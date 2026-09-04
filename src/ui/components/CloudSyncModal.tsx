@@ -371,7 +371,7 @@ export const CloudSyncModal: React.FC = () => {
                     className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono focus:outline-none focus:border-teal-500"
                   />
                   <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-normal">
-                    <strong>Quick Setup:</strong> In Google Cloud Console &gt; Credentials &gt; Create Credentials &gt; OAuth client ID &gt; Application type: <em>Web application</em> &gt; Add your App Origin to <em>Authorized JavaScript origins</em> &gt; Paste the generated Client ID above.
+                    <strong>Quick Setup:</strong> In Google Cloud Console &gt; Credentials &gt; OAuth client ID &gt; Application type: <em>Web application</em> &gt; Add your App Origin (e.g. <code>http://localhost:5173</code>) to <strong>both</strong> <em>Authorized JavaScript origins</em> AND <em>Authorized redirect URIs</em> &gt; Save.
                   </p>
                 </div>
 

@@ -605,4 +605,108 @@ describe('Graphdule Domain Invariants and Services', () => {
       expect(parsed.recurrence.daysOfWeek).toEqual([1]);
     });
   });
+
+  describe('Universal JSON Import and Backup Restoration', () => {
+    it('successfully parses full workspace backup with projects, standalone tasks, and preferences', () => {
+      const { project, egnNode } = ProjectService.createProject('Full Backup Proj', 'Reach Goal', '2026-12-31');
+      const doc: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: '2026-09-03T20:00:00.000Z',
+        project,
+        nodes: [egnNode],
+        edges: [],
+        notes: [],
+        history: [],
+      };
+
+      const backupObj = {
+        schemaVersion: 1,
+        exportedAt: '2026-09-03T20:00:00.000Z',
+        backupType: 'full_workspace',
+        projects: [doc],
+        standaloneTasks: [
+          {
+            id: 'st_1',
+            text: 'Standalone Task',
+            dueDate: '2026-09-05',
+            status: 'planned',
+            createdAt: '2026-09-03T20:00:00.000Z',
+            updatedAt: '2026-09-03T20:00:00.000Z',
+          },
+        ],
+        preferences: {
+          myDayMode: 'today',
+          theme: 'dark',
+          onboardingCompleted: true,
+          preferredStorageProvider: 'browser',
+        },
+      };
+
+      const result = MigrationService.parseAnyJsonPayload(backupObj);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.payload.type).toBe('workspace');
+        if (result.payload.type === 'workspace') {
+          expect(result.payload.projects).toHaveLength(1);
+          expect(result.payload.projects[0].project.name).toBe('Full Backup Proj');
+          expect(result.payload.standaloneTasks).toHaveLength(1);
+          expect(result.payload.preferences?.theme).toBe('dark');
+        }
+      }
+    });
+
+    it('gracefully normalizes partial or relaxed project JSON structures', () => {
+      // Partial format: missing notes, edges, nodes arrays
+      const partialJson = {
+        project: {
+          id: 'proj_partial',
+          name: 'Partial Project',
+          endGoalNodeId: 'goal_1',
+          createdAt: '2026-09-03T20:00:00.000Z',
+          updatedAt: '2026-09-03T20:00:00.000Z',
+        },
+      };
+
+      const result = MigrationService.parseAndMigrate(partialJson);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.document.nodes).toEqual([]);
+        expect(result.document.edges).toEqual([]);
+        expect(result.document.notes).toEqual([]);
+      }
+    });
+
+    it('parses arrays of project documents', () => {
+      const { project: p1, egnNode: e1 } = ProjectService.createProject('P1', 'G1', '2026-10-01');
+      const { project: p2, egnNode: e2 } = ProjectService.createProject('P2', 'G2', '2026-11-01');
+
+      const arrayJson = [
+        {
+          schemaVersion: 1,
+          exportedAt: '2026-09-03T20:00:00.000Z',
+          project: p1,
+          nodes: [e1],
+          edges: [],
+          notes: [],
+        },
+        {
+          schemaVersion: 1,
+          exportedAt: '2026-09-03T20:00:00.000Z',
+          project: p2,
+          nodes: [e2],
+          edges: [],
+          notes: [],
+        },
+      ];
+
+      const result = MigrationService.parseAnyJsonPayload(arrayJson);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.payload.type).toBe('projects_array');
+        if (result.payload.type === 'projects_array') {
+          expect(result.payload.projects).toHaveLength(2);
+        }
+      }
+    });
+  });
 });

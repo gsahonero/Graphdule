@@ -58,6 +58,41 @@ export class GDriveAuth {
     return this.user;
   }
 
+  private static async ensureGsiLoaded(): Promise<boolean> {
+    if (typeof window === 'undefined') return false;
+    if ((window as any).google?.accounts?.oauth2) return true;
+
+    return new Promise((resolve) => {
+      let script = document.getElementById('google-gsi-client') as HTMLScriptElement | null;
+      if (!script) {
+        script = document.createElement('script');
+        script.id = 'google-gsi-client';
+        script.src = 'https://accounts.google.com/gsi/client';
+        script.async = true;
+        script.defer = true;
+        document.head.appendChild(script);
+      }
+
+      const checkInterval = setInterval(() => {
+        if ((window as any).google?.accounts?.oauth2) {
+          clearInterval(checkInterval);
+          resolve(true);
+        }
+      }, 100);
+
+      script.addEventListener('load', () => {
+        clearInterval(checkInterval);
+        resolve(true);
+      });
+
+      // Timeout after 3s and fallback
+      setTimeout(() => {
+        clearInterval(checkInterval);
+        resolve(!!(window as any).google?.accounts?.oauth2);
+      }, 3000);
+    });
+  }
+
   /**
    * Triggers Google OAuth 2.0 Token Flow in browser.
    */
@@ -66,6 +101,8 @@ export class GDriveAuth {
       this.setCustomClientId(clientId);
     }
     const finalClientId = this.getEffectiveClientId();
+
+    await this.ensureGsiLoaded();
 
     return new Promise((resolve) => {
       // 1. If Google Identity Services script is available
@@ -103,7 +140,7 @@ export class GDriveAuth {
       }
 
       // 2. Fallback OAuth 2.0 Popup Flow
-      const redirectUri = window.location.origin;
+      const redirectUri = window.location.origin.replace(/\/$/, '');
       const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
         `client_id=${encodeURIComponent(finalClientId)}&` +
         `redirect_uri=${encodeURIComponent(redirectUri)}&` +

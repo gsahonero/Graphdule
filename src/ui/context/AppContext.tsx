@@ -879,24 +879,67 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [storage]);
 
   const importProjectJson = useCallback(
-    async (jsonString: string): Promise<{ success: boolean; error?: string }> => {
-      const parseResult = JsonFileProvider.parseProjectFileContent(jsonString);
+    async (jsonString: string): Promise<{ success: boolean; error?: string; count?: number }> => {
+      const parseResult = JsonFileProvider.parseAnyImportFileContent(jsonString);
       if (!parseResult.success) {
         return { success: false, error: parseResult.error };
       }
 
-      await storage.writeProject(parseResult.document);
+      const { payload } = parseResult;
+
+      if (payload.type === 'workspace') {
+        for (const doc of payload.projects) {
+          await storage.writeProject(doc);
+          const { snapshot } = HistoryService.createSnapshot(doc, 'Restored from full workspace backup');
+          await storage.writeSnapshot(snapshot);
+        }
+
+        if (payload.standaloneTasks && payload.standaloneTasks.length > 0) {
+          const currentStandalones = await storage.readStandaloneTasks();
+          const mergedIds = new Set(payload.standaloneTasks.map((t) => t.id));
+          const existingFiltered = currentStandalones.filter((t) => !mergedIds.has(t.id));
+          const combined = [...existingFiltered, ...payload.standaloneTasks];
+          await storage.writeStandaloneTasks(combined);
+          setStandaloneTasks(combined);
+        }
+
+        if (payload.preferences) {
+          await updatePreferences(payload.preferences);
+        }
+
+        await refreshData();
+        if (payload.projects.length > 0) {
+          await openProject(payload.projects[0].project.id);
+        }
+        return { success: true, count: payload.projects.length };
+      }
+
+      if (payload.type === 'projects_array') {
+        for (const doc of payload.projects) {
+          await storage.writeProject(doc);
+          const { snapshot } = HistoryService.createSnapshot(doc, 'Imported from project bundle');
+          await storage.writeSnapshot(snapshot);
+        }
+        await refreshData();
+        if (payload.projects.length > 0) {
+          await openProject(payload.projects[0].project.id);
+        }
+        return { success: true, count: payload.projects.length };
+      }
+
+      // Single project document
+      await storage.writeProject(payload.document);
       const { snapshot } = HistoryService.createSnapshot(
-        parseResult.document,
+        payload.document,
         'Imported from canonical JSON file'
       );
       await storage.writeSnapshot(snapshot);
 
       await refreshData();
-      await openProject(parseResult.document.project.id);
-      return { success: true };
+      await openProject(payload.document.project.id);
+      return { success: true, count: 1 };
     },
-    [storage, refreshData, openProject]
+    [storage, refreshData, openProject, updatePreferences]
   );
 
   const triggerCloudSync = useCallback(async () => {

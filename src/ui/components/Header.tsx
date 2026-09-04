@@ -42,7 +42,7 @@ export const Header: React.FC = () => {
       if (content) {
         const res = await importProjectJson(content);
         if (!res.success) {
-          alert(`Failed to import project: ${res.error}`);
+          alert(`Failed to import file: ${res.error}`);
         }
       }
     };

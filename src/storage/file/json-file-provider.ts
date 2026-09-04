@@ -21,6 +21,21 @@ export class JsonFileProvider {
   }
 
   /**
+   * Reads and parses any supported JSON file (workspace backup, project list, or single project).
+   */
+  public static parseAnyImportFileContent(
+    content: string
+  ) {
+    try {
+      const parsed = JSON.parse(content);
+      return MigrationService.parseAnyJsonPayload(parsed);
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      return { success: false as const, error: `Invalid JSON syntax: ${errorMsg}` };
+    }
+  }
+
+  /**
    * Reads and parses a canonical JSON string into a validated ProjectDocument.
    */
   public static parseProjectFileContent(
