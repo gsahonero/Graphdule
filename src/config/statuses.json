@@ -1,0 +1,32 @@
+{
+  "statuses": [
+    {
+      "id": "planned",
+      "label": "Planned",
+      "description": "Work that has been scheduled but not yet started.",
+      "color": "slate",
+      "isTerminal": false
+    },
+    {
+      "id": "in_progress",
+      "label": "In Progress",
+      "description": "Work actively underway.",
+      "color": "amber",
+      "isTerminal": false
+    },
+    {
+      "id": "completed",
+      "label": "Completed",
+      "description": "Work successfully finished.",
+      "color": "emerald",
+      "isTerminal": true
+    },
+    {
+      "id": "abandoned",
+      "label": "Abandoned",
+      "description": "Work performed or planned but judged unnecessary/no longer useful. Preserved in history.",
+      "color": "rose",
+      "isTerminal": true
+    }
+  ]
+}

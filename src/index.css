@@ -1,0 +1,156 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply h-full;
+  }
+  body {
+    @apply h-full m-0 p-0 antialiased font-sans transition-colors duration-150 bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100;
+  }
+
+  /* Custom text selection colors for high contrast and readability */
+  ::selection {
+    background-color: #a7f3d0; /* Soft emerald-200 mint */
+    color: #064e3b; /* Deep emerald-950 for crisp readability in light mode */
+  }
+
+  .dark ::selection {
+    background-color: #047857; /* Rich emerald-700 in dark mode */
+    color: #ffffff;
+  }
+
+  input::selection,
+  textarea::selection {
+    background-color: #a7f3d0;
+    color: #064e3b;
+  }
+
+  .dark input::selection,
+  .dark textarea::selection {
+    background-color: #047857;
+    color: #ffffff;
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(148, 163, 184, 0.15);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.45);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(16, 185, 129, 0.7);
+}
+
+/* Firefox standard scrollbar support */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.45) rgba(148, 163, 184, 0.15);
+}
+
+/* React Flow customizations */
+.react-flow__attribution {
+  display: none !important;
+}
+
+.react-flow__edge-path {
+  stroke: #64748b;
+  stroke-width: 2.5;
+  transition: stroke 0.15s ease, stroke-width 0.15s ease;
+  cursor: pointer;
+}
+
+.dark .react-flow__edge-path {
+  stroke: #94a3b8;
+}
+
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: #334155;
+  stroke-width: 3.5;
+}
+
+.dark .react-flow__edge:hover .react-flow__edge-path {
+  stroke: #cbd5e1;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: #10b981 !important;
+  stroke-width: 4 !important;
+  filter: drop-shadow(0 0 6px rgba(16, 185, 129, 0.8));
+}
+
+/* Arrowhead / Causality Marker Styles */
+.react-flow__arrowhead,
+.react-flow__arrowhead polyline,
+.react-flow__arrowhead path {
+  fill: #64748b;
+  stroke: #64748b;
+  transition: fill 0.15s ease, stroke 0.15s ease;
+}
+
+.dark .react-flow__arrowhead,
+.dark .react-flow__arrowhead polyline,
+.dark .react-flow__arrowhead path {
+  fill: #94a3b8;
+  stroke: #94a3b8;
+}
+
+.react-flow__edge:hover .react-flow__arrowhead,
+.react-flow__edge:hover .react-flow__arrowhead polyline,
+.react-flow__edge:hover .react-flow__arrowhead path {
+  fill: #334155;
+  stroke: #334155;
+}
+
+.dark .react-flow__edge:hover .react-flow__arrowhead,
+.dark .react-flow__edge:hover .react-flow__arrowhead polyline,
+.dark .react-flow__edge:hover .react-flow__arrowhead path {
+  fill: #cbd5e1;
+  stroke: #cbd5e1;
+}
+
+.react-flow__edge.selected .react-flow__arrowhead,
+.react-flow__edge.selected .react-flow__arrowhead polyline,
+.react-flow__edge.selected .react-flow__arrowhead path {
+  fill: #10b981 !important;
+  stroke: #10b981 !important;
+  filter: drop-shadow(0 0 4px rgba(16, 185, 129, 0.8));
+}
+
+/* Handle Perfect Symmetrical Centering */
+.react-flow__handle {
+  cursor: crosshair !important;
+  margin: 0 !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+}
+
+/* React Flow Node and Popover Layering */
+.react-flow__node {
+  z-index: 1;
+}
+
+.react-flow__node:hover,
+.react-flow__node.selected,
+.react-flow__node:focus-within {
+  z-index: 100 !important;
+}
+
+.react-flow__handle-left {
+  left: -7px !important;
+  right: auto !important;
+}
+
+.react-flow__handle-right {
+  right: -7px !important;
+  left: auto !important;
+}

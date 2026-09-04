@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "steps": [
+    {
+      "id": "welcome",
+      "title": "Welcome to Graphdule",
+      "description": "Projects are graphs of evolving understanding. Decompose long-term goals into concrete work linked by dependency.",
+      "target": "header-brand"
+    },
+    {
+      "id": "projects",
+      "title": "Projects Dashboard",
+      "description": "Every project has exactly one graph and exactly one Goal representing its ultimate objective.",
+      "target": "nav-projects"
+    },
+    {
+      "id": "my-day",
+      "title": "My Day Execution",
+      "description": "See today's active project tasks alongside standalone non-project tasks.",
+      "target": "nav-my-day"
+    },
+    {
+      "id": "graph-view",
+      "title": "Graph, Timeline & History",
+      "description": "Visualise dependencies left-to-right, explore derived temporal projections on the timeline, and inspect immutable version history.",
+      "target": "nav-tabs"
+    },
+    {
+      "id": "storage",
+      "title": "Local-First & User Controlled",
+      "description": "Your data is stored locally in your browser. Export or sync your canonical JSON anytime to protect your work.",
+      "target": "storage-status-indicator"
+    }
+  ]
+}

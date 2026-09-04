@@ -1,0 +1,8 @@
+{
+  "name": "Graphdule",
+  "shortName": "Graphdule",
+  "version": "0.1.0",
+  "schemaVersion": 1,
+  "tagline": "Projects are graphs of evolving understanding",
+  "description": "Local-first, graph-based personal project and task management application."
+}
