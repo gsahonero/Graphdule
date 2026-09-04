@@ -14,7 +14,7 @@ const AppContent: React.FC = () => {
   const { currentView } = useApp();
 
   return (
-    <div className="h-screen w-screen flex flex-col dark:bg-slate-950 dark:text-slate-100 bg-slate-100 text-slate-900 overflow-hidden select-none transition-colors duration-150">
+    <div className="h-[100dvh] min-h-[100dvh] w-screen flex flex-col dark:bg-slate-950 dark:text-slate-100 bg-slate-100 text-slate-900 overflow-hidden select-none transition-colors duration-150 pb-[env(safe-area-inset-bottom,0px)]">
       <Header />
       <StorageWarningBanner />
 

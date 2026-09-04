@@ -25,6 +25,11 @@ import {
   SyncState,
   GDriveAuth,
   OneDriveAuth,
+  GCalendarClient,
+  GCalendarSync,
+  GCalendarSyncConfig,
+  GCalSyncSummary,
+  GCalendarItem,
 } from '../../storage';
 import { JsonFileProvider } from '../../storage/file/json-file-provider';
 import { getTodayString, formatDisplayDate, DateDisplayFormat } from '../../domain/utils/date';
@@ -101,6 +106,14 @@ interface AppContextType {
   disconnectCloud: () => Promise<void>;
   triggerCloudSync: () => Promise<void>;
 
+  // Google Calendar Sync
+  gcalendarSyncConfig: GCalendarSyncConfig;
+  setGCalendarSyncConfig: (config: Partial<GCalendarSyncConfig>) => Promise<void>;
+  triggerGCalendarSync: () => Promise<GCalSyncSummary>;
+  clearAllGCalendarEvents: () => Promise<{ success: boolean; count: number; error?: string }>;
+  availableGCalendars: GCalendarItem[];
+  fetchAvailableGCalendars: () => Promise<GCalendarItem[]>;
+
   // Preferences & Import/Export
   updatePreferences: (partial: Partial<UserPreferences>) => Promise<void>;
   exportActiveProject: () => void;
@@ -141,6 +154,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [cloudSyncState, setCloudSyncState] = useState<SyncState>(() => SyncCoordinator.getState());
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
 
+  // Google Calendar state
+  const [gcalendarSyncConfig, setGcalendarSyncConfigState] = useState<GCalendarSyncConfig>(() => GCalendarSync.getConfig());
+  const [availableGCalendars, setAvailableGCalendars] = useState<GCalendarItem[]>([]);
+
   useEffect(() => {
     const unsubscribe = SyncCoordinator.subscribe((state) => {
       setCloudSyncState(state);
@@ -177,8 +194,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await storage.init();
     let projList = await storage.listProjects();
 
-    // Default sample project seed if no projects exist yet
-    if (projList.length === 0) {
+    // Default sample project seed if no projects exist yet and never deleted/imported
+    if (projList.length === 0 && localStorage.getItem('graphdule_sample_deleted') !== 'true') {
       const sampleDoc = createDefaultSampleProject();
       await storage.writeProject(sampleDoc);
       const { snapshot } = HistoryService.createSnapshot(sampleDoc, 'Sample Research Project with Default Tags');
@@ -424,6 +441,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteProject = useCallback(
     async (projectId: string) => {
+      if (projectId === 'sample_phd_paper') {
+        localStorage.setItem('graphdule_sample_deleted', 'true');
+      }
       await storage.deleteProject(projectId);
       if (activeProjectDoc?.project.id === projectId) {
         setActiveProjectDoc(null);
@@ -454,6 +474,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         nodes: [...activeProjectDoc.nodes, newNode],
       };
       await saveProjectDoc(updatedDoc);
+      if (newNode.dueDate) {
+        GCalendarSync.syncTaskDateChange({
+          taskId: newNode.id,
+          newDueDate: newNode.dueDate,
+          taskText: newNode.text,
+          status: newNode.status,
+          projectId: activeProjectDoc.project.id,
+          projectName: activeProjectDoc.project.name,
+        }).catch((err) => console.warn('[AppContext] Calendar sync on addNode failed:', err));
+      }
       return newNode;
     },
     [activeProjectDoc, saveProjectDoc]
@@ -462,6 +492,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updateNode = useCallback(
     async (updatedNode: Node) => {
       if (!activeProjectDoc) return;
+      const prevNode = activeProjectDoc.nodes.find((n) => n.id === updatedNode.id);
       const updatedNodes = activeProjectDoc.nodes.map((n) => (n.id === updatedNode.id ? updatedNode : n));
       await saveProjectDoc({
         ...activeProjectDoc,
@@ -470,6 +501,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (selectedNode?.id === updatedNode.id) {
         setSelectedNode(updatedNode);
+      }
+
+      if (prevNode) {
+        if (prevNode.dueDate !== updatedNode.dueDate) {
+          GCalendarSync.syncTaskDateChange({
+            taskId: updatedNode.id,
+            newDueDate: updatedNode.dueDate,
+            taskText: updatedNode.text,
+            status: updatedNode.status,
+            projectId: activeProjectDoc.project.id,
+            projectName: activeProjectDoc.project.name,
+          }).catch((err) => console.warn('[AppContext] Calendar sync on updateNode date change failed:', err));
+        } else if (prevNode.text !== updatedNode.text || prevNode.status !== updatedNode.status) {
+          GCalendarSync.syncTaskStatusOrTextChange({
+            taskId: updatedNode.id,
+            taskText: updatedNode.text,
+            status: updatedNode.status,
+            dueDate: updatedNode.dueDate,
+            projectId: activeProjectDoc.project.id,
+            projectName: activeProjectDoc.project.name,
+          }).catch((err) => console.warn('[AppContext] Calendar sync on updateNode status/text change failed:', err));
+        }
       }
     },
     [activeProjectDoc, selectedNode, saveProjectDoc]
@@ -485,6 +538,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       await saveProjectDoc(res.document);
+      GCalendarSync.syncTaskDelete(nodeId).catch(() => {});
 
       if (selectedNode?.id === nodeId) {
         setSelectedNode(null);
@@ -519,6 +573,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (node) {
           const updated = ProjectService.updateNodeStatus(node, status);
           await updateNode(updated);
+          GCalendarSync.syncTaskStatusOrTextChange({
+            taskId: nodeId,
+            taskText: node.text,
+            status,
+            dueDate: node.dueDate,
+            projectId: activeProjectDoc.project.id,
+            projectName: activeProjectDoc.project.name,
+          }).catch(() => {});
           await refreshData();
           return;
         }
@@ -538,6 +600,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             if (activeProjectDoc && activeProjectDoc.project.id === p.id) {
               setActiveProjectDoc(updatedDoc);
             }
+            GCalendarSync.syncTaskStatusOrTextChange({
+              taskId: nodeId,
+              taskText: targetNode.text,
+              status,
+              dueDate: targetNode.dueDate,
+              projectId: doc.project.id,
+              projectName: doc.project.name,
+            }).catch(() => {});
             await refreshData();
             return;
           }
@@ -572,6 +642,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             updatedAt: new Date().toISOString(),
           };
           await updateNode(updated);
+          GCalendarSync.syncTaskDateChange({
+            taskId: nodeId,
+            newDueDate,
+            taskText: node.text,
+            status: node.status,
+            projectId: activeProjectDoc.project.id,
+            projectName: activeProjectDoc.project.name,
+          }).catch((err) => console.warn('[AppContext] Calendar sync on moveNodeDate failed:', err));
           await refreshData();
           return;
         }
@@ -606,10 +684,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             if (activeProjectDoc && activeProjectDoc.project.id === p.id) {
               setActiveProjectDoc(updatedDoc);
             }
+            GCalendarSync.syncTaskDateChange({
+              taskId: nodeId,
+              newDueDate,
+              taskText: node.text,
+              status: node.status,
+              projectId: doc.project.id,
+              projectName: doc.project.name,
+            }).catch((err) => console.warn('[AppContext] Calendar sync on moveNodeDate failed:', err));
             await refreshData();
             return;
           }
         }
+      }
+
+      // Search across standalone tasks
+      const standalones = await storage.readStandaloneTasks();
+      const stIdx = standalones.findIndex((s) => s.id === nodeId);
+      if (stIdx >= 0) {
+        const st = standalones[stIdx];
+        const updatedStandalones = [...standalones];
+        updatedStandalones[stIdx] = {
+          ...st,
+          dueDate: newDueDate,
+          updatedAt: new Date().toISOString(),
+        };
+        await storage.writeStandaloneTasks(updatedStandalones);
+        setStandaloneTasks(updatedStandalones);
+        GCalendarSync.syncTaskDateChange({
+          taskId: nodeId,
+          newDueDate,
+          taskText: st.text,
+          status: st.status,
+          projectId: 'standalone',
+          projectName: 'Standalone Tasks',
+        }).catch((err) => console.warn('[AppContext] Calendar sync on moveNodeDate standalone failed:', err));
+        await refreshData();
+        return;
       }
     },
     [activeProjectDoc, updateNode, storage, refreshData]
@@ -622,6 +733,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...activeProjectDoc,
       nodes: updatedNodes,
     });
+    for (const node of updatedNodes) {
+      if (node.dueDate) {
+        GCalendarSync.syncTaskDateChange({
+          taskId: node.id,
+          newDueDate: node.dueDate,
+          taskText: node.text,
+          status: node.status,
+          projectId: activeProjectDoc.project.id,
+          projectName: activeProjectDoc.project.name,
+        }).catch(() => {});
+      }
+    }
     setPendingCascade(null);
   }, [activeProjectDoc, pendingCascade, saveProjectDoc]);
 
@@ -753,10 +876,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const addStandaloneTask = useCallback(
     async (text: string, dueDate?: string, recurrence?: RecurrenceRule) => {
-      const newTask = MyDayService.createStandaloneTask(text, dueDate || getTodayString(), recurrence);
+      const targetDate = dueDate || getTodayString();
+      const newTask = MyDayService.createStandaloneTask(text, targetDate, recurrence);
       const updated = [...standaloneTasks, newTask];
       await storage.writeStandaloneTasks(updated);
       setStandaloneTasks(updated);
+      if (targetDate) {
+        GCalendarSync.syncTaskStatusOrTextChange({
+          taskId: newTask.id,
+          taskText: newTask.text,
+          status: newTask.status,
+          dueDate: targetDate,
+          projectId: 'standalone',
+          projectName: 'Standalone Tasks',
+        }).catch(() => {});
+      }
     },
     [standaloneTasks, storage]
   );
@@ -768,6 +902,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
       await storage.writeStandaloneTasks(updated);
       setStandaloneTasks(updated);
+      if (task.dueDate) {
+        GCalendarSync.syncTaskDateChange({
+          taskId: task.id,
+          newDueDate: task.dueDate,
+          taskText: task.text,
+          status: task.status,
+          projectId: 'standalone',
+          projectName: 'Standalone Tasks',
+        }).catch(() => {});
+      }
     },
     [standaloneTasks, storage]
   );
@@ -778,6 +922,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       let updated = standaloneTasks.map((t) =>
         t.id === taskId ? { ...t, status, updatedAt: new Date().toISOString() } : t
       );
+
+      if (targetTask) {
+        GCalendarSync.syncTaskStatusOrTextChange({
+          taskId: targetTask.id,
+          taskText: targetTask.text,
+          status,
+          dueDate: targetTask.dueDate,
+          projectId: 'standalone',
+          projectName: 'Standalone Tasks',
+        }).catch(() => {});
+      }
 
       // If completing a recurring task, automatically generate the next occurrence!
       if (targetTask && status === 'completed' && targetTask.recurrence) {
@@ -808,6 +963,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               nextInstanceNumber
             );
             updated = [...updated, nextTask];
+            if (nextDueDate) {
+              GCalendarSync.syncTaskStatusOrTextChange({
+                taskId: nextTask.id,
+                taskText: nextTask.text,
+                status: nextTask.status,
+                dueDate: nextDueDate,
+                projectId: 'standalone',
+                projectName: 'Standalone Tasks',
+              }).catch(() => {});
+            }
           }
         }
       }
@@ -823,6 +988,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const updated = standaloneTasks.filter((t) => t.id !== taskId);
       await storage.writeStandaloneTasks(updated);
       setStandaloneTasks(updated);
+      GCalendarSync.syncTaskDelete(taskId).catch(() => {});
     },
     [standaloneTasks, storage]
   );
@@ -887,6 +1053,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       const { payload } = parseResult;
 
+      // When importing projects from a file, remove the initial default sample project if present
+      const existingProjects = await storage.listProjects();
+      const hasSampleProject = existingProjects.some((p) => p.id === 'sample_phd_paper');
+      const importingSampleDirectly =
+        (payload.type === 'project' && payload.document.project.id === 'sample_phd_paper') ||
+        (payload.type !== 'project' && payload.projects.some((p) => p.project.id === 'sample_phd_paper'));
+
+      if (hasSampleProject && !importingSampleDirectly) {
+        await storage.deleteProject('sample_phd_paper');
+        localStorage.setItem('graphdule_sample_deleted', 'true');
+        if (activeProjectDoc?.project.id === 'sample_phd_paper') {
+          setActiveProjectDoc(null);
+        }
+      }
+
       if (payload.type === 'workspace') {
         for (const doc of payload.projects) {
           await storage.writeProject(doc);
@@ -939,7 +1120,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await openProject(payload.document.project.id);
       return { success: true, count: 1 };
     },
-    [storage, refreshData, openProject, updatePreferences]
+    [storage, refreshData, openProject, updatePreferences, activeProjectDoc]
   );
 
   const triggerCloudSync = useCallback(async () => {
@@ -977,6 +1158,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const disconnectCloud = useCallback(async () => {
     SyncCoordinator.disconnect();
+  }, []);
+
+  const setGCalendarSyncConfig = useCallback(async (partial: Partial<GCalendarSyncConfig>) => {
+    const updated = GCalendarSync.setConfig(partial);
+    setGcalendarSyncConfigState(updated);
+  }, []);
+
+  const fetchAvailableGCalendars = useCallback(async () => {
+    if (!GDriveAuth.isAuthenticated()) return [];
+    try {
+      const list = await GCalendarClient.listCalendars();
+      setAvailableGCalendars(list);
+      return list;
+    } catch (err) {
+      console.warn('[AppContext] Failed to fetch available Google calendars:', err);
+      throw err;
+    }
+  }, []);
+
+  const triggerGCalendarSync = useCallback(async () => {
+    const result = await GCalendarSync.syncAll(storage);
+    setGcalendarSyncConfigState(GCalendarSync.getConfig());
+    if (result.pulledFromCalendar > 0) {
+      await refreshData();
+    }
+    return result;
+  }, [storage, refreshData]);
+
+  const clearAllGCalendarEvents = useCallback(async () => {
+    const result = await GCalendarSync.clearAllEventsFromCalendar();
+    return result;
   }, []);
 
   // Background auto-sync on focus and network online
@@ -1060,6 +1272,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         connectOneDrive,
         disconnectCloud,
         triggerCloudSync,
+        gcalendarSyncConfig,
+        setGCalendarSyncConfig,
+        triggerGCalendarSync,
+        clearAllGCalendarEvents,
+        availableGCalendars,
+        fetchAvailableGCalendars,
         updatePreferences,
         exportActiveProject,
         exportAllData,

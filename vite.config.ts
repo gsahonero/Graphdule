@@ -15,4 +15,12 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: true,
   },
+  server: {
+    port: 5173,
+    strictPort: false,
+    hmr: {
+      protocol: 'ws',
+      host: 'localhost',
+    },
+  },
 });

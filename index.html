@@ -3,9 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./pwa-192.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Graphdule" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="theme-color" content="#020617" />
     <meta name="description" content="Goal-Oriented Project Graph Scheduler with Cross-Device Cloud Sync" />
@@ -21,6 +24,32 @@
           document.documentElement.classList.remove('light');
         }
       } catch (e) {}
+
+      if ('serviceWorker' in navigator) {
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+          // Unregister any active service worker during local development to avoid stale caching & HMR breakages
+          navigator.serviceWorker.getRegistrations().then((registrations) => {
+            for (const registration of registrations) {
+              registration.unregister();
+            }
+          });
+          if ('caches' in window) {
+            caches.keys().then((names) => {
+              for (const name of names) {
+                if (name.startsWith('graphdule-cache')) {
+                  caches.delete(name);
+                }
+              }
+            });
+          }
+        } else {
+          window.addEventListener('load', () => {
+            navigator.serviceWorker.register('./sw.js').catch((err) => {
+              console.warn('PWA service worker registration:', err);
+            });
+          });
+        }
+      }
     </script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>

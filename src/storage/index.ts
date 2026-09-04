@@ -9,6 +9,8 @@ export * from './gdrive/gdrive-client';
 export * from './onedrive/onedrive-auth';
 export * from './onedrive/onedrive-client';
 export * from './sync/sync-coordinator';
+export * from './gcalendar/gcalendar-client';
+export * from './gcalendar/gcalendar-sync';
 
 // Default global storage provider for the application
 export const defaultStorageProvider: IStorageProvider = new IndexedDBProvider();

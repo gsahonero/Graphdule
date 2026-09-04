@@ -166,7 +166,7 @@ export const ProjectsView: React.FC = () => {
   }, [allAvailableTags, projectTags]);
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 md:p-10 max-w-6xl mx-auto w-full space-y-7">
+    <div className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-10 max-w-6xl mx-auto w-full space-y-7">
       {/* View Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800/80 pb-6">
         <div>

@@ -10,7 +10,7 @@ export const DEFAULT_GDRIVE_CLIENT_ID =
   (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID ||
   '1081532507375-rv55honr2501rn3r6v9chffuumuiu17c.apps.googleusercontent.com';
 
-const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
+const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
 
 export class GDriveAuth {
   private static token: string | null = localStorage.getItem(GDRIVE_TOKEN_KEY);

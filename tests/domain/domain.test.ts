@@ -708,5 +708,47 @@ describe('Graphdule Domain Invariants and Services', () => {
         }
       }
     });
+
+    it('preserves custom project styles (color, icon, emoji) during JSON serialization and import', () => {
+      const { project, egnNode } = ProjectService.createProject(
+        'Styled Project',
+        'Custom Goal',
+        '2026-12-31',
+        ['important'],
+        { color: 'indigo', icon: 'graduation-cap', emoji: '🎓' }
+      );
+
+      const doc: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: '2026-09-03T20:00:00.000Z',
+        project,
+        nodes: [egnNode],
+        edges: [],
+        notes: [],
+        history: [],
+      };
+
+      // 1. Serialize to JSON string
+      const jsonString = JSON.stringify(doc);
+
+      // 2. Parse and migrate back
+      const parsed = MigrationService.parseAndMigrate(JSON.parse(jsonString));
+      expect(parsed.success).toBe(true);
+      if (parsed.success) {
+        expect(parsed.document.project.style).toBeDefined();
+        expect(parsed.document.project.style?.color).toBe('indigo');
+        expect(parsed.document.project.style?.icon).toBe('graduation-cap');
+        expect(parsed.document.project.style?.emoji).toBe('🎓');
+      }
+
+      // 3. Test through universal payload parser
+      const universalParsed = MigrationService.parseAnyJsonPayload(JSON.parse(jsonString));
+      expect(universalParsed.success).toBe(true);
+      if (universalParsed.success && universalParsed.payload.type === 'project') {
+        expect(universalParsed.payload.document.project.style?.color).toBe('indigo');
+        expect(universalParsed.payload.document.project.style?.icon).toBe('graduation-cap');
+        expect(universalParsed.payload.document.project.style?.emoji).toBe('🎓');
+      }
+    });
   });
 });
