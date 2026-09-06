@@ -5,6 +5,8 @@ import {
   StandaloneTask,
   UserPreferences,
   ProjectSummary,
+  IdeaSeed,
+  ActivityEvent,
 } from '../../domain/models/types';
 
 export type CloudSyncStatus = 'idle' | 'syncing' | 'synced' | 'error' | 'offline';
@@ -44,4 +46,12 @@ export interface IStorageProvider {
   listSnapshots(projectId: string): Promise<SnapshotMetadata[]>;
   readSnapshot(projectId: string, snapshotId: string): Promise<ProjectSnapshot | null>;
   writeSnapshot(snapshot: ProjectSnapshot): Promise<void>;
+
+  readIdeaSeeds?(): Promise<IdeaSeed[]>;
+  writeIdeaSeeds?(seeds: IdeaSeed[]): Promise<void>;
+  deleteIdeaSeed?(seedId: string): Promise<void>;
+
+  readActivityLog?(): Promise<ActivityEvent[]>;
+  appendActivityEvents?(events: ActivityEvent[]): Promise<void>;
+  clearActivityLog?(): Promise<void>;
 }

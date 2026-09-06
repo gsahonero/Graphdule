@@ -1,8 +1,27 @@
-import { ProjectDocumentSchema, StandaloneTaskSchema, UserPreferencesSchema } from '../models/schema';
-import { ProjectDocument, StandaloneTask, UserPreferences } from '../models/types';
+import {
+  ProjectDocumentSchema,
+  StandaloneTaskSchema,
+  UserPreferencesSchema,
+  IdeaSeedSchema,
+  ActivityEventSchema,
+} from '../models/schema';
+import {
+  ProjectDocument,
+  StandaloneTask,
+  UserPreferences,
+  IdeaSeed,
+  ActivityEvent,
+} from '../models/types';
 
 export type ParsedImportPayload =
-  | { type: 'workspace'; projects: ProjectDocument[]; standaloneTasks?: StandaloneTask[]; preferences?: UserPreferences }
+  | {
+      type: 'workspace';
+      projects: ProjectDocument[];
+      standaloneTasks?: StandaloneTask[];
+      preferences?: UserPreferences;
+      ideaSeeds?: IdeaSeed[];
+      activityLog?: ActivityEvent[];
+    }
   | { type: 'projects_array'; projects: ProjectDocument[] }
   | { type: 'project'; document: ProjectDocument };
 
@@ -21,6 +40,10 @@ export class MigrationService {
         name: rawObj.name,
         endGoalNodeId: rawObj.endGoalNodeId || ((rawObj.nodes as any[])?.[0]?.id ?? 'goal'),
         tags: rawObj.tags || [],
+        status: rawObj.status || 'active',
+        isAttention: Boolean(rawObj.isAttention),
+        attentionPromotedAt: rawObj.attentionPromotedAt,
+        archivedAt: rawObj.archivedAt,
         style: rawObj.style,
         createdAt: rawObj.createdAt || new Date().toISOString(),
         updatedAt: rawObj.updatedAt || new Date().toISOString(),
@@ -124,6 +147,26 @@ export class MigrationService {
         }
       }
 
+      const validSeeds: IdeaSeed[] = [];
+      if (Array.isArray(obj.ideaSeeds)) {
+        for (const seed of obj.ideaSeeds) {
+          const parsedSeed = IdeaSeedSchema.safeParse(seed);
+          if (parsedSeed.success) {
+            validSeeds.push(parsedSeed.data as IdeaSeed);
+          }
+        }
+      }
+
+      const validEvents: ActivityEvent[] = [];
+      if (Array.isArray(obj.activityLog)) {
+        for (const ev of obj.activityLog) {
+          const parsedEvent = ActivityEventSchema.safeParse(ev);
+          if (parsedEvent.success) {
+            validEvents.push(parsedEvent.data as ActivityEvent);
+          }
+        }
+      }
+
       return {
         success: true,
         payload: {
@@ -131,6 +174,8 @@ export class MigrationService {
           projects: validDocs,
           standaloneTasks: validStandalones.length > 0 ? validStandalones : undefined,
           preferences: validPrefs,
+          ideaSeeds: validSeeds.length > 0 ? validSeeds : undefined,
+          activityLog: validEvents.length > 0 ? validEvents : undefined,
         },
       };
     }

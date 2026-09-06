@@ -1,5 +1,5 @@
 export type NodeStatus = 'planned' | 'in_progress' | 'completed' | 'abandoned';
-export type ProjectStatus = 'active' | 'archived' | 'completed' | 'abandoned';
+export type ProjectStatus = 'active' | 'parked' | 'archived' | 'completed' | 'abandoned';
 
 export type ProjectColor =
   | 'emerald'
@@ -42,8 +42,11 @@ export interface Project {
   readonly endGoalNodeId: string;
   readonly tags?: readonly string[];
   readonly status?: ProjectStatus;
+  readonly isAttention?: boolean;
+  readonly attentionPromotedAt?: string;
   readonly archivedAt?: string;
   readonly style?: ProjectStyle;
+  readonly lastActiveNodeId?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -75,6 +78,8 @@ export interface Note {
   readonly createdAt: string;
   readonly updatedAt: string;
 }
+
+export type ProjectNote = Note;
 
 export interface SnapshotMetadata {
   readonly id: string;
@@ -132,12 +137,51 @@ export interface StandaloneTask {
   readonly updatedAt: string;
 }
 
+export interface IdeaSeed {
+  readonly id: string;
+  readonly title: string;
+  readonly rawNotes?: string;
+  readonly seedThoughts?: readonly string[];
+  readonly tags?: readonly string[];
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export type ActivityEventType =
+  | 'task_created'
+  | 'status_changed'
+  | 'task_completed'
+  | 'date_moved'
+  | 'attention_promoted'
+  | 'attention_demoted'
+  | 'project_parked'
+  | 'project_unparked';
+
+export interface ActivityEvent {
+  readonly id: string;
+  readonly timestamp: string;
+  readonly type: ActivityEventType;
+  readonly entityId: string;
+  readonly entityText?: string;
+  readonly projectId?: string;
+  readonly projectName?: string;
+  readonly fromStatus?: string;
+  readonly toStatus?: string;
+  readonly oldDueDate?: string;
+  readonly newDueDate?: string;
+  readonly metadata?: Record<string, unknown>;
+}
+
 export interface UserPreferences {
   readonly myDayMode: 'today' | 'current_tasks';
   readonly theme: 'dark' | 'light' | 'system';
   readonly dateFormat?: 'DD/MM/YYYY' | 'MMM_D_YYYY';
   readonly onboardingCompleted: boolean;
   readonly preferredStorageProvider: 'browser' | 'local_file';
+  readonly maxAttentionProjects?: number;
+  readonly lastActiveNodeId?: string;
+  readonly lastActiveProjectId?: string;
+  readonly lastActiveTimestamp?: string;
 }
 
 export interface ProjectSummary {
@@ -148,6 +192,8 @@ export interface ProjectSummary {
   readonly tags: readonly string[];
   readonly status: ProjectStatus;
   readonly isArchived: boolean;
+  readonly isParked: boolean;
+  readonly isAttention: boolean;
   readonly archivedAt?: string;
   readonly style?: ProjectStyle;
   readonly progressPercentage: number;

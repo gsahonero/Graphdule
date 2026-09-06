@@ -26,6 +26,12 @@ export function getLayoutedElements(
   const ranksep = direction === 'LR' ? Math.round((isCompact ? 45 : 55) * nodeScale) : Math.round((isCompact ? 40 : 45) * nodeScale);
   const nodesep = direction === 'LR' ? Math.round((isCompact ? 20 : 25) * nodeScale) : Math.round((isCompact ? 20 : 25) * nodeScale);
 
+  // 1. Sanitize edges: ensure both endpoints exist in nodes and ignore self-loops to prevent Dagre crashing
+  const nodeIds = new Set(nodes.map((n) => n.id));
+  const validEdges = edges.filter(
+    (e) => nodeIds.has(e.fromNodeId) && nodeIds.has(e.toNodeId) && e.fromNodeId !== e.toNodeId
+  );
+
   const dagreGraph = new dagre.graphlib.Graph();
   dagreGraph.setDefaultEdgeLabel(() => ({}));
   dagreGraph.setGraph({
@@ -38,7 +44,7 @@ export function getLayoutedElements(
     dagreGraph.setNode(node.id, { width: nodeW, height: nodeH });
   });
 
-  edges.forEach((edge) => {
+  validEdges.forEach((edge) => {
     dagreGraph.setEdge(edge.fromNodeId, edge.toNodeId);
   });
 
@@ -48,9 +54,9 @@ export function getLayoutedElements(
     console.warn('Dagre layout computation error:', err);
   }
 
-  const rfNodes: RFNode[] = nodes.map((node, index) => {
+  // Compute raw positions
+  const rawPositions = nodes.map((node, index) => {
     const nodeWithPos = dagreGraph.node(node.id);
-    let position: { x: number; y: number };
 
     if (
       !forceLayout &&
@@ -58,29 +64,54 @@ export function getLayoutedElements(
       isValidCoordinate(node.position.x) &&
       isValidCoordinate(node.position.y)
     ) {
-      position = { x: node.position.x, y: node.position.y };
-    } else if (
+      return { x: node.position.x, y: node.position.y };
+    }
+    if (
       nodeWithPos &&
       isValidCoordinate(nodeWithPos.x) &&
       isValidCoordinate(nodeWithPos.y)
     ) {
-      position = {
+      return {
         x: Math.round(nodeWithPos.x - nodeW / 2),
         y: Math.round(nodeWithPos.y - nodeH / 2),
       };
-    } else {
-      // Safe fallback for disconnected nodes or unexpected coordinates
-      const cols = count <= 4 ? 2 : count <= 8 ? 4 : isCompact ? 6 : 4;
-      position = {
-        x: (index % cols) * (nodeW + Math.round(30 * nodeScale)) + 50,
-        y: Math.floor(index / cols) * (nodeH + Math.round(30 * nodeScale)) + 100,
-      };
     }
+    // Safe fallback for disconnected nodes or unexpected coordinates
+    const cols = count <= 4 ? 2 : count <= 8 ? 4 : isCompact ? 6 : 4;
+    return {
+      x: (index % cols) * (nodeW + Math.round(30 * nodeScale)) + 50,
+      y: Math.floor(index / cols) * (nodeH + Math.round(30 * nodeScale)) + 100,
+    };
+  });
+
+  // Normalize coordinates so nodes are never placed in negative coordinate space
+  let minX = Infinity;
+  let minY = Infinity;
+  rawPositions.forEach((pos) => {
+    if (pos.x < minX) minX = pos.x;
+    if (pos.y < minY) minY = pos.y;
+  });
+
+  const offsetX = minX < 50 ? 50 - minX : 0;
+  const offsetY = minY < 60 ? 60 - minY : 0;
+
+  const rfNodes: RFNode[] = nodes.map((node, index) => {
+    const pos = rawPositions[index];
+    const finalX = pos.x + offsetX;
+    const finalY = pos.y + offsetY;
 
     return {
       id: node.id,
       type: 'graphNode',
-      position,
+      position: { x: finalX, y: finalY },
+      width: nodeW,
+      height: nodeH,
+      initialWidth: nodeW,
+      initialHeight: nodeH,
+      measured: {
+        width: nodeW,
+        height: nodeH,
+      },
       data: {
         node,
       },
@@ -91,7 +122,7 @@ export function getLayoutedElements(
   const strokeWidth = Math.max(1.5, Math.round(2.5 * nodeScale * 10) / 10);
   const interactionWidth = Math.round(20 * nodeScale);
 
-  const rfEdges: RFEdge[] = edges.map((edge) => ({
+  const rfEdges: RFEdge[] = validEdges.map((edge) => ({
     id: edge.id,
     source: edge.fromNodeId,
     target: edge.toNodeId,

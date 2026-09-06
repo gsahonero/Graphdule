@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const NodeStatusSchema = z.enum(['planned', 'in_progress', 'completed', 'abandoned']);
-export const ProjectStatusSchema = z.enum(['active', 'archived', 'completed', 'abandoned']);
+export const ProjectStatusSchema = z.enum(['active', 'parked', 'archived', 'completed', 'abandoned']);
 
 export const ProjectColorSchema = z.enum([
   'emerald',
@@ -46,8 +46,11 @@ export const ProjectSchema = z.object({
   endGoalNodeId: z.string().min(1),
   tags: z.array(z.string()).optional().default([]),
   status: ProjectStatusSchema.optional().default('active'),
+  isAttention: z.boolean().optional().default(false),
+  attentionPromotedAt: z.string().optional(),
   archivedAt: z.string().optional(),
   style: ProjectStyleSchema.optional(),
+  lastActiveNodeId: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 }).passthrough();
@@ -137,5 +140,45 @@ export const UserPreferencesSchema = z.object({
   dateFormat: z.enum(['DD/MM/YYYY', 'MMM_D_YYYY']).optional().default('DD/MM/YYYY'),
   onboardingCompleted: z.boolean().default(false),
   preferredStorageProvider: z.enum(['browser', 'local_file']).default('browser'),
+  maxAttentionProjects: z.number().int().positive().optional().default(3),
+  lastActiveNodeId: z.string().optional(),
+  lastActiveProjectId: z.string().optional(),
+  lastActiveTimestamp: z.string().optional(),
+}).passthrough();
+
+export const IdeaSeedSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  rawNotes: z.string().optional(),
+  seedThoughts: z.array(z.string()).optional().default([]),
+  tags: z.array(z.string()).optional().default([]),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+}).passthrough();
+
+export const ActivityEventTypeSchema = z.enum([
+  'task_created',
+  'status_changed',
+  'task_completed',
+  'date_moved',
+  'attention_promoted',
+  'attention_demoted',
+  'project_parked',
+  'project_unparked',
+]);
+
+export const ActivityEventSchema = z.object({
+  id: z.string().min(1),
+  timestamp: z.string(),
+  type: ActivityEventTypeSchema,
+  entityId: z.string().min(1),
+  entityText: z.string().optional(),
+  projectId: z.string().optional(),
+  projectName: z.string().optional(),
+  fromStatus: z.string().optional(),
+  toStatus: z.string().optional(),
+  oldDueDate: z.string().optional(),
+  newDueDate: z.string().optional(),
+  metadata: z.record(z.unknown()).optional(),
 }).passthrough();
 

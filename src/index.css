@@ -5,9 +5,15 @@
 @layer base {
   html {
     @apply h-full;
+    -webkit-tap-highlight-color: transparent;
   }
   body {
     @apply h-full m-0 p-0 antialiased font-sans transition-colors duration-150 bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button, a, input, select, textarea {
+    touch-action: manipulation;
   }
 
   /* Custom text selection colors for high contrast and readability */
@@ -32,6 +38,15 @@
     background-color: #047857;
     color: #ffffff;
   }
+}
+
+/* Utility to hide scrollbars on mobile horizontal scrolling carousels/toolbars */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 /* Custom scrollbars */
@@ -126,12 +141,25 @@
   filter: drop-shadow(0 0 4px rgba(16, 185, 129, 0.8));
 }
 
-/* Handle Perfect Symmetrical Centering */
+/* Handle Perfect Symmetrical Centering & Mobile Touch Hitbox */
 .react-flow__handle {
   cursor: crosshair !important;
   margin: 0 !important;
   top: 50% !important;
   transform: translateY(-50%) !important;
+  position: absolute;
+}
+
+/* Expanded touch target for handles (generous 36px touch zone) without altering visual dot size */
+.react-flow__handle::after {
+  content: '';
+  position: absolute;
+  top: -12px;
+  bottom: -12px;
+  left: -12px;
+  right: -12px;
+  border-radius: 9999px;
+  pointer-events: auto;
 }
 
 /* React Flow Node and Popover Layering */

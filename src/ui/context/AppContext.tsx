@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   ProjectDocument,
   ProjectSummary,
@@ -12,12 +12,18 @@ import {
   ProjectStyle,
   RecurrenceRule,
   CascadeImpactPreview,
+  IdeaSeed,
+  ActivityEvent,
+  ActivityEventType,
 } from '../../domain/models/types';
 import { ProjectService } from '../../domain/services/project-service';
 import { TemporalService } from '../../domain/services/temporal-service';
+import { GraphService } from '../../domain/services/graph-service';
 import { HistoryService } from '../../domain/services/history-service';
+import { UndoRedoManager, MAX_HISTORY_SIZE } from '../../domain/services/undo-redo-service';
 import { MyDayService } from '../../domain/services/my-day-service';
 import { RecurrenceService } from '../../domain/services/recurrence-service';
+import { ActivityLogService } from '../../domain/services/activity-log-service';
 import {
   defaultStorageProvider,
   IStorageProvider,
@@ -32,8 +38,8 @@ import {
   GCalendarItem,
 } from '../../storage';
 import { JsonFileProvider } from '../../storage/file/json-file-provider';
-import { getTodayString, formatDisplayDate, DateDisplayFormat } from '../../domain/utils/date';
-import { createDefaultSampleProject } from '../../config/sample-project';
+import { getTodayString, formatDisplayDate, DateDisplayFormat, isAfter } from '../../domain/utils/date';
+import { createDefaultSampleProject, DEFAULT_SAMPLE_PROJECT_ID } from '../../config/sample-project';
 
 interface AppContextType {
   storage: IStorageProvider;
@@ -51,6 +57,9 @@ interface AppContextType {
   toggleDateFormat: () => Promise<void>;
   selectedNode: Node | null;
   setSelectedNode: (node: Node | null) => void;
+  lastActiveNode: { node: Node; project: ProjectSummary } | null;
+  goToLastActivityNode: () => Promise<boolean>;
+  recordActiveNode: (node: Node, projectId?: string) => Promise<void>;
   isNotesDrawerOpen: boolean;
   setIsNotesDrawerOpen: (open: boolean) => void;
 
@@ -64,7 +73,7 @@ interface AppContextType {
 
   // Actions
   refreshData: () => Promise<void>;
-  openProject: (projectId: string) => Promise<void>;
+  openProject: (projectId: string, nodeToSelect?: Node | string | null) => Promise<void>;
   createProject: (name: string, endGoalText: string, deadline: string, tags?: string[], style?: ProjectStyle) => Promise<void>;
   updateProjectName: (name: string) => Promise<void>;
   updateProjectTags: (tags: string[]) => Promise<void>;
@@ -72,7 +81,7 @@ interface AppContextType {
   archiveProject: (projectId: string, reason?: ProjectStatus) => Promise<void>;
   unarchiveProject: (projectId: string) => Promise<void>;
   deleteProject: (projectId: string) => Promise<void>;
-  addNode: (text: string, dueDate: string, parentNodeId?: string | null, position?: { x: number; y: number }) => Promise<Node | null>;
+  addNode: (text: string, dueDate?: string, parentNodeId?: string | null, position?: { x: number; y: number }) => Promise<Node | null>;
   updateNode: (node: Node) => Promise<void>;
   deleteNode: (nodeId: string) => Promise<void>;
   updateNodePositions: (positions: { id: string; position: { x: number; y: number } }[]) => Promise<void>;
@@ -81,6 +90,7 @@ interface AppContextType {
   applyPendingCascade: () => Promise<void>;
   addEdge: (fromNodeId: string, toNodeId: string) => Promise<{ success: boolean; error?: string }>;
   deleteEdge: (edgeId: string) => Promise<void>;
+  spliceNodeIntoEdge: (nodeId: string, edgeId: string) => Promise<{ success: boolean; error?: string }>;
   decomposeNode: (parentNodeId: string, subtasks: { text: string; dueDate?: string }[]) => Promise<void>;
   addNote: (nodeId: string, text: string) => Promise<void>;
   deleteNote: (noteId: string) => Promise<void>;
@@ -90,6 +100,12 @@ interface AppContextType {
   projectSnapshots: SnapshotMetadata[];
   createSnapshot: (message?: string) => Promise<void>;
   restoreSnapshot: (snapshotId: string) => Promise<void>;
+
+  // Undo & Redo System (100 actions queue)
+  canUndo: boolean;
+  canRedo: boolean;
+  undo: () => Promise<void>;
+  redo: () => Promise<void>;
 
   // Standalone Tasks
   addStandaloneTask: (text: string, dueDate?: string, recurrence?: RecurrenceRule) => Promise<void>;
@@ -119,6 +135,27 @@ interface AppContextType {
   exportActiveProject: () => void;
   exportAllData: () => Promise<void>;
   importProjectJson: (jsonString: string) => Promise<{ success: boolean; error?: string }>;
+
+  // Idea Parking Lot & Seeds
+  ideaSeeds: IdeaSeed[];
+  addIdeaSeed: (title: string, options?: { rawNotes?: string; seedThoughts?: string[]; tags?: string[] }) => Promise<IdeaSeed>;
+  updateIdeaSeed: (id: string, updates: Partial<Omit<IdeaSeed, 'id' | 'createdAt'>>) => Promise<void>;
+  deleteIdeaSeed: (id: string) => Promise<void>;
+  germinateIdeaSeed: (id: string, deadline?: string, style?: ProjectStyle) => Promise<string>;
+  parkProject: (projectId: string) => Promise<void>;
+  unparkProject: (projectId: string) => Promise<void>;
+
+  // Priority Attention Management
+  maxAttentionProjects: number;
+  attentionProjects: ProjectSummary[];
+  toggleProjectAttention: (projectId: string) => Promise<{ success: boolean; requiresDemotion?: boolean }>;
+  swapProjectAttention: (promoteProjectId: string, demoteProjectId: string) => Promise<void>;
+
+  // Activity Telemetry & LLM Prompt
+  activityLog: ActivityEvent[];
+  logActivityEvent: (type: ActivityEventType, entityId: string, options?: { entityText?: string; projectId?: string; projectName?: string; fromStatus?: string; toStatus?: string; oldDueDate?: string; newDueDate?: string; metadata?: Record<string, unknown> }) => Promise<void>;
+  exportActivityLogPrompt: () => string;
+  clearActivityLog: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -145,10 +182,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   });
 
-  const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+  const [selectedNode, setSelectedNodeState] = useState<Node | null>(null);
   const [isNotesDrawerOpen, setIsNotesDrawerOpen] = useState(false);
   const [pendingCascade, setPendingCascade] = useState<CascadeImpactPreview | null>(null);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+
+  // Idea Seeds and Activity Log states
+  const [ideaSeeds, setIdeaSeeds] = useState<IdeaSeed[]>([]);
+  const [activityLog, setActivityLog] = useState<ActivityEvent[]>([]);
 
   // Cloud Sync state
   const [cloudSyncState, setCloudSyncState] = useState<SyncState>(() => SyncCoordinator.getState());
@@ -157,6 +198,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Google Calendar state
   const [gcalendarSyncConfig, setGcalendarSyncConfigState] = useState<GCalendarSyncConfig>(() => GCalendarSync.getConfig());
   const [availableGCalendars, setAvailableGCalendars] = useState<GCalendarItem[]>([]);
+
+  // Undo & Redo state and manager (100 actions cap)
+  const undoRedoManagerRef = useRef<UndoRedoManager>(new UndoRedoManager(MAX_HISTORY_SIZE));
+  const isPerformingUndoRedoRef = useRef<boolean>(false);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+  const activeProjectDocRef = useRef<ProjectDocument | null>(activeProjectDoc);
+
+  useEffect(() => {
+    activeProjectDocRef.current = activeProjectDoc;
+    if (activeProjectDoc) {
+      setCanUndo(undoRedoManagerRef.current.canUndo(activeProjectDoc.project.id));
+      setCanRedo(undoRedoManagerRef.current.canRedo(activeProjectDoc.project.id));
+    } else {
+      setCanUndo(false);
+      setCanRedo(false);
+    }
+  }, [activeProjectDoc]);
 
   useEffect(() => {
     const unsubscribe = SyncCoordinator.subscribe((state) => {
@@ -187,6 +246,101 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return formatDisplayDate(dateStr, preferences.dateFormat || 'DD/MM/YYYY');
     },
     [preferences.dateFormat]
+  );
+
+  const updatePreferences = useCallback(
+    async (partial: Partial<UserPreferences>) => {
+      const updated = { ...preferences, ...partial };
+      if (partial.theme) {
+        localStorage.setItem('graphdule_theme', partial.theme);
+        if (partial.theme === 'light') {
+          document.documentElement.classList.remove('dark');
+          document.documentElement.classList.add('light');
+        } else {
+          document.documentElement.classList.remove('light');
+          document.documentElement.classList.add('dark');
+        }
+      }
+      if (partial.dateFormat) {
+        localStorage.setItem('graphdule_date_format', partial.dateFormat);
+      }
+      setPreferences(updated);
+      await storage.writePreferences(updated);
+    },
+    [preferences, storage]
+  );
+
+  const toggleDateFormat = useCallback(async () => {
+    const nextFormat: DateDisplayFormat =
+      preferences.dateFormat === 'MMM_D_YYYY' ? 'DD/MM/YYYY' : 'MMM_D_YYYY';
+    await updatePreferences({ dateFormat: nextFormat });
+  }, [preferences.dateFormat, updatePreferences]);
+
+  const recordActiveNode = useCallback(
+    async (node: Node, projectId?: string) => {
+      const pId = projectId || node.projectId || activeProjectDoc?.project.id;
+      const timestamp = new Date().toISOString();
+      try {
+        localStorage.setItem(
+          'graphdule_last_active_node',
+          JSON.stringify({
+            nodeId: node.id,
+            projectId: pId,
+            timestamp,
+          })
+        );
+      } catch {
+        // ignore localStorage errors
+      }
+
+      // 1. Update preferences (synchronized via preferences.json)
+      await updatePreferences({
+        lastActiveNodeId: node.id,
+        lastActiveProjectId: pId,
+        lastActiveTimestamp: timestamp,
+      });
+
+      // 2. Update in-memory activeProjectDoc state functionally
+      setActiveProjectDoc((prev) => {
+        if (!prev || prev.project.id !== pId) return prev;
+        if (prev.project.lastActiveNodeId === node.id) return prev;
+        return {
+          ...prev,
+          project: {
+            ...prev.project,
+            lastActiveNodeId: node.id,
+          },
+          exportedAt: timestamp,
+        };
+      });
+
+      // 3. Update project JSON on storage (synchronized via project_{id}.json)
+      if (pId) {
+        const doc = await storage.readProject(pId);
+        if (doc && doc.project.lastActiveNodeId !== node.id) {
+          const updatedDoc: ProjectDocument = {
+            ...doc,
+            project: {
+              ...doc.project,
+              lastActiveNodeId: node.id,
+            },
+            exportedAt: timestamp,
+          };
+          await storage.writeProject(updatedDoc);
+        }
+      }
+    },
+    [activeProjectDoc?.project.id, storage, updatePreferences]
+  );
+
+  const setSelectedNode = useCallback(
+    (node: Node | null) => {
+      setSelectedNodeState(node);
+      if (node) {
+        recordActiveNode(node).catch(() => {});
+      }
+    },
+    [recordActiveNode]
   );
 
   // Initialize storage and load initial state
@@ -229,8 +383,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setStandaloneTasks(standalones);
     setPreferences(mergedPrefs);
 
-    // Read and combine nodes from ALL active (non-archived) projects
-    const activeProjectSummaries = projList.filter((p) => !p.isArchived);
+    if (storage.readIdeaSeeds) {
+      const seeds = await storage.readIdeaSeeds();
+      setIdeaSeeds(seeds);
+    }
+    if (storage.readActivityLog) {
+      const events = await storage.readActivityLog();
+      setActivityLog(events);
+    }
+
+    // Read and combine nodes from ALL active (non-archived, non-parked) projects
+    const activeProjectSummaries = projList.filter((p) => !p.isArchived && !p.isParked);
     const docs = await Promise.all(
       activeProjectSummaries.map(async (p) => {
         if (activeProjectDoc && activeProjectDoc.project.id === p.id) {
@@ -246,6 +409,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
     setAllActiveNodes(combinedNodes);
+
+    if (activeProjectDoc && !projList.some((p) => p.id === activeProjectDoc.project.id)) {
+      setActiveProjectDoc(null);
+    }
 
     if (!prefs.onboardingCompleted && projList.length === 0) {
       setIsOnboardingOpen(true);
@@ -276,17 +443,114 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const openProject = useCallback(
-    async (projectId: string) => {
+    async (projectId: string, nodeToSelect?: Node | string | null) => {
       const doc = await storage.readProject(projectId);
       if (doc) {
         setActiveProjectDoc(doc);
         setCurrentView('project_detail');
-        setSelectedNode(null);
+        if (nodeToSelect !== undefined) {
+          if (typeof nodeToSelect === 'string') {
+            const found = doc.nodes.find((n) => n.id === nodeToSelect) || null;
+            setSelectedNode(found);
+          } else if (nodeToSelect) {
+            const found = doc.nodes.find((n) => n.id === nodeToSelect.id) || nodeToSelect;
+            setSelectedNode(found);
+          } else {
+            setSelectedNode(null);
+          }
+        } else {
+          setSelectedNode(null);
+        }
         await loadProjectSnapshots(projectId);
+        setCanUndo(undoRedoManagerRef.current.canUndo(projectId));
+        setCanRedo(undoRedoManagerRef.current.canRedo(projectId));
       }
     },
-    [storage, loadProjectSnapshots]
+    [storage, loadProjectSnapshots, setSelectedNode]
   );
+
+  const lastActiveNode = useMemo((): { node: Node; project: ProjectSummary } | null => {
+    if (projects.length === 0) return null;
+    const activeProjectsMap = new Map(
+      projects.filter((p) => !p.isArchived && !p.isParked).map((p) => [p.id, p])
+    );
+    if (activeProjectsMap.size === 0) return null;
+
+    const allNodesMap = new Map(allActiveNodes.map((n) => [n.id, n]));
+
+    // Priority 1: Check preferences.lastActiveNodeId (synchronized JSON via preferences.json)
+    const targetNodeId = preferences.lastActiveNodeId;
+    const targetProjectId = preferences.lastActiveProjectId;
+    if (targetNodeId) {
+      const node = allNodesMap.get(targetNodeId);
+      if (node) {
+        const pId = node.projectId || targetProjectId;
+        if (pId && activeProjectsMap.has(pId)) {
+          return { node, project: activeProjectsMap.get(pId)! };
+        }
+      }
+    }
+
+    // Priority 2: Check localStorage
+    try {
+      const stored = localStorage.getItem('graphdule_last_active_node');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.nodeId) {
+          const node = allNodesMap.get(parsed.nodeId);
+          if (node) {
+            const pId = node.projectId || parsed.projectId;
+            if (pId && activeProjectsMap.has(pId)) {
+              return { node, project: activeProjectsMap.get(pId)! };
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // Priority 3: Check activityLog (most recent node event in an active project)
+    for (let i = activityLog.length - 1; i >= 0; i--) {
+      const ev = activityLog[i];
+      if (ev.entityId && allNodesMap.has(ev.entityId)) {
+        const node = allNodesMap.get(ev.entityId)!;
+        const pId = node.projectId || ev.projectId;
+        if (pId && activeProjectsMap.has(pId)) {
+          return { node, project: activeProjectsMap.get(pId)! };
+        }
+      }
+    }
+
+    // Priority 4: Fallback to the node with latest updatedAt / createdAt across all active nodes
+    if (allActiveNodes.length > 0) {
+      const eligibleNodes = allActiveNodes.filter(
+        (n) => n.projectId && activeProjectsMap.has(n.projectId)
+      );
+      if (eligibleNodes.length > 0) {
+        const sorted = [...eligibleNodes].sort((a, b) => {
+          const timeA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+          const timeB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+          return timeB - timeA;
+        });
+        const latest = sorted[0];
+        return { node: latest, project: activeProjectsMap.get(latest.projectId!)! };
+      }
+    }
+
+    return null;
+  }, [preferences.lastActiveNodeId, preferences.lastActiveProjectId, projects, allActiveNodes, activityLog]);
+
+  const goToLastActivityNode = useCallback(async (): Promise<boolean> => {
+    if (!lastActiveNode) return false;
+    const { node, project } = lastActiveNode;
+
+    await openProject(project.id, node);
+    setCurrentView('project_detail');
+    setActiveProjectTab('graph');
+    return true;
+  }, [lastActiveNode, openProject]);
+
 
   const createProject = useCallback(
     async (name: string, endGoalText: string, deadline: string, tags?: string[], style?: ProjectStyle) => {
@@ -314,6 +578,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const saveProjectDoc = useCallback(
     async (updatedDoc: ProjectDocument) => {
+      const prevDoc = activeProjectDocRef.current;
+      // Record previous state into UndoRedoManager before applying changes
+      if (
+        !isPerformingUndoRedoRef.current &&
+        prevDoc &&
+        prevDoc.project.id === updatedDoc.project.id
+      ) {
+        undoRedoManagerRef.current.record(prevDoc);
+        setCanUndo(undoRedoManagerRef.current.canUndo(updatedDoc.project.id));
+        setCanRedo(undoRedoManagerRef.current.canRedo(updatedDoc.project.id));
+      }
+
       const syncedNodes = TemporalService.syncParentDueDates(updatedDoc.nodes);
       const now = new Date().toISOString();
       const docWithTimestamp: ProjectDocument = {
@@ -334,6 +610,101 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     },
     [storage]
   );
+
+  const undo = useCallback(async () => {
+    const currentDoc = activeProjectDocRef.current;
+    if (!currentDoc) return;
+    const projectId = currentDoc.project.id;
+    if (!undoRedoManagerRef.current.canUndo(projectId)) return;
+
+    isPerformingUndoRedoRef.current = true;
+    try {
+      const restored = undoRedoManagerRef.current.undo(currentDoc);
+      if (restored) {
+        await storage.writeProject(restored);
+        setActiveProjectDoc(restored);
+
+        const projList = await storage.listProjects();
+        setProjects(projList);
+
+        // Keep selectedNode in sync
+        setSelectedNodeState((prev) => {
+          if (!prev) return null;
+          return restored.nodes.find((n) => n.id === prev.id) || null;
+        });
+
+        setCanUndo(undoRedoManagerRef.current.canUndo(projectId));
+        setCanRedo(undoRedoManagerRef.current.canRedo(projectId));
+      }
+    } finally {
+      isPerformingUndoRedoRef.current = false;
+    }
+  }, [storage]);
+
+  const redo = useCallback(async () => {
+    const currentDoc = activeProjectDocRef.current;
+    if (!currentDoc) return;
+    const projectId = currentDoc.project.id;
+    if (!undoRedoManagerRef.current.canRedo(projectId)) return;
+
+    isPerformingUndoRedoRef.current = true;
+    try {
+      const restored = undoRedoManagerRef.current.redo(currentDoc);
+      if (restored) {
+        await storage.writeProject(restored);
+        setActiveProjectDoc(restored);
+
+        const projList = await storage.listProjects();
+        setProjects(projList);
+
+        setSelectedNodeState((prev) => {
+          if (!prev) return null;
+          return restored.nodes.find((n) => n.id === prev.id) || null;
+        });
+
+        setCanUndo(undoRedoManagerRef.current.canUndo(projectId));
+        setCanRedo(undoRedoManagerRef.current.canRedo(projectId));
+      }
+    } finally {
+      isPerformingUndoRedoRef.current = false;
+    }
+  }, [storage]);
+
+  // Global Keyboard Shortcuts for Undo (Ctrl+Z / Cmd+Z) and Redo (Ctrl+Y / Ctrl+Shift+Z / Cmd+Shift+Z)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent);
+      const isModifier = isMac ? e.metaKey : e.ctrlKey;
+      if (!isModifier) return;
+
+      // Bypass when typing inside native inputs, textareas, or contentEditable elements
+      const target = e.target as HTMLElement | null;
+      const isInput =
+        target?.tagName === 'INPUT' ||
+        target?.tagName === 'TEXTAREA' ||
+        target?.isContentEditable;
+      if (isInput) return;
+
+      const key = e.key.toLowerCase();
+
+      // Undo: Ctrl+Z (Cmd+Z) without Shift
+      if (key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo().catch((err) => console.warn('[UndoRedo] Undo error:', err));
+        return;
+      }
+
+      // Redo: Ctrl+Y (Cmd+Y) OR Ctrl+Shift+Z (Cmd+Shift+Z)
+      if (key === 'y' || (key === 'z' && e.shiftKey)) {
+        e.preventDefault();
+        redo().catch((err) => console.warn('[UndoRedo] Redo error:', err));
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [undo, redo]);
 
   const updateProjectName = useCallback(
     async (newName: string) => {
@@ -402,9 +773,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     async (projectId: string, reason: ProjectStatus = 'archived') => {
       const doc = await storage.readProject(projectId);
       if (!doc) return;
+      const archiveStatus = reason === 'completed' || reason === 'abandoned' ? reason : 'archived';
       const updatedProject = ProjectService.archiveProject(
         doc.project,
-        reason === 'active' ? 'archived' : reason
+        archiveStatus
       );
       const updatedDoc: ProjectDocument = {
         ...doc,
@@ -441,7 +813,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteProject = useCallback(
     async (projectId: string) => {
-      if (projectId === 'sample_phd_paper') {
+      undoRedoManagerRef.current.clearProject(projectId);
+      if (projectId === DEFAULT_SAMPLE_PROJECT_ID) {
         localStorage.setItem('graphdule_sample_deleted', 'true');
       }
       await storage.deleteProject(projectId);
@@ -454,26 +827,307 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [storage, activeProjectDoc, refreshData]
   );
 
+  // Priority Attention Management
+  const maxAttentionProjects = preferences.maxAttentionProjects || 3;
+
+  const attentionProjects = useMemo(() => {
+    const activeAttention = projects.filter((p) => p.isAttention && !p.isArchived && !p.isParked);
+    return ProjectService.sortAttentionProjects(activeAttention);
+  }, [projects]);
+
+  const logActivityEvent = useCallback(
+    async (
+      type: ActivityEventType,
+      entityId: string,
+      options?: {
+        entityText?: string;
+        projectId?: string;
+        projectName?: string;
+        fromStatus?: string;
+        toStatus?: string;
+        oldDueDate?: string;
+        newDueDate?: string;
+        metadata?: Record<string, unknown>;
+      }
+    ) => {
+      try {
+        const event = ActivityLogService.createEvent(type, entityId, options);
+        if (storage.appendActivityEvents) {
+          await storage.appendActivityEvents([event]);
+        }
+        setActivityLog((prev) => [...prev, event]);
+      } catch (e) {
+        console.warn('[AppContext] Failed to log activity event:', e);
+      }
+    },
+    [storage]
+  );
+
+  const exportActivityLogPrompt = useCallback(() => {
+    const analysis = ActivityLogService.generatePatternAnalysis(activityLog);
+    return analysis.markdownPrompt;
+  }, [activityLog]);
+
+  const clearActivityLog = useCallback(async () => {
+    if (storage.clearActivityLog) {
+      await storage.clearActivityLog();
+    }
+    setActivityLog([]);
+  }, [storage]);
+
+  // Idea Parking Lot & Seeds
+  const addIdeaSeed = useCallback(
+    async (title: string, options?: { rawNotes?: string; seedThoughts?: string[]; tags?: string[] }) => {
+      const newSeed = ProjectService.createIdeaSeed(title, options);
+      const updated = [newSeed, ...ideaSeeds];
+      setIdeaSeeds(updated);
+      if (storage.writeIdeaSeeds) {
+        await storage.writeIdeaSeeds(updated);
+      }
+      return newSeed;
+    },
+    [ideaSeeds, storage]
+  );
+
+  const updateIdeaSeed = useCallback(
+    async (id: string, updates: Partial<Omit<IdeaSeed, 'id' | 'createdAt'>>) => {
+      const existing = ideaSeeds.find((s) => s.id === id);
+      if (!existing) return;
+      const updatedSeed = ProjectService.updateIdeaSeed(existing, updates);
+      const updated = ideaSeeds.map((s) => (s.id === id ? updatedSeed : s));
+      setIdeaSeeds(updated);
+      if (storage.writeIdeaSeeds) {
+        await storage.writeIdeaSeeds(updated);
+      }
+    },
+    [ideaSeeds, storage]
+  );
+
+  const deleteIdeaSeed = useCallback(
+    async (id: string) => {
+      const updated = ideaSeeds.filter((s) => s.id !== id);
+      setIdeaSeeds(updated);
+      if (storage.deleteIdeaSeed) {
+        await storage.deleteIdeaSeed(id);
+      } else if (storage.writeIdeaSeeds) {
+        await storage.writeIdeaSeeds(updated);
+      }
+    },
+    [ideaSeeds, storage]
+  );
+
+  const germinateIdeaSeed = useCallback(
+    async (id: string, deadline?: string, style?: ProjectStyle) => {
+      const seed = ideaSeeds.find((s) => s.id === id);
+      if (!seed) throw new Error('Idea seed not found');
+
+      const { project, egnNode, nodes, edges } = ProjectService.germinateSeedToProject(seed, deadline, style);
+      const newDoc: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: new Date().toISOString(),
+        project,
+        nodes,
+        edges,
+        notes: seed.rawNotes
+          ? [
+              {
+                id: ProjectService.generateId('note'),
+                nodeId: egnNode.id,
+                text: seed.rawNotes,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              },
+            ]
+          : [],
+        history: [],
+      };
+
+      await storage.writeProject(newDoc);
+      const { snapshot } = HistoryService.createSnapshot(newDoc, `Germinated from idea seed: ${seed.title}`);
+      await storage.writeSnapshot(snapshot);
+
+      await deleteIdeaSeed(id);
+
+      await logActivityEvent('task_created', egnNode.id, {
+        entityText: egnNode.text,
+        projectId: project.id,
+        projectName: project.name,
+        metadata: { germinatedFromSeedId: id },
+      });
+
+      await refreshData();
+      await openProject(project.id);
+      return project.id;
+    },
+    [ideaSeeds, storage, deleteIdeaSeed, logActivityEvent, refreshData, openProject]
+  );
+
+  const parkProject = useCallback(
+    async (projectId: string) => {
+      const doc = await storage.readProject(projectId);
+      if (!doc) return;
+      const updatedProject = ProjectService.parkProject(doc.project);
+      const updatedDoc: ProjectDocument = {
+        ...doc,
+        project: updatedProject,
+        exportedAt: new Date().toISOString(),
+      };
+      await storage.writeProject(updatedDoc);
+      if (activeProjectDoc?.project.id === projectId) {
+        setActiveProjectDoc(updatedDoc);
+      }
+      await logActivityEvent('project_parked', projectId, {
+        entityText: doc.project.name,
+        projectId,
+        projectName: doc.project.name,
+      });
+      await refreshData();
+    },
+    [storage, activeProjectDoc, logActivityEvent, refreshData]
+  );
+
+  const unparkProject = useCallback(
+    async (projectId: string) => {
+      const doc = await storage.readProject(projectId);
+      if (!doc) return;
+      const updatedProject = ProjectService.unparkProject(doc.project);
+      const updatedDoc: ProjectDocument = {
+        ...doc,
+        project: updatedProject,
+        exportedAt: new Date().toISOString(),
+      };
+      await storage.writeProject(updatedDoc);
+      if (activeProjectDoc?.project.id === projectId) {
+        setActiveProjectDoc(updatedDoc);
+      }
+      await logActivityEvent('project_unparked', projectId, {
+        entityText: doc.project.name,
+        projectId,
+        projectName: doc.project.name,
+      });
+      await refreshData();
+    },
+    [storage, activeProjectDoc, logActivityEvent, refreshData]
+  );
+
+  const toggleProjectAttention = useCallback(
+    async (projectId: string) => {
+      const doc = await storage.readProject(projectId);
+      if (!doc) return { success: false };
+
+      const willBeAttention = !doc.project.isAttention;
+
+      if (willBeAttention) {
+        const currentAttentionCount = projects.filter(
+          (p) => p.isAttention && !p.isArchived && !p.isParked && p.id !== projectId
+        ).length;
+        if (currentAttentionCount >= maxAttentionProjects) {
+          return { success: false, requiresDemotion: true };
+        }
+      }
+
+      const updatedProject = ProjectService.setProjectAttention(doc.project, willBeAttention);
+      const updatedDoc: ProjectDocument = {
+        ...doc,
+        project: updatedProject,
+        exportedAt: new Date().toISOString(),
+      };
+      await storage.writeProject(updatedDoc);
+      if (activeProjectDoc?.project.id === projectId) {
+        setActiveProjectDoc(updatedDoc);
+      }
+
+      await logActivityEvent(
+        willBeAttention ? 'attention_promoted' : 'attention_demoted',
+        projectId,
+        {
+          entityText: doc.project.name,
+          projectId,
+          projectName: doc.project.name,
+        }
+      );
+
+      await refreshData();
+      return { success: true };
+    },
+    [storage, projects, maxAttentionProjects, activeProjectDoc, logActivityEvent, refreshData]
+  );
+
+  const swapProjectAttention = useCallback(
+    async (promoteProjectId: string, demoteProjectId: string) => {
+      const promoteDoc = await storage.readProject(promoteProjectId);
+      const demoteDoc = await storage.readProject(demoteProjectId);
+      if (!promoteDoc || !demoteDoc) return;
+
+      const demotedProject = ProjectService.setProjectAttention(demoteDoc.project, false);
+      await storage.writeProject({
+        ...demoteDoc,
+        project: demotedProject,
+        exportedAt: new Date().toISOString(),
+      });
+      await logActivityEvent('attention_demoted', demoteProjectId, {
+        entityText: demoteDoc.project.name,
+        projectId: demoteProjectId,
+        projectName: demoteDoc.project.name,
+      });
+
+      const promotedProject = ProjectService.setProjectAttention(promoteDoc.project, true);
+      await storage.writeProject({
+        ...promoteDoc,
+        project: promotedProject,
+        exportedAt: new Date().toISOString(),
+      });
+      await logActivityEvent('attention_promoted', promoteProjectId, {
+        entityText: promoteDoc.project.name,
+        projectId: promoteProjectId,
+        projectName: promoteDoc.project.name,
+      });
+
+      if (activeProjectDoc?.project.id === promoteProjectId) {
+        setActiveProjectDoc({ ...promoteDoc, project: promotedProject });
+      } else if (activeProjectDoc?.project.id === demoteProjectId) {
+        setActiveProjectDoc({ ...demoteDoc, project: demotedProject });
+      }
+
+      await refreshData();
+    },
+    [storage, activeProjectDoc, logActivityEvent, refreshData]
+  );
+
   const addNode = useCallback(
     async (
       text: string,
-      dueDate: string,
+      dueDate: string = getTodayString(),
       parentNodeId?: string | null,
       position?: { x: number; y: number }
     ): Promise<Node | null> => {
       if (!activeProjectDoc) return null;
+      const effectiveDueDate = dueDate || getTodayString();
       const newNode = ProjectService.createNode(
         activeProjectDoc.project.id,
         text,
-        dueDate,
+        effectiveDueDate,
         parentNodeId,
         position
       );
       const updatedDoc: ProjectDocument = {
         ...activeProjectDoc,
+        project: {
+          ...activeProjectDoc.project,
+          lastActiveNodeId: newNode.id,
+        },
         nodes: [...activeProjectDoc.nodes, newNode],
       };
       await saveProjectDoc(updatedDoc);
+
+      logActivityEvent('task_created', newNode.id, {
+        entityText: newNode.text,
+        projectId: activeProjectDoc.project.id,
+        projectName: activeProjectDoc.project.name,
+      }).catch(() => {});
+
+      recordActiveNode(newNode, activeProjectDoc.project.id).catch(() => {});
+
       if (newNode.dueDate) {
         GCalendarSync.syncTaskDateChange({
           taskId: newNode.id,
@@ -486,14 +1140,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return newNode;
     },
-    [activeProjectDoc, saveProjectDoc]
+    [activeProjectDoc, saveProjectDoc, logActivityEvent, recordActiveNode]
   );
 
   const updateNode = useCallback(
     async (updatedNode: Node) => {
       if (!activeProjectDoc) return;
+
+      // Invariant: When any child node is in progress, the parent node is also in progress, this behavior cannot be modified
+      if (updatedNode.status !== 'in_progress') {
+        const canModify = ProjectService.canModifyNodeStatus(activeProjectDoc.nodes, updatedNode.id, updatedNode.status);
+        if (!canModify.allowed) {
+          console.warn(canModify.reason);
+          return;
+        }
+      }
+
       const prevNode = activeProjectDoc.nodes.find((n) => n.id === updatedNode.id);
-      const updatedNodes = activeProjectDoc.nodes.map((n) => (n.id === updatedNode.id ? updatedNode : n));
+      let updatedNodes = activeProjectDoc.nodes.map((n) => (n.id === updatedNode.id ? updatedNode : n));
+
+      let affectedParentIds: string[] = [];
+      if (updatedNode.status === 'in_progress') {
+        const inProgressCascade = ProjectService.cascadeParentInProgress(updatedNodes, updatedNode.id);
+        updatedNodes = inProgressCascade.updatedNodes;
+        affectedParentIds = inProgressCascade.inProgressParentIds;
+      } else if (updatedNode.status === 'completed') {
+        const cascadeResult = ProjectService.cascadeParentCompletion(updatedNodes, updatedNode.id);
+        updatedNodes = cascadeResult.updatedNodes;
+        affectedParentIds = cascadeResult.completedParentIds;
+      }
+
+      const hierarchySync = ProjectService.syncParentStatusHierarchy(updatedNodes);
+      updatedNodes = hierarchySync.updatedNodes;
+      for (const id of hierarchySync.affectedParentIds) {
+        if (!affectedParentIds.includes(id)) {
+          affectedParentIds.push(id);
+        }
+      }
+
       await saveProjectDoc({
         ...activeProjectDoc,
         nodes: updatedNodes,
@@ -501,10 +1185,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (selectedNode?.id === updatedNode.id) {
         setSelectedNode(updatedNode);
+      } else {
+        recordActiveNode(updatedNode, activeProjectDoc.project.id).catch(() => {});
       }
 
       if (prevNode) {
         if (prevNode.dueDate !== updatedNode.dueDate) {
+          logActivityEvent('date_moved', updatedNode.id, {
+            entityText: updatedNode.text,
+            projectId: activeProjectDoc.project.id,
+            projectName: activeProjectDoc.project.name,
+            oldDueDate: prevNode.dueDate,
+            newDueDate: updatedNode.dueDate,
+          }).catch(() => {});
+
           GCalendarSync.syncTaskDateChange({
             taskId: updatedNode.id,
             newDueDate: updatedNode.dueDate,
@@ -514,6 +1208,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             projectName: activeProjectDoc.project.name,
           }).catch((err) => console.warn('[AppContext] Calendar sync on updateNode date change failed:', err));
         } else if (prevNode.text !== updatedNode.text || prevNode.status !== updatedNode.status) {
+          if (prevNode.status !== updatedNode.status) {
+            logActivityEvent('status_changed', updatedNode.id, {
+              entityText: updatedNode.text,
+              projectId: activeProjectDoc.project.id,
+              projectName: activeProjectDoc.project.name,
+              fromStatus: prevNode.status,
+              toStatus: updatedNode.status,
+            }).catch(() => {});
+
+            if (updatedNode.status === 'completed') {
+              logActivityEvent('task_completed', updatedNode.id, {
+                entityText: updatedNode.text,
+                projectId: activeProjectDoc.project.id,
+                projectName: activeProjectDoc.project.name,
+                metadata: { isAttentionProject: activeProjectDoc.project.isAttention },
+              }).catch(() => {});
+            }
+          }
+
           GCalendarSync.syncTaskStatusOrTextChange({
             taskId: updatedNode.id,
             taskText: updatedNode.text,
@@ -524,8 +1237,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }).catch((err) => console.warn('[AppContext] Calendar sync on updateNode status/text change failed:', err));
         }
       }
+
+      for (const parentId of affectedParentIds) {
+        const pNode = updatedNodes.find((n) => n.id === parentId);
+        if (pNode) {
+          if (pNode.status === 'completed') {
+            logActivityEvent('task_completed', pNode.id, {
+              entityText: pNode.text,
+              projectId: activeProjectDoc.project.id,
+              projectName: activeProjectDoc.project.name,
+              metadata: { isAttentionProject: activeProjectDoc.project.isAttention, cascaded: true },
+            }).catch(() => {});
+          } else if (pNode.status === 'in_progress') {
+            logActivityEvent('status_changed', pNode.id, {
+              entityText: pNode.text,
+              projectId: activeProjectDoc.project.id,
+              projectName: activeProjectDoc.project.name,
+              toStatus: 'in_progress',
+              metadata: { isAttentionProject: activeProjectDoc.project.isAttention, cascaded: true },
+            }).catch(() => {});
+          }
+
+          GCalendarSync.syncTaskStatusOrTextChange({
+            taskId: pNode.id,
+            taskText: pNode.text,
+            status: pNode.status,
+            dueDate: pNode.dueDate,
+            projectId: activeProjectDoc.project.id,
+            projectName: activeProjectDoc.project.name,
+          }).catch((err) => console.warn('[AppContext] Calendar sync on parent cascade failed:', err));
+        }
+      }
     },
-    [activeProjectDoc, selectedNode, saveProjectDoc]
+    [activeProjectDoc, selectedNode, saveProjectDoc, logActivityEvent, setSelectedNode, recordActiveNode]
   );
 
   const deleteNode = useCallback(
@@ -571,6 +1315,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (activeProjectDoc) {
         const node = activeProjectDoc.nodes.find((n) => n.id === nodeId);
         if (node) {
+          // Invariant check: cannot modify status away from in_progress if any child is in progress
+          const canModify = ProjectService.canModifyNodeStatus(activeProjectDoc.nodes, nodeId, status);
+          if (!canModify.allowed) {
+            console.warn(canModify.reason);
+            return;
+          }
+
           const updated = ProjectService.updateNodeStatus(node, status);
           await updateNode(updated);
           GCalendarSync.syncTaskStatusOrTextChange({
@@ -593,13 +1344,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (doc) {
           const targetNode = doc.nodes.find((n) => n.id === nodeId);
           if (targetNode) {
+            // Invariant check: cannot modify status away from in_progress if any child is in progress
+            const canModify = ProjectService.canModifyNodeStatus(doc.nodes, nodeId, status);
+            if (!canModify.allowed) {
+              console.warn(canModify.reason);
+              return;
+            }
+
             const updatedNode = ProjectService.updateNodeStatus(targetNode, status);
-            const updatedNodes = doc.nodes.map((n) => (n.id === nodeId ? updatedNode : n));
+            let updatedNodes = doc.nodes.map((n) => (n.id === nodeId ? updatedNode : n));
+            let affectedParentIds: string[] = [];
+
+            if (status === 'in_progress') {
+              const inProgressCascade = ProjectService.cascadeParentInProgress(updatedNodes, nodeId);
+              updatedNodes = inProgressCascade.updatedNodes;
+              affectedParentIds = inProgressCascade.inProgressParentIds;
+            } else if (status === 'completed') {
+              const cascadeResult = ProjectService.cascadeParentCompletion(updatedNodes, nodeId);
+              updatedNodes = cascadeResult.updatedNodes;
+              affectedParentIds = cascadeResult.completedParentIds;
+            }
+
+            const hierarchySync = ProjectService.syncParentStatusHierarchy(updatedNodes);
+            updatedNodes = hierarchySync.updatedNodes;
+            for (const id of hierarchySync.affectedParentIds) {
+              if (!affectedParentIds.includes(id)) {
+                affectedParentIds.push(id);
+              }
+            }
+
             const updatedDoc: ProjectDocument = { ...doc, nodes: updatedNodes };
             await storage.writeProject(updatedDoc);
             if (activeProjectDoc && activeProjectDoc.project.id === p.id) {
               setActiveProjectDoc(updatedDoc);
             }
+            recordActiveNode(updatedNode, doc.project.id).catch(() => {});
             GCalendarSync.syncTaskStatusOrTextChange({
               taskId: nodeId,
               taskText: targetNode.text,
@@ -608,13 +1387,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               projectId: doc.project.id,
               projectName: doc.project.name,
             }).catch(() => {});
+            for (const parentId of affectedParentIds) {
+              const pNode = updatedNodes.find((n) => n.id === parentId);
+              if (pNode) {
+                GCalendarSync.syncTaskStatusOrTextChange({
+                  taskId: pNode.id,
+                  taskText: pNode.text,
+                  status: pNode.status,
+                  dueDate: pNode.dueDate,
+                  projectId: doc.project.id,
+                  projectName: doc.project.name,
+                }).catch(() => {});
+              }
+            }
             await refreshData();
             return;
           }
         }
       }
     },
-    [activeProjectDoc, updateNode, storage, refreshData]
+    [activeProjectDoc, updateNode, storage, refreshData, recordActiveNode]
   );
 
   const moveNodeDate = useCallback(
@@ -786,6 +1578,101 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [activeProjectDoc, saveProjectDoc]
   );
 
+  const spliceNodeIntoEdge = useCallback(
+    async (nodeId: string, edgeId: string): Promise<{ success: boolean; error?: string }> => {
+      if (!activeProjectDoc) return { success: false, error: 'No active project' };
+
+      const edge = activeProjectDoc.edges.find((e) => e.id === edgeId);
+      if (!edge) return { success: false, error: 'Edge not found' };
+
+      const node = activeProjectDoc.nodes.find((n) => n.id === nodeId);
+      const fromNode = activeProjectDoc.nodes.find((n) => n.id === edge.fromNodeId);
+      const toNode = activeProjectDoc.nodes.find((n) => n.id === edge.toNodeId);
+      if (!node || !fromNode || !toNode) {
+        return { success: false, error: 'One or more connected nodes do not exist.' };
+      }
+
+      if (node.id === fromNode.id || node.id === toNode.id) {
+        return { success: false, error: 'Cannot insert node into its own edge.' };
+      }
+
+      // Check cycles without the old edge
+      const remainingEdges = activeProjectDoc.edges.filter((e) => e.id !== edgeId);
+      if (
+        GraphService.wouldCreateCycle(fromNode.id, node.id, remainingEdges) ||
+        GraphService.wouldCreateCycle(node.id, toNode.id, remainingEdges)
+      ) {
+        return { success: false, error: 'Connecting this node would create a circular dependency.' };
+      }
+
+      // Ensure chronological validity: clamp node.dueDate to [fromNode.dueDate, toNode.dueDate]
+      let updatedNode = node;
+      let newDueDate = node.dueDate;
+      if (isAfter(fromNode.dueDate, newDueDate)) {
+        newDueDate = fromNode.dueDate;
+      }
+      if (isAfter(newDueDate, toNode.dueDate)) {
+        newDueDate = toNode.dueDate;
+      }
+      if (newDueDate !== node.dueDate) {
+        updatedNode = {
+          ...node,
+          dueDate: newDueDate,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+
+      const updatedNodes = activeProjectDoc.nodes.map((n) =>
+        n.id === updatedNode.id ? updatedNode : n
+      );
+
+      const edge1Result = ProjectService.createEdge(
+        activeProjectDoc.project.id,
+        fromNode.id,
+        node.id,
+        updatedNodes,
+        remainingEdges
+      );
+      if (!edge1Result.success) {
+        return { success: false, error: edge1Result.error };
+      }
+
+      const edgesWithFirst = [...remainingEdges, edge1Result.edge];
+      const edge2Result = ProjectService.createEdge(
+        activeProjectDoc.project.id,
+        node.id,
+        toNode.id,
+        updatedNodes,
+        edgesWithFirst
+      );
+      if (!edge2Result.success) {
+        return { success: false, error: edge2Result.error };
+      }
+
+      const newEdges = [...edgesWithFirst, edge2Result.edge];
+
+      await saveProjectDoc({
+        ...activeProjectDoc,
+        nodes: updatedNodes,
+        edges: newEdges,
+      });
+
+      if (newDueDate !== node.dueDate) {
+        GCalendarSync.syncTaskDateChange({
+          taskId: node.id,
+          newDueDate,
+          taskText: node.text,
+          status: node.status,
+          projectId: activeProjectDoc.project.id,
+          projectName: activeProjectDoc.project.name,
+        }).catch((err) => console.warn('[AppContext] Calendar sync on spliceNodeIntoEdge failed:', err));
+      }
+
+      return { success: true };
+    },
+    [activeProjectDoc, saveProjectDoc]
+  );
+
   const decomposeNode = useCallback(
     async (parentNodeId: string, subtasks: { text: string; dueDate?: string }[]) => {
       if (!activeProjectDoc) return;
@@ -881,6 +1768,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const updated = [...standaloneTasks, newTask];
       await storage.writeStandaloneTasks(updated);
       setStandaloneTasks(updated);
+
+      logActivityEvent('task_created', newTask.id, {
+        entityText: newTask.text,
+      }).catch(() => {});
+
       if (targetDate) {
         GCalendarSync.syncTaskStatusOrTextChange({
           taskId: newTask.id,
@@ -892,7 +1784,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }).catch(() => {});
       }
     },
-    [standaloneTasks, storage]
+    [standaloneTasks, storage, logActivityEvent]
   );
 
   const updateStandaloneTask = useCallback(
@@ -922,6 +1814,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       let updated = standaloneTasks.map((t) =>
         t.id === taskId ? { ...t, status, updatedAt: new Date().toISOString() } : t
       );
+
+      if (targetTask && targetTask.status !== status) {
+        logActivityEvent('status_changed', taskId, {
+          entityText: targetTask.text,
+          fromStatus: targetTask.status,
+          toStatus: status,
+        }).catch(() => {});
+
+        if (status === 'completed') {
+          logActivityEvent('task_completed', taskId, {
+            entityText: targetTask.text,
+          }).catch(() => {});
+        }
+      }
 
       if (targetTask) {
         GCalendarSync.syncTaskStatusOrTextChange({
@@ -993,34 +1899,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [standaloneTasks, storage]
   );
 
-  const updatePreferences = useCallback(
-    async (partial: Partial<UserPreferences>) => {
-      const updated = { ...preferences, ...partial };
-      if (partial.theme) {
-        localStorage.setItem('graphdule_theme', partial.theme);
-        if (partial.theme === 'light') {
-          document.documentElement.classList.remove('dark');
-          document.documentElement.classList.add('light');
-        } else {
-          document.documentElement.classList.remove('light');
-          document.documentElement.classList.add('dark');
-        }
-      }
-      if (partial.dateFormat) {
-        localStorage.setItem('graphdule_date_format', partial.dateFormat);
-      }
-      setPreferences(updated);
-      await storage.writePreferences(updated);
-    },
-    [preferences, storage]
-  );
-
-  const toggleDateFormat = useCallback(async () => {
-    const nextFormat: DateDisplayFormat =
-      preferences.dateFormat === 'MMM_D_YYYY' ? 'DD/MM/YYYY' : 'MMM_D_YYYY';
-    await updatePreferences({ dateFormat: nextFormat });
-  }, [preferences.dateFormat, updatePreferences]);
-
   const exportActiveProject = useCallback(() => {
     if (activeProjectDoc) {
       JsonFileProvider.exportProjectToFile(activeProjectDoc);
@@ -1036,11 +1914,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     const standalones = await storage.readStandaloneTasks();
     const prefs = await storage.readPreferences();
+    const seeds = storage.readIdeaSeeds ? await storage.readIdeaSeeds() : [];
+    const log = storage.readActivityLog ? await storage.readActivityLog() : [];
 
     JsonFileProvider.exportFullWorkspaceBackup({
       projects: allDocs,
       standaloneTasks: standalones,
       preferences: prefs,
+      ideaSeeds: seeds,
+      activityLog: log,
     });
   }, [storage]);
 
@@ -1055,15 +1937,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // When importing projects from a file, remove the initial default sample project if present
       const existingProjects = await storage.listProjects();
-      const hasSampleProject = existingProjects.some((p) => p.id === 'sample_phd_paper');
+      const hasSampleProject = existingProjects.some((p) => p.id === DEFAULT_SAMPLE_PROJECT_ID);
       const importingSampleDirectly =
-        (payload.type === 'project' && payload.document.project.id === 'sample_phd_paper') ||
-        (payload.type !== 'project' && payload.projects.some((p) => p.project.id === 'sample_phd_paper'));
+        (payload.type === 'project' && payload.document.project.id === DEFAULT_SAMPLE_PROJECT_ID) ||
+        (payload.type !== 'project' && payload.projects.some((p) => p.project.id === DEFAULT_SAMPLE_PROJECT_ID));
 
       if (hasSampleProject && !importingSampleDirectly) {
-        await storage.deleteProject('sample_phd_paper');
+        await storage.deleteProject(DEFAULT_SAMPLE_PROJECT_ID);
         localStorage.setItem('graphdule_sample_deleted', 'true');
-        if (activeProjectDoc?.project.id === 'sample_phd_paper') {
+        if (activeProjectDoc?.project.id === DEFAULT_SAMPLE_PROJECT_ID) {
           setActiveProjectDoc(null);
         }
       }
@@ -1082,6 +1964,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const combined = [...existingFiltered, ...payload.standaloneTasks];
           await storage.writeStandaloneTasks(combined);
           setStandaloneTasks(combined);
+        }
+
+        if (payload.ideaSeeds && payload.ideaSeeds.length > 0 && storage.writeIdeaSeeds) {
+          const currentSeeds = storage.readIdeaSeeds ? await storage.readIdeaSeeds() : [];
+          const mergedIds = new Set(payload.ideaSeeds.map((s) => s.id));
+          const existingFiltered = currentSeeds.filter((s) => !mergedIds.has(s.id));
+          const combined = [...existingFiltered, ...payload.ideaSeeds];
+          await storage.writeIdeaSeeds(combined);
+          setIdeaSeeds(combined);
+        }
+
+        if (payload.activityLog && payload.activityLog.length > 0 && storage.appendActivityEvents) {
+          const currentLog = storage.readActivityLog ? await storage.readActivityLog() : [];
+          const currentLogIds = new Set(currentLog.map((e) => e.id));
+          const newEvents = payload.activityLog.filter((e) => !currentLogIds.has(e.id));
+          if (newEvents.length > 0) {
+            await storage.appendActivityEvents(newEvents);
+            setActivityLog((prev) => [...prev, ...newEvents]);
+          }
         }
 
         if (payload.preferences) {
@@ -1229,6 +2130,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         toggleDateFormat,
         selectedNode,
         setSelectedNode,
+        lastActiveNode,
+        goToLastActivityNode,
+        recordActiveNode,
         isNotesDrawerOpen,
         setIsNotesDrawerOpen,
         pendingCascade,
@@ -1254,6 +2158,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         applyPendingCascade,
         addEdge,
         deleteEdge,
+        spliceNodeIntoEdge,
         decomposeNode,
         addNote,
         deleteNote,
@@ -1261,6 +2166,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         projectSnapshots,
         createSnapshot,
         restoreSnapshot,
+        canUndo,
+        canRedo,
+        undo,
+        redo,
         addStandaloneTask,
         updateStandaloneTask,
         updateStandaloneTaskStatus,
@@ -1282,6 +2191,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         exportActiveProject,
         exportAllData,
         importProjectJson,
+        ideaSeeds,
+        addIdeaSeed,
+        updateIdeaSeed,
+        deleteIdeaSeed,
+        germinateIdeaSeed,
+        parkProject,
+        unparkProject,
+        maxAttentionProjects,
+        attentionProjects,
+        toggleProjectAttention,
+        swapProjectAttention,
+        activityLog,
+        logActivityEvent,
+        exportActivityLogPrompt,
+        clearActivityLog,
       }}
     >
       {children}

@@ -24,6 +24,9 @@ export interface OnboardingStep {
   title: string;
   description: string;
   target: string;
+  badge?: string;
+  highlights?: string[];
+  donate?: boolean;
 }
 
 export interface OnboardingConfig {

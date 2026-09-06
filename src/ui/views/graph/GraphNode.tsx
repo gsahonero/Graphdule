@@ -24,13 +24,15 @@ export interface GraphNodeData extends Record<string, unknown> {
   notesCount: number;
   subtaskCount: number;
   viewDensity?: 'auto' | 'compact' | 'full';
+  layoutDir?: 'LR' | 'TB';
   nodeScale?: number;
   totalNodesInScope?: number;
+  hasInProgressChild?: boolean;
   onStatusChange: (status: NodeStatus) => void;
   onTextChange: (newText: string) => void;
   onDateChange: (newDate: string) => void;
   onOpenNotes: () => void;
-  onOpenDecompose: () => void;
+  onOpenDecompose?: () => void;
   onDeleteNode?: () => void;
   onDrillDown?: () => void;
 }
@@ -43,8 +45,10 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
     notesCount,
     subtaskCount,
     viewDensity = 'auto',
+    layoutDir = 'LR',
     nodeScale = 1.0,
     totalNodesInScope = 4,
+    hasInProgressChild = false,
     onStatusChange,
     onTextChange,
     onDateChange,
@@ -56,6 +60,41 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
 
   const { zoom } = useViewport();
   const [isHovered, setIsHovered] = useState(false);
+  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleMouseEnter = () => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    setIsHovered(true);
+  };
+
+  const handleMouseLeave = () => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+    }
+    hoverTimeoutRef.current = setTimeout(() => {
+      setIsHovered(false);
+    }, 250);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleDecomposeAction = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onDrillDown) {
+      onDrillDown();
+    } else if (onOpenDecompose) {
+      onOpenDecompose();
+    }
+  };
 
   // In auto mode, keep full cards when there are few nodes (empty space) and only switch to circles if dense & zoomed out
   const isCompact =
@@ -103,6 +142,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
 
   const cycleStatus = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (hasInProgressChild) return;
     if (node.status === 'abandoned') {
       onStatusChange('planned');
       return;
@@ -115,6 +155,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
 
   const toggleAbandoned = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (hasInProgressChild) return;
     if (node.status === 'abandoned') {
       onStatusChange('planned');
     } else {
@@ -141,9 +182,10 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
   if (isCompact) {
     return (
       <div
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
         onDoubleClick={(e) => {
+          if (isEditing) return;
           e.stopPropagation();
           if (!isEGN && onDrillDown) {
             onDrillDown();
@@ -172,14 +214,18 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
             : node.status === 'abandoned'
             ? 'bg-rose-50/90 dark:bg-rose-950/80 border-2 border-rose-400 text-rose-900 dark:text-rose-100'
             : 'bg-white dark:bg-slate-900 border-2 border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-100'
-        } hover:scale-110 hover:shadow-xl hover:z-50 cursor-pointer`}
+        } hover:scale-105 hover:shadow-xl hover:z-50 cursor-pointer`}
         title={isEGN ? undefined : 'Double-click to open internal decomposed tasks'}
       >
-        {/* Target handle (Left) */}
+        {/* Target handle */}
         <Handle
           type="target"
-          position={Position.Left}
-          className="!m-0 !w-3.5 !h-3.5 !-left-[7px] !bg-slate-400 dark:!bg-slate-700 !border-2 !border-white dark:!border-slate-900 hover:!bg-emerald-400 hover:!scale-125 transition-all !cursor-crosshair"
+          position={layoutDir === 'TB' ? Position.Top : Position.Left}
+          className={`!m-0 !w-3.5 !h-3.5 ${
+            layoutDir === 'TB'
+              ? '!-top-[7px] !left-1/2 !-translate-x-1/2'
+              : '!-left-[7px] !top-1/2 !-translate-y-1/2'
+          } !bg-slate-400 dark:!bg-slate-700 !border-2 !border-white dark:!border-slate-900 hover:!bg-emerald-400 hover:!scale-125 transition-all !cursor-crosshair`}
         />
 
         {/* Subtask count badge */}
@@ -204,8 +250,31 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
           </span>
         )}
 
-        {/* Status / Goal Icon */}
-        <div className="shrink-0 mb-1">
+        {/* Status / Goal Icon (Direct Click to Cycle Status) */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!isEGN && !hasInProgressChild) {
+              cycleStatus(e);
+            }
+          }}
+          disabled={isEGN || hasInProgressChild}
+          className={`shrink-0 mb-1 p-1 rounded-full transition-transform ${
+            isEGN || hasInProgressChild
+              ? 'cursor-default'
+              : 'hover:scale-125 hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer active:scale-95'
+          }`}
+          title={
+            isEGN
+              ? 'End Goal Node'
+              : hasInProgressChild
+              ? 'In Progress: subtasks are in progress (status cannot be modified)'
+              : node.status === 'abandoned'
+              ? 'Click to reactivate task'
+              : 'Click to toggle status (Planned → In Progress → Completed)'
+          }
+        >
           {isEGN ? (
             <Target className="w-4.5 h-4.5 text-emerald-600 dark:text-emerald-400" />
           ) : node.status === 'completed' ? (
@@ -215,11 +284,11 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
           ) : node.status === 'abandoned' ? (
             <Ban className="w-4 h-4 text-rose-500 dark:text-rose-400" />
           ) : (
-            <Circle className="w-3.5 h-3.5 text-slate-400" />
+            <Circle className="w-3.5 h-3.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" />
           )}
-        </div>
+        </button>
 
-        {/* Task Title (Simplified & Legible) */}
+        {/* Task Title (Simplified & Legible on circle) */}
         <span
           className={`text-xs font-bold leading-tight line-clamp-3 px-1.5 break-words ${
             node.status === 'abandoned' ? 'line-through text-slate-400 dark:text-slate-500' : ''
@@ -228,54 +297,161 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
           {node.text}
         </span>
 
-        {/* Floating Rich Tooltip / Hover Card Popover */}
-        {(isHovered || isCalendarOpen) && (
+        {/* Floating Rich Tooltip / Hover Card Popover with Full Modification Capabilities */}
+        {(isHovered || isCalendarOpen || isEditing || selected) && (
           <div
-            className="nodrag nowheel nopan absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 shadow-2xl z-[999] pointer-events-auto text-left space-y-2.5 animate-in fade-in zoom-in-95 duration-150"
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
+            className="nodrag nowheel nopan absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-72 max-w-[calc(100vw-2rem)] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 shadow-2xl z-[999] pointer-events-auto text-left space-y-2.5 animate-in fade-in zoom-in-95 duration-150"
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            {/* Popover Header */}
+            {/* Invisible hover bridge to prevent cursor gap when moving between circle and popover */}
+            <div className="absolute -bottom-3 inset-x-0 h-4 bg-transparent pointer-events-auto" />
+
+            {/* Popover Header: Status Cycle, Abandon & Goal/Subtasks */}
             <div className="flex items-center justify-between gap-1.5">
-              <div className="flex items-center space-x-1.5">
-                {node.status === 'completed' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />}
-                {node.status === 'in_progress' && <Clock className="w-3.5 h-3.5 text-amber-500 animate-pulse" />}
-                {node.status === 'abandoned' && <Ban className="w-3.5 h-3.5 text-rose-500" />}
-                {node.status === 'planned' && <Circle className="w-3 h-3 text-slate-400" />}
-                <span className="text-xs font-bold capitalize text-slate-800 dark:text-slate-200">
-                  {node.status === 'in_progress' ? 'In Progress' : node.status}
-                </span>
+              <div className="flex items-center space-x-1">
+                {/* Main Status Cycle Toggle Button */}
+                {node.status === 'abandoned' ? (
+                  <button
+                    type="button"
+                    onClick={toggleAbandoned}
+                    disabled={hasInProgressChild}
+                    className={`flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-50 dark:bg-rose-500/20 hover:bg-rose-100 dark:hover:bg-rose-500/30 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-500/40 transition-colors ${
+                      hasInProgressChild ? 'cursor-default opacity-80' : 'cursor-pointer'
+                    }`}
+                    title="Click to un-abandon task"
+                  >
+                    <RotateCcw className="w-3 h-3 text-rose-500 dark:text-rose-400" />
+                    <span>Abandoned</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={cycleStatus}
+                    disabled={hasInProgressChild}
+                    className={`flex items-center space-x-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-all ${
+                      hasInProgressChild ? 'cursor-default opacity-90' : 'cursor-pointer'
+                    } ${
+                      node.status === 'completed'
+                        ? 'bg-emerald-50 dark:bg-emerald-500/20 hover:bg-emerald-100 dark:hover:bg-emerald-500/30 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-500/40'
+                        : node.status === 'in_progress'
+                        ? 'bg-amber-50 dark:bg-amber-500/20 hover:bg-amber-100 dark:hover:bg-amber-500/30 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-500/40'
+                        : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'
+                    }`}
+                    title={
+                      hasInProgressChild
+                        ? 'In Progress: subtasks are in progress (cannot be modified)'
+                        : 'Click to toggle status (Planned → In Progress → Completed)'
+                    }
+                  >
+                    {node.status === 'completed' && <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />}
+                    {node.status === 'in_progress' && <Clock className="w-3 h-3 text-amber-600 dark:text-amber-400 animate-pulse" />}
+                    {node.status === 'planned' && <Circle className="w-2.5 h-2.5 text-slate-400 dark:text-slate-400" />}
+                    <span className="capitalize">
+                      {node.status === 'in_progress' ? 'In Progress' : node.status}
+                    </span>
+                  </button>
+                )}
+
+                {/* Abandon shortcut icon button */}
+                {!hasInProgressChild && node.status !== 'abandoned' && (
+                  <button
+                    type="button"
+                    onClick={toggleAbandoned}
+                    className="p-1 rounded-full text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
+                    title="Mark task as abandoned"
+                  >
+                    <Ban className="w-3 h-3" />
+                  </button>
+                )}
               </div>
+
+              {/* Goal or Subtask count tag */}
               {isEGN ? (
-                <span className="text-[10px] uppercase font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/30">
-                  Goal
+                <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold tracking-wide uppercase border border-emerald-500/30 shrink-0">
+                  <Target className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                  <span>Goal</span>
                 </span>
               ) : subtaskCount > 0 ? (
-                <span className="text-[10px] text-blue-700 dark:text-blue-300 bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/30 font-medium">
-                  {subtaskCount} subtasks
-                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onDrillDown) onDrillDown();
+                  }}
+                  className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-blue-500/10 dark:bg-blue-500/20 hover:bg-blue-500/20 dark:hover:bg-blue-500/30 text-blue-700 dark:text-blue-300 text-[10px] font-medium border border-blue-500/30 shrink-0 transition-colors cursor-pointer"
+                  title="Click to view internal subtasks"
+                >
+                  <Layers className="w-3 h-3" />
+                  <span>{subtaskCount} subtasks</span>
+                </button>
               ) : null}
             </div>
 
-            {/* Popover Task Title */}
-            <div className="font-semibold text-slate-900 dark:text-slate-100 text-xs break-words">
-              {node.text}
+            {/* Popover Task Title - Inline Canvas Editable */}
+            <div className="font-semibold text-slate-800 dark:text-slate-100 text-xs leading-snug">
+              {isEditing ? (
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={editText}
+                  onChange={(e) => setEditText(e.target.value)}
+                  onBlur={handleFinishEditing}
+                  onKeyDown={handleKeyDown}
+                  onClick={(e) => e.stopPropagation()}
+                  onDoubleClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  className="w-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-semibold px-2 py-1 rounded border border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-400 text-xs shadow-inner"
+                />
+              ) : (
+                <div
+                  onDoubleClick={(e) => {
+                    if (isEGN) {
+                      e.stopPropagation();
+                      setIsEditing(true);
+                    }
+                  }}
+                  className="group/text flex items-center justify-between p-1 -m-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors"
+                  title={isEGN ? 'Double-click or click pencil to edit' : undefined}
+                >
+                  <span className={`break-words ${node.status === 'abandoned' ? 'line-through text-slate-400 dark:text-slate-500' : ''}`}>
+                    {node.text}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsEditing(true);
+                    }}
+                    className="p-1 rounded text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 opacity-100 sm:opacity-0 sm:group-hover/text:opacity-100 transition-opacity shrink-0 ml-1.5 cursor-pointer"
+                    title="Edit task name"
+                  >
+                    <Edit2 className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
             </div>
 
-            {/* Popover Info: Due Date & Notes */}
-            <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 relative">
-              <div className="relative">
+            {/* Popover Temporal due date & controls */}
+            <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800/80 text-[11px] relative">
+              {/* Due date picker with modern custom calendar popup */}
+              <div className={`relative nodrag nowheel nopan ${isCalendarOpen ? 'z-50' : ''}`}>
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     setIsCalendarOpen((prev) => !prev);
                   }}
-                  className="flex items-center space-x-1.5 px-2 py-0.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors cursor-pointer group/cal"
-                  title="Click to change date with modern calendar"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  className="flex items-center space-x-1.5 px-2 py-0.5 -mx-1 rounded-md text-slate-600 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-colors cursor-pointer group/date"
+                  title="Click to open calendar and set due date"
                 >
-                  <Calendar className="w-3.5 h-3.5 text-slate-400 group-hover/cal:text-emerald-500 transition-colors" />
-                  <span className="font-mono text-[10px] font-medium">{formatDateDisplay(node.dueDate)}</span>
+                  <Calendar className="w-3.5 h-3.5 text-slate-400 group-hover/date:text-emerald-500 transition-colors shrink-0" />
+                  <span className="font-mono text-[10px] font-medium">
+                    {formatDateDisplay(node.dueDate)}
+                  </span>
                 </button>
 
                 {isCalendarOpen && (
@@ -288,39 +464,92 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
                   />
                 )}
               </div>
-              {notesCount > 0 && (
-                <span className="text-emerald-600 dark:text-emerald-400 font-medium text-[10px]">
-                  {notesCount} notes
-                </span>
-              )}
+
+              {/* Action icons */}
+              <div className="flex items-center space-x-1">
+                {/* Notes button */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenNotes();
+                  }}
+                  className="flex items-center space-x-0.5 p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors cursor-pointer"
+                  title="Notes"
+                >
+                  <StickyNote className="w-3.5 h-3.5" />
+                  {notesCount > 0 && (
+                    <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 font-semibold">{notesCount}</span>
+                  )}
+                </button>
+
+                {/* Decompose button (Disabled for End Goal Node) */}
+                {!isEGN && (
+                  <button
+                    type="button"
+                    onClick={handleDecomposeAction}
+                    className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors cursor-pointer"
+                    title="Decompose Task (Open subtasks)"
+                  >
+                    <Split className="w-3.5 h-3.5" />
+                  </button>
+                )}
+
+                {/* Delete node button */}
+                {!isEGN && onDeleteNode && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteNode();
+                    }}
+                    className="p-1 rounded hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 transition-colors cursor-pointer"
+                    title="Delete Task"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
 
-            {/* Popover Action Shortcuts */}
-            <div className="pt-1.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[10px] text-slate-400">
-              {!isEGN && (
-                <span className="text-blue-600 dark:text-blue-400 font-medium">
-                  Double-click to expand
-                </span>
-              )}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onOpenNotes();
-                }}
-                className="text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer ml-auto"
-              >
-                View Notes →
-              </button>
-            </div>
+            {/* Quick drill-down navigation link */}
+            {!isEGN && (
+              <div className="pt-1.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[10px] text-slate-400">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onDrillDown) onDrillDown();
+                  }}
+                  className="text-blue-600 dark:text-blue-400 hover:underline cursor-pointer font-medium"
+                >
+                  {subtaskCount > 0 ? `Open subtasks (${subtaskCount}) →` : 'Decompose subtasks →'}
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenNotes();
+                  }}
+                  className="text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer ml-auto"
+                >
+                  View Notes ({notesCount}) →
+                </button>
+              </div>
+            )}
           </div>
         )}
 
-        {/* Source handle (Right) */}
+        {/* Source handle */}
         {!isEGN && (
           <Handle
             type="source"
-            position={Position.Right}
-            className="!m-0 !w-3 !h-3 !-right-[6px] !bg-slate-400 dark:!bg-slate-700 !border-2 !border-white dark:!border-slate-900 hover:!bg-emerald-400 hover:!scale-125 transition-all !cursor-crosshair"
+            position={layoutDir === 'TB' ? Position.Bottom : Position.Right}
+            className={`!m-0 !w-3 !h-3 ${
+              layoutDir === 'TB'
+                ? '!-bottom-[6px] !left-1/2 !-translate-x-1/2'
+                : '!-right-[6px] !top-1/2 !-translate-y-1/2'
+            } !bg-slate-400 dark:!bg-slate-700 !border-2 !border-white dark:!border-slate-900 hover:!bg-emerald-400 hover:!scale-125 transition-all !cursor-crosshair`}
           />
         )}
       </div>
@@ -330,8 +559,9 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
   return (
     <div
       onDoubleClick={(e) => {
+        if (isEditing) return;
         e.stopPropagation();
-        if (!isEGN && onDrillDown && !isEditing) {
+        if (!isEGN && onDrillDown) {
           onDrillDown();
         }
       }}
@@ -339,11 +569,15 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
       className={`relative w-68 rounded-2xl border p-3.5 transition-all text-xs flex flex-col gap-2.5 shadow-sm dark:shadow-xl select-none ${getStatusBorder()}`}
       title={isEGN ? undefined : 'Double-click to open internal decomposed tasks'}
     >
-      {/* Target handle (Left - incoming dependency) */}
+      {/* Target handle (incoming dependency) */}
       <Handle
         type="target"
-        position={Position.Left}
-        className="!m-0 !w-3.5 !h-3.5 !-left-[7px] !bg-slate-400 dark:!bg-slate-700 !border-2 !border-white dark:!border-slate-900 hover:!bg-emerald-400 hover:!scale-125 transition-all !cursor-crosshair"
+        position={layoutDir === 'TB' ? Position.Top : Position.Left}
+        className={`!m-0 !w-3.5 !h-3.5 ${
+          layoutDir === 'TB'
+            ? '!-top-[7px] !left-1/2 !-translate-x-1/2'
+            : '!-left-[7px] !top-1/2 !-translate-y-1/2'
+        } !bg-slate-400 dark:!bg-slate-700 !border-2 !border-white dark:!border-slate-900 hover:!bg-emerald-400 hover:!scale-125 transition-all !cursor-crosshair`}
       />
 
       {/* Header: Status Toggle and EGN / Subtasks indicator */}
@@ -353,8 +587,15 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
           {node.status === 'abandoned' ? (
             <button
               onClick={toggleAbandoned}
-              className="flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-50 dark:bg-rose-500/20 hover:bg-rose-100 dark:hover:bg-rose-500/30 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-500/40 transition-colors cursor-pointer"
-              title="Click to un-abandon task"
+              disabled={hasInProgressChild}
+              className={`flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-50 dark:bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-500/40 transition-colors ${
+                hasInProgressChild ? 'cursor-not-allowed opacity-90' : 'hover:bg-rose-100 dark:hover:bg-rose-500/30 cursor-pointer'
+              }`}
+              title={
+                hasInProgressChild
+                  ? 'In Progress: subtasks are in progress (status cannot be modified)'
+                  : 'Click to un-abandon task'
+              }
             >
               <RotateCcw className="w-3 h-3 text-rose-500 dark:text-rose-400" />
               <span>Abandoned</span>
@@ -362,14 +603,23 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
           ) : (
             <button
               onClick={cycleStatus}
-              className={`flex items-center space-x-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-all cursor-pointer ${
+              disabled={hasInProgressChild}
+              className={`flex items-center space-x-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-all ${
+                hasInProgressChild
+                  ? 'cursor-not-allowed opacity-90'
+                  : 'cursor-pointer'
+              } ${
                 node.status === 'completed'
                   ? 'bg-emerald-50 dark:bg-emerald-500/20 hover:bg-emerald-100 dark:hover:bg-emerald-500/30 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-500/40'
                   : node.status === 'in_progress'
                   ? 'bg-amber-50 dark:bg-amber-500/20 hover:bg-amber-100 dark:hover:bg-amber-500/30 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-500/40'
                   : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'
               }`}
-              title="Click to toggle status (Planned → In Progress → Completed)"
+              title={
+                hasInProgressChild
+                  ? 'In Progress: subtasks are in progress (status cannot be modified)'
+                  : 'Click to toggle status (Planned → In Progress → Completed)'
+              }
             >
               {node.status === 'completed' && <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />}
               {node.status === 'in_progress' && <Clock className="w-3 h-3 text-amber-600 dark:text-amber-400 animate-pulse" />}
@@ -381,7 +631,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
           )}
 
           {/* Abandon shortcut icon button */}
-          {node.status !== 'abandoned' && (
+          {!hasInProgressChild && node.status !== 'abandoned' && (
             <button
               onClick={toggleAbandoned}
               className="p-1 rounded-full text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
@@ -423,18 +673,36 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
             onChange={(e) => setEditText(e.target.value)}
             onBlur={handleFinishEditing}
             onKeyDown={handleKeyDown}
+            onClick={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
             className="w-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-semibold px-2 py-1 rounded border border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-400 text-xs shadow-inner"
           />
         ) : (
           <div
-            onClick={() => setIsEditing(true)}
-            className="group/text flex items-center justify-between cursor-text p-1 -m-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors"
-            title="Click to edit task name"
+            onDoubleClick={(e) => {
+              if (isEGN) {
+                e.stopPropagation();
+                setIsEditing(true);
+              }
+            }}
+            className="group/text flex items-center justify-between p-1 -m-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors"
+            title={isEGN ? 'Double-click or click pencil to edit' : undefined}
           >
             <span className={`break-words ${node.status === 'abandoned' ? 'line-through text-slate-400 dark:text-slate-500' : ''}`}>
               {node.text}
             </span>
-            <Edit2 className="w-3 h-3 text-slate-400 dark:text-slate-500 opacity-0 group-hover/text:opacity-100 transition-opacity shrink-0 ml-1.5" />
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsEditing(true);
+              }}
+              className="p-1 rounded text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 opacity-100 sm:opacity-0 sm:group-hover/text:opacity-100 transition-opacity shrink-0 ml-1.5 cursor-pointer"
+              title="Edit task name"
+            >
+              <Edit2 className="w-3 h-3" />
+            </button>
           </div>
         )}
       </div>
@@ -442,7 +710,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
       {/* Temporal due date & controls */}
       <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800/80 text-[11px] relative">
         {/* Due date picker with modern custom calendar popup */}
-        <div className="relative nodrag nowheel nopan">
+        <div className={`relative nodrag nowheel nopan ${isCalendarOpen ? 'z-50' : ''}`}>
           <button
             type="button"
             onClick={(e) => {
@@ -490,12 +758,10 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
           {/* Decompose button (Disabled for End Goal Node) */}
           {!isEGN && (
             <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenDecompose();
-              }}
+              type="button"
+              onClick={handleDecomposeAction}
               className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors cursor-pointer"
-              title="Decompose Task"
+              title="Decompose Task (Open subtasks)"
             >
               <Split className="w-3.5 h-3.5" />
             </button>
@@ -517,12 +783,16 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
         </div>
       </div>
 
-      {/* Source handle (Right - outgoing dependency). Not rendered for End Goal Node */}
+      {/* Source handle (outgoing dependency). Not rendered for End Goal Node */}
       {!isEGN && (
         <Handle
           type="source"
-          position={Position.Right}
-          className="!m-0 !w-3.5 !h-3.5 !-right-[7px] !bg-slate-400 dark:!bg-slate-700 !border-2 !border-white dark:!border-slate-900 hover:!bg-emerald-400 hover:!scale-125 transition-all !cursor-crosshair"
+          position={layoutDir === 'TB' ? Position.Bottom : Position.Right}
+          className={`!m-0 !w-3.5 !h-3.5 ${
+            layoutDir === 'TB'
+              ? '!-bottom-[7px] !left-1/2 !-translate-x-1/2'
+              : '!-right-[7px] !top-1/2 !-translate-y-1/2'
+          } !bg-slate-400 dark:!bg-slate-700 !border-2 !border-white dark:!border-slate-900 hover:!bg-emerald-400 hover:!scale-125 transition-all !cursor-crosshair`}
         />
       )}
     </div>

@@ -14,6 +14,7 @@ interface RecurrencePickerProps {
   baseDate: string; // YYYY-MM-DD
   onChange: (rule: RecurrenceRule | undefined) => void;
   onClose?: () => void;
+  onOpenChange?: (isOpen: boolean) => void;
   buttonVariant?: 'icon' | 'badge' | 'button';
   align?: 'left' | 'right';
   position?: 'bottom' | 'top';
@@ -24,12 +25,22 @@ export const RecurrencePicker: React.FC<RecurrencePickerProps> = ({
   baseDate,
   onChange,
   onClose,
+  onOpenChange,
   buttonVariant = 'button',
   align = 'right',
   position = 'bottom',
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isCustomMode, setIsCustomMode] = useState(false);
+
+  const handleSetIsOpen = (valOrFn: boolean | ((prev: boolean) => boolean)) => {
+    setIsOpen((prev) => {
+      const next = typeof valOrFn === 'function' ? valOrFn(prev) : valOrFn;
+      if (onOpenChange) onOpenChange(next);
+      if (!next && onClose) onClose();
+      return next;
+    });
+  };
 
   // Custom Form State
   const baseD = parseDate(baseDate);
@@ -70,8 +81,7 @@ export const RecurrencePicker: React.FC<RecurrencePickerProps> = ({
         buttonRef.current &&
         !buttonRef.current.contains(event.target as Node)
       ) {
-        setIsOpen(false);
-        if (onClose) onClose();
+        handleSetIsOpen(false);
       }
     }
     if (isOpen) {
@@ -101,14 +111,12 @@ export const RecurrencePicker: React.FC<RecurrencePickerProps> = ({
 
   const handleApplyPreset = (rule: RecurrenceRule | null) => {
     onChange(rule || undefined);
-    setIsOpen(false);
-    if (onClose) onClose();
+    handleSetIsOpen(false);
   };
 
   const handleApplyCustom = () => {
     onChange(currentCustomRule);
-    setIsOpen(false);
-    if (onClose) onClose();
+    handleSetIsOpen(false);
   };
 
   const handleToggleDayOfWeek = (dayIndex: number) => {
@@ -144,7 +152,10 @@ export const RecurrencePicker: React.FC<RecurrencePickerProps> = ({
   const displayText = value ? RecurrenceService.formatRecurrenceRule(value) : 'Repeat';
 
   return (
-    <div className="relative inline-block text-left">
+    <div
+      className={`relative inline-block text-left ${isOpen ? 'z-50' : ''}`}
+      style={isOpen ? { zIndex: 50 } : undefined}
+    >
       {/* Trigger Button Variants */}
       {buttonVariant === 'icon' && (
         <button
@@ -152,7 +163,7 @@ export const RecurrencePicker: React.FC<RecurrencePickerProps> = ({
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            setIsOpen((prev) => !prev);
+            handleSetIsOpen((prev) => !prev);
           }}
           className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
             value
@@ -171,9 +182,9 @@ export const RecurrencePicker: React.FC<RecurrencePickerProps> = ({
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            setIsOpen((prev) => !prev);
+            handleSetIsOpen((prev) => !prev);
           }}
-          className="inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-[10px] font-medium bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800/60 hover:bg-teal-100 dark:hover:bg-teal-900/50 transition-colors cursor-pointer group/badge"
+          className="inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-xs font-medium bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800/60 hover:bg-teal-100 dark:hover:bg-teal-900/50 transition-colors cursor-pointer group/badge"
           title="Click to edit recurrence pattern"
         >
           <Repeat className="w-3 h-3 text-teal-500 shrink-0" />
@@ -187,7 +198,7 @@ export const RecurrencePicker: React.FC<RecurrencePickerProps> = ({
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            setIsOpen((prev) => !prev);
+            handleSetIsOpen((prev) => !prev);
           }}
           className={`flex items-center space-x-1.5 px-2.5 py-1 text-xs font-medium rounded-lg border transition-all cursor-pointer shadow-xs ${
             value
@@ -207,9 +218,10 @@ export const RecurrencePicker: React.FC<RecurrencePickerProps> = ({
         <div
           ref={popoverRef}
           onClick={(e) => e.stopPropagation()}
+          style={{ zIndex: 9999 }}
           className={`absolute ${position === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'} ${
             align === 'right' ? 'right-0' : 'left-0'
-          } z-50 w-72 sm:w-80 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-3 text-slate-900 dark:text-slate-100 text-xs animate-in fade-in zoom-in-95 duration-150`}
+          } z-[9999] w-72 sm:w-80 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-3 text-slate-900 dark:text-slate-100 text-xs animate-in fade-in zoom-in-95 duration-150`}
         >
           {/* Header */}
           <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100 dark:border-slate-800">
@@ -223,8 +235,7 @@ export const RecurrencePicker: React.FC<RecurrencePickerProps> = ({
             </div>
             <button
               onClick={() => {
-                setIsOpen(false);
-                if (onClose) onClose();
+                handleSetIsOpen(false);
               }}
               className="p-1 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
             >

@@ -7,11 +7,13 @@ import {
   StandaloneTask,
   UserPreferences,
   ProjectSummary,
+  IdeaSeed,
+  ActivityEvent,
 } from '../../domain/models/types';
 import { ProjectService } from '../../domain/services/project-service';
 
 const DB_NAME = 'graphdule_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export class IndexedDBProvider implements IStorageProvider {
   private db: IDBPDatabase | null = null;
@@ -41,6 +43,12 @@ export class IndexedDBProvider implements IStorageProvider {
         if (!db.objectStoreNames.contains('snapshots')) {
           const snapshotStore = db.createObjectStore('snapshots', { keyPath: 'id' });
           snapshotStore.createIndex('by_project', 'projectId');
+        }
+        if (!db.objectStoreNames.contains('idea_seeds')) {
+          db.createObjectStore('idea_seeds', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('activity_log')) {
+          db.createObjectStore('activity_log', { keyPath: 'id' });
         }
       },
     });
@@ -143,5 +151,47 @@ export class IndexedDBProvider implements IStorageProvider {
   public async writeSnapshot(snapshot: ProjectSnapshot): Promise<void> {
     const db = await this.getDB();
     await db.put('snapshots', snapshot);
+  }
+
+  public async readIdeaSeeds(): Promise<IdeaSeed[]> {
+    const db = await this.getDB();
+    const seeds: IdeaSeed[] = await db.getAll('idea_seeds');
+    return seeds.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  public async writeIdeaSeeds(seeds: IdeaSeed[]): Promise<void> {
+    const db = await this.getDB();
+    const tx = db.transaction('idea_seeds', 'readwrite');
+    await tx.store.clear();
+    for (const s of seeds) {
+      await tx.store.put(s);
+    }
+    await tx.done;
+  }
+
+  public async deleteIdeaSeed(seedId: string): Promise<void> {
+    const db = await this.getDB();
+    await db.delete('idea_seeds', seedId);
+  }
+
+  public async readActivityLog(): Promise<ActivityEvent[]> {
+    const db = await this.getDB();
+    const events: ActivityEvent[] = await db.getAll('activity_log');
+    return events.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  }
+
+  public async appendActivityEvents(events: ActivityEvent[]): Promise<void> {
+    if (events.length === 0) return;
+    const db = await this.getDB();
+    const tx = db.transaction('activity_log', 'readwrite');
+    for (const e of events) {
+      await tx.store.put(e);
+    }
+    await tx.done;
+  }
+
+  public async clearActivityLog(): Promise<void> {
+    const db = await this.getDB();
+    await db.clear('activity_log');
   }
 }

@@ -210,14 +210,15 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
       ref={popoverRef}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
-      className={`nodrag nowheel nopan absolute ${positionClass} ${alignClass} w-[270px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-3 z-[9999] select-none animate-in fade-in zoom-in-95 duration-150 ring-1 ring-slate-950/5 text-left`}
+      style={{ zIndex: 9999 }}
+      className={`nodrag nowheel nopan absolute ${positionClass} ${alignClass} w-[270px] max-w-[calc(100vw-1.5rem)] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-3 z-[9999] select-none animate-in fade-in zoom-in-95 duration-150 ring-1 ring-slate-950/5 text-left`}
     >
       {/* Month & Year Navigation Header */}
       <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100 dark:border-slate-800">
         <button
           type="button"
           onClick={handlePrevMonth}
-          className="p-1 rounded-lg text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+          className="p-1.5 sm:p-1 rounded-lg text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
           title="Previous month"
         >
           <ChevronLeft className="w-4 h-4" />
@@ -231,7 +232,7 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
         <button
           type="button"
           onClick={handleNextMonth}
-          className="p-1 rounded-lg text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+          className="p-1.5 sm:p-1 rounded-lg text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
           title="Next month"
         >
           <ChevronRight className="w-4 h-4" />
@@ -241,7 +242,7 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
       {/* Weekday Labels Header */}
       <div className="grid grid-cols-7 gap-1 text-center mb-1">
         {DAYS_OF_WEEK.map((day) => (
-          <span key={day} className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider py-0.5">
+          <span key={day} className="text-[11px] sm:text-xs font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider py-0.5">
             {day}
           </span>
         ))}
@@ -256,7 +257,7 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
               key={`${cell.dateString}-${idx}`}
               type="button"
               onClick={(e) => handleSelectDay(cell.dayNum, cell.monthType, e)}
-              className={`h-7 w-7 mx-auto rounded-lg text-xs font-medium flex items-center justify-center transition-all cursor-pointer relative ${
+              className={`h-8 w-8 sm:h-7 sm:w-7 mx-auto rounded-lg text-xs font-medium flex items-center justify-center transition-all cursor-pointer relative ${
                 cell.isSelected
                   ? 'bg-emerald-600 text-white font-bold shadow-md shadow-emerald-600/30 scale-105'
                   : cell.isToday
@@ -280,21 +281,21 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
         <button
           type="button"
           onClick={(e) => handleSetQuickDate(0, e)}
-          className="px-2 py-0.5 rounded-md text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 font-semibold transition-colors cursor-pointer"
+          className="px-2.5 py-1 sm:px-2 sm:py-0.5 rounded-lg text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 font-semibold transition-colors cursor-pointer"
         >
           Today
         </button>
         <button
           type="button"
           onClick={(e) => handleSetQuickDate(1, e)}
-          className="px-2 py-0.5 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+          className="px-2.5 py-1 sm:px-2 sm:py-0.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
         >
           Tomorrow
         </button>
         <button
           type="button"
           onClick={(e) => handleSetQuickDate(7, e)}
-          className="px-2 py-0.5 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+          className="px-2.5 py-1 sm:px-2 sm:py-0.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
         >
           +1 Week
         </button>

@@ -1,8 +1,9 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
+  useUpdateNodeInternals,
   useViewport,
   Background,
   Controls,
@@ -20,7 +21,7 @@ import '@xyflow/react/dist/style.css';
 
 import { useApp } from '../../context/AppContext';
 import { GraphNode, GraphNodeData } from './GraphNode';
-import { getLayoutedElements, isValidCoordinate, NODE_WIDTH, NODE_HEIGHT } from './layout';
+import { getLayoutedElements, isValidCoordinate, NODE_WIDTH, NODE_HEIGHT, COMPACT_NODE_SIZE } from './layout';
 import { Node, NodeStatus } from '../../../domain/models/types';
 import { getTodayString, addDays } from '../../../domain/utils/date';
 import {
@@ -38,6 +39,8 @@ import {
   CircleDot,
   LayoutGrid,
   Maximize2,
+  Undo2,
+  Redo2,
 } from 'lucide-react';
 
 const nodeTypes = {
@@ -100,17 +103,42 @@ const GraphCanvas: React.FC = () => {
     moveNodeDate,
     addEdge,
     deleteEdge,
+    spliceNodeIntoEdge,
     decomposeNode,
     createSnapshot,
+    selectedNode,
     setSelectedNode,
     setIsNotesDrawerOpen,
     syncAtomicInheritance,
+    canUndo,
+    canRedo,
+    undo,
+    redo,
   } = useApp();
 
   const { screenToFlowPosition, fitView } = useReactFlow();
+  const updateNodeInternals = useUpdateNodeInternals();
+
+  // Highlighted edge when dragging node over an existing connection
+  const [targetEdgeForDropId, setTargetEdgeForDropId] = useState<string | null>(null);
 
   // Recursive Decomposition Scope Navigation (Scope Breadcrumb Stack)
-  const [scopeStack, setScopeStack] = useState<Node[]>([]);
+  const [scopeStack, setScopeStack] = useState<Node[]>(() => {
+    if (selectedNode && activeProjectDoc && selectedNode.projectId === activeProjectDoc.project.id && selectedNode.parentNodeId) {
+      const chain: Node[] = [];
+      let curr: string | null | undefined = selectedNode.parentNodeId;
+      const visited = new Set<string>();
+      while (curr && !visited.has(curr)) {
+        visited.add(curr);
+        const parent = activeProjectDoc.nodes.find((n) => n.id === curr);
+        if (!parent) break;
+        chain.unshift(parent);
+        curr = parent.parentNodeId;
+      }
+      return chain;
+    }
+    return [];
+  });
   const currentParentNode = scopeStack.length > 0 ? scopeStack[scopeStack.length - 1] : null;
 
   // View density mode: 'auto' (LOD based on zoom), 'compact' (simplified circles), 'full' (full cards)
@@ -120,8 +148,17 @@ const GraphCanvas: React.FC = () => {
   const [nodeScale, setNodeScale] = useState<number>(1.0);
 
   // Layout orientation: 'LR' (Left to Right) vs 'TB' (Top to Bottom)
-  const [layoutDir, setLayoutDir] = useState<'LR' | 'TB'>('LR');
+  // On mobile portrait (< 768px and height >= width), default to 'TB' (Top to Bottom)
+  const [layoutDir, setLayoutDir] = useState<'LR' | 'TB'>(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      return window.innerHeight >= window.innerWidth ? 'TB' : 'LR';
+    }
+    return 'LR';
+  });
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const lastFocusedNodeIdRef = useRef<string | null>(null);
+  const userManualDirRef = useRef<boolean>(false);
+  const isInitialFocusDoneRef = useRef<boolean>(false);
 
   // PowerPoint-style Smart Alignment Guides
   const [guideLines, setGuideLines] = useState<{
@@ -170,6 +207,7 @@ const GraphCanvas: React.FC = () => {
   const [rfNodes, setRfNodes] = useState<RFNode[]>(initialElements.rfNodes);
   const [rfEdges, setRfEdges] = useState<RFEdge[]>(initialElements.rfEdges);
 
+  // Synchronize React Flow local nodes and edges when scoped items or layout changes
   React.useEffect(() => {
     const layout = getLayoutedElements(
       scopedNodes,
@@ -181,23 +219,121 @@ const GraphCanvas: React.FC = () => {
     );
     setRfNodes(layout.rfNodes);
     setRfEdges(layout.rfEdges);
-  }, [scopedNodes, scopedEdges, layoutDir, viewDensity, nodeScale]);
+    scopedNodes.forEach((n) => updateNodeInternals(n.id));
+  }, [scopedNodes, scopedEdges, layoutDir, viewDensity, nodeScale, updateNodeInternals]);
+
+  // Synchronize scopeStack and focus view when selectedNode changes externally (e.g., from My Day or search)
+  React.useEffect(() => {
+    if (!selectedNode || selectedNode.projectId !== project.id) {
+      lastFocusedNodeIdRef.current = null;
+      return;
+    }
+
+    // 1. If the selected node is outside current scope, navigate scopeStack to its hierarchy level
+    const currentParentId = scopeStack[scopeStack.length - 1]?.id ?? null;
+    const isAlreadyInScope = (selectedNode.parentNodeId ?? null) === currentParentId;
+
+    if (!isAlreadyInScope) {
+      const ancestorChain: Node[] = [];
+      let currParentId = selectedNode.parentNodeId;
+      const visited = new Set<string>();
+      while (currParentId && !visited.has(currParentId)) {
+        visited.add(currParentId);
+        const parent = nodes.find((n) => n.id === currParentId);
+        if (!parent) break;
+        ancestorChain.unshift(parent);
+        currParentId = parent.parentNodeId;
+      }
+
+      setScopeStack(ancestorChain);
+    }
+
+    // 2. Center/focus view on the selected node strictly ONCE per selected node transition
+    if (lastFocusedNodeIdRef.current !== selectedNode.id) {
+      lastFocusedNodeIdRef.current = selectedNode.id;
+      const timer = setTimeout(() => {
+        fitView({
+          nodes: [{ id: selectedNode.id }],
+          duration: 350,
+          maxZoom: 1.15,
+          padding: 0.4,
+        });
+      }, 150);
+
+      return () => clearTimeout(timer);
+    }
+  }, [selectedNode?.id, project.id, nodes, fitView]);
+
+  // Determine the optimal node to focus on mobile view:
+  // 1. Prioritize active selectedNode if in scope
+  // 2. Prioritize the last in-progress node
+  // 3. Fallback to the last added / created node in current scope
+  const getInitialFocusNode = useCallback(
+    (nodesList: readonly Node[]): Node | undefined => {
+      if (nodesList.length === 0) return undefined;
+      if (selectedNode) {
+        const matched = nodesList.find((n) => n.id === selectedNode.id);
+        if (matched) return matched;
+      }
+      const inProgressNodes = nodesList.filter((n) => n.status === 'in_progress');
+      if (inProgressNodes.length > 0) {
+        return inProgressNodes[inProgressNodes.length - 1];
+      }
+      return nodesList[nodesList.length - 1];
+    },
+    [selectedNode]
+  );
+
+  // Focus camera: on mobile, centers on focal node at 100% zoom (1.0) without breaking canvas; on desktop, fits full graph
+  const focusSmartView = useCallback(
+    (nodesList: readonly Node[] = scopedNodes) => {
+      const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+      if (isMobile) {
+        const target = getInitialFocusNode(nodesList);
+        if (target) {
+          fitView({
+            nodes: [{ id: target.id }],
+            duration: 350,
+            maxZoom: 1.0,
+            minZoom: 0.9,
+            padding: 0.35,
+          });
+          return;
+        }
+      }
+      fitView({
+        padding: 0.25,
+        duration: 350,
+        maxZoom: 1.15,
+        minZoom: 0.2,
+      });
+    },
+    [fitView, getInitialFocusNode, scopedNodes]
+  );
 
   // Drill-down navigation handlers
   const handleDrillDown = useCallback(
     (nodeToOpen: Node) => {
       if (nodeToOpen.id === project.endGoalNodeId) return;
-      setScopeStack((prev) => [...prev, nodeToOpen]);
+      setSelectedNode(null);
+      lastFocusedNodeIdRef.current = null;
+      setScopeStack((prev) => {
+        if (prev.length > 0 && prev[prev.length - 1].id === nodeToOpen.id) return prev;
+        return [...prev, nodeToOpen];
+      });
       setSelectedEdgeId(null);
+      const childNodes = nodes.filter((n) => n.parentNodeId === nodeToOpen.id);
       setTimeout(() => {
-        fitView({ padding: 0.25, duration: 350 });
-      }, 50);
+        focusSmartView(childNodes);
+      }, 60);
     },
-    [project.endGoalNodeId, fitView]
+    [project.endGoalNodeId, nodes, focusSmartView, setSelectedNode]
   );
 
   const handleNavigateToBreadcrumb = useCallback(
     async (index: number) => {
+      setSelectedNode(null);
+      lastFocusedNodeIdRef.current = null;
       setSelectedEdgeId(null);
       // Automatically trigger due date computation when shifting to a superior level
       await syncAtomicInheritance();
@@ -206,22 +342,28 @@ const GraphCanvas: React.FC = () => {
       } else {
         setScopeStack((prev) => prev.slice(0, index + 1));
       }
+      const targetParentId = index === -1 ? null : scopeStack[index]?.id ?? null;
+      const targetNodes = nodes.filter((n) => n.parentNodeId === targetParentId);
       setTimeout(() => {
-        fitView({ padding: 0.25, duration: 350 });
-      }, 50);
+        focusSmartView(targetNodes);
+      }, 60);
     },
-    [fitView, syncAtomicInheritance]
+    [nodes, scopeStack, focusSmartView, syncAtomicInheritance, setSelectedNode]
   );
 
   const handleGoUpOneLevel = useCallback(async () => {
+    setSelectedNode(null);
+    lastFocusedNodeIdRef.current = null;
     setSelectedEdgeId(null);
     // Automatically trigger due date computation when shifting to immediately superior level
     await syncAtomicInheritance();
     setScopeStack((prev) => prev.slice(0, prev.length - 1));
+    const parentTarget = scopeStack.length > 1 ? scopeStack[scopeStack.length - 2].id : null;
+    const targetNodes = nodes.filter((n) => n.parentNodeId === parentTarget);
     setTimeout(() => {
-      fitView({ padding: 0.25, duration: 350 });
-    }, 50);
-  }, [fitView, syncAtomicInheritance]);
+      focusSmartView(targetNodes);
+    }, 60);
+  }, [nodes, scopeStack, focusSmartView, syncAtomicInheritance, setSelectedNode]);
 
   // Keyboard shortcut: Escape to go up one level
   React.useEffect(() => {
@@ -300,6 +442,64 @@ const GraphCanvas: React.FC = () => {
     [addEdge]
   );
 
+  // Helper to find edge under dragged node for drop-to-connect
+  const findEdgeUnderNode = useCallback(
+    (activeNode: RFNode) => {
+      const isCompact = viewDensity === 'compact';
+      const nodeW = Math.round((isCompact ? COMPACT_NODE_SIZE : NODE_WIDTH) * nodeScale);
+      const nodeH = Math.round((isCompact ? COMPACT_NODE_SIZE : NODE_HEIGHT) * nodeScale);
+
+      const activeCx = activeNode.position.x + nodeW / 2;
+      const activeCy = activeNode.position.y + nodeH / 2;
+
+      let bestEdge: RFEdge | null = null;
+      let minDistance = Infinity;
+      const threshold = Math.max(50, Math.round(nodeH * 0.75));
+
+      for (const edge of rfEdges) {
+        if (edge.source === activeNode.id || edge.target === activeNode.id) continue;
+
+        const sourceNode = rfNodes.find((n) => n.id === edge.source);
+        const targetNode = rfNodes.find((n) => n.id === edge.target);
+        if (!sourceNode || !targetNode) continue;
+        if (!sourceNode.position || !targetNode.position) continue;
+
+        let sx: number, sy: number, tx: number, ty: number;
+        if (layoutDir === 'TB') {
+          sx = sourceNode.position.x + nodeW / 2;
+          sy = sourceNode.position.y + nodeH;
+          tx = targetNode.position.x + nodeW / 2;
+          ty = targetNode.position.y;
+        } else {
+          sx = sourceNode.position.x + nodeW;
+          sy = sourceNode.position.y + nodeH / 2;
+          tx = targetNode.position.x;
+          ty = targetNode.position.y + nodeH / 2;
+        }
+
+        const dx = tx - sx;
+        const dy = ty - sy;
+        const lenSq = dx * dx + dy * dy;
+        if (lenSq === 0) continue;
+
+        const t = ((activeCx - sx) * dx + (activeCy - sy) * dy) / lenSq;
+        if (t < 0.08 || t > 0.92) continue;
+
+        const projX = sx + t * dx;
+        const projY = sy + t * dy;
+        const dist = Math.hypot(activeCx - projX, activeCy - projY);
+
+        if (dist <= threshold && dist < minDistance) {
+          minDistance = dist;
+          bestEdge = edge;
+        }
+      }
+
+      return bestEdge;
+    },
+    [viewDensity, nodeScale, rfEdges, rfNodes, layoutDir]
+  );
+
   // PowerPoint-style Smart Alignment Drag Handler with Real Magnetic Snap
   const onNodeDrag = useCallback(
     (_event: unknown, activeNode: RFNode) => {
@@ -310,6 +510,10 @@ const GraphCanvas: React.FC = () => {
       ) {
         return;
       }
+
+      // Check if dragging in between an existing connection
+      const candidateEdge = findEdgeUnderNode(activeNode);
+      setTargetEdgeForDropId(candidateEdge ? candidateEdge.id : null);
 
       let activeX = activeNode.position.x;
       let activeY = activeNode.position.y;
@@ -382,10 +586,10 @@ const GraphCanvas: React.FC = () => {
         );
       }
     },
-    [rfNodes]
+    [rfNodes, findEdgeUnderNode]
   );
 
-  // Drag Stop: Magnetically snap and persist final coordinates
+  // Drag Stop: Magnetically snap, persist final coordinates, and splice into edge if dropped between nodes
   const onNodeDragStop = useCallback(
     (_event: unknown, activeNode: RFNode) => {
       setGuideLines({ horizontal: null, vertical: null });
@@ -394,7 +598,21 @@ const GraphCanvas: React.FC = () => {
         !isValidCoordinate(activeNode.position.x) ||
         !isValidCoordinate(activeNode.position.y)
       ) {
+        setTargetEdgeForDropId(null);
         return;
+      }
+
+      const candidateEdge = targetEdgeForDropId
+        ? rfEdges.find((e) => e.id === targetEdgeForDropId)
+        : findEdgeUnderNode(activeNode);
+
+      setTargetEdgeForDropId(null);
+
+      // If dropped onto an existing connection, splice node in between!
+      if (candidateEdge) {
+        spliceNodeIntoEdge(activeNode.id, candidateEdge.id).catch((err) =>
+          console.warn('[GraphView] Failed to splice node into edge:', err)
+        );
       }
 
       let finalX = activeNode.position.x;
@@ -452,7 +670,7 @@ const GraphCanvas: React.FC = () => {
         });
       }
     },
-    [rfNodes, nodes, updateNode]
+    [rfNodes, nodes, updateNode, targetEdgeForDropId, rfEdges, findEdgeUnderNode, spliceNodeIntoEdge]
   );
 
   // Auto Layout Handler - tight minimal distance layout
@@ -476,11 +694,15 @@ const GraphCanvas: React.FC = () => {
       }));
       updateNodePositions(positionsToUpdate);
 
+      // Force React Flow to recalculate handle coordinates immediately and after transition
+      scopedNodes.forEach((n) => updateNodeInternals(n.id));
+
       setTimeout(() => {
-        fitView({ padding: 0.15, duration: 300 });
-      }, 50);
+        scopedNodes.forEach((n) => updateNodeInternals(n.id));
+        focusSmartView(scopedNodes);
+      }, 80);
     },
-    [scopedNodes, scopedEdges, layoutDir, viewDensity, nodeScale, updateNodePositions, fitView]
+    [scopedNodes, scopedEdges, layoutDir, viewDensity, nodeScale, updateNodePositions, updateNodeInternals, focusSmartView]
   );
 
   const handleScaleChange = useCallback(
@@ -504,11 +726,14 @@ const GraphCanvas: React.FC = () => {
       }));
       updateNodePositions(positionsToUpdate);
 
+      scopedNodes.forEach((n) => updateNodeInternals(n.id));
+
       setTimeout(() => {
-        fitView({ padding: 0.15, duration: 300 });
-      }, 50);
+        scopedNodes.forEach((n) => updateNodeInternals(n.id));
+        focusSmartView(scopedNodes);
+      }, 80);
     },
-    [viewDensity, scopedNodes, scopedEdges, layoutDir, updateNodePositions, fitView]
+    [viewDensity, scopedNodes, scopedEdges, layoutDir, updateNodePositions, updateNodeInternals, focusSmartView]
   );
 
   const handleDensityChange = useCallback(
@@ -532,35 +757,97 @@ const GraphCanvas: React.FC = () => {
       }));
       updateNodePositions(positionsToUpdate);
 
+      scopedNodes.forEach((n) => updateNodeInternals(n.id));
+
       setTimeout(() => {
-        fitView({ padding: 0.15, duration: 300 });
-      }, 50);
+        scopedNodes.forEach((n) => updateNodeInternals(n.id));
+        focusSmartView(scopedNodes);
+      }, 80);
     },
-    [nodeScale, scopedNodes, scopedEdges, layoutDir, updateNodePositions, fitView]
+    [nodeScale, scopedNodes, scopedEdges, layoutDir, updateNodePositions, updateNodeInternals, focusSmartView]
   );
 
   const handleFitScreen = useCallback(() => {
-    fitView({ padding: 0.15, duration: 300 });
+    fitView({ padding: 0.2, duration: 300, maxZoom: 1.15, minZoom: 0.2 });
   }, [fitView]);
 
   const handleToggleLayoutDirection = () => {
+    userManualDirRef.current = true;
     const newDir = layoutDir === 'LR' ? 'TB' : 'LR';
     setLayoutDir(newDir);
     handleAutoLayout(newDir);
   };
 
+  // Dynamic Orientation Detection: On mobile, auto-switch between TB (portrait) and LR (landscape)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleResizeOrOrientation = () => {
+      if (userManualDirRef.current) return;
+
+      const isMobile = window.innerWidth < 768;
+      if (!isMobile) return;
+
+      const isPortrait = window.innerHeight >= window.innerWidth;
+      const desiredDir: 'LR' | 'TB' = isPortrait ? 'TB' : 'LR';
+
+      setLayoutDir((curr) => {
+        if (curr !== desiredDir) {
+          handleAutoLayout(desiredDir);
+          return desiredDir;
+        }
+        return curr;
+      });
+    };
+
+    window.addEventListener('resize', handleResizeOrOrientation);
+    window.addEventListener('orientationchange', handleResizeOrOrientation);
+    return () => {
+      window.removeEventListener('resize', handleResizeOrOrientation);
+      window.removeEventListener('orientationchange', handleResizeOrOrientation);
+    };
+  }, [handleAutoLayout]);
+
+  // Initial camera focus & layout alignment on first render
+  useEffect(() => {
+    if (isInitialFocusDoneRef.current) return;
+    if (scopedNodes.length === 0) return;
+    isInitialFocusDoneRef.current = true;
+
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+    const isPortrait = typeof window !== 'undefined' && window.innerHeight >= window.innerWidth;
+
+    if (isMobile && isPortrait) {
+      // Auto-arrange to TB on mobile portrait mount so nodes stack down cleanly
+      handleAutoLayout('TB');
+    } else {
+      const timer = setTimeout(() => {
+        focusSmartView(scopedNodes);
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [scopedNodes, handleAutoLayout, focusSmartView]);
+
   // Direct In-Canvas Node Creation (Toolbar button)
   const handleQuickAddNode = async () => {
-    const defaultDueDate = currentParentNode?.dueDate || addDays(getTodayString(), 7);
+    const defaultDueDate = getTodayString();
     const parentId = currentParentNode ? currentParentNode.id : null;
     const lastNode = scopedNodes[scopedNodes.length - 1];
     let newPos = { x: 100, y: 150 };
 
     if (lastNode?.position && isValidCoordinate(lastNode.position.x) && isValidCoordinate(lastNode.position.y)) {
-      newPos = { x: lastNode.position.x - 60, y: lastNode.position.y + 120 };
+      if (layoutDir === 'TB') {
+        newPos = { x: lastNode.position.x, y: lastNode.position.y + 180 };
+      } else {
+        newPos = { x: lastNode.position.x + 310, y: lastNode.position.y };
+      }
     }
 
-    await addNode('New Task', defaultDueDate, parentId, newPos);
+    const newNode = await addNode('New Task', defaultDueDate, parentId, newPos);
+    if (newNode) {
+      lastFocusedNodeIdRef.current = newNode.id;
+      setSelectedNode(newNode);
+    }
   };
 
   // Right-click on canvas pane to create node directly at cursor location
@@ -572,10 +859,14 @@ const GraphCanvas: React.FC = () => {
     });
     const posX = isValidCoordinate(position.x) ? Math.round(position.x - 130) : 100;
     const posY = isValidCoordinate(position.y) ? Math.round(position.y - 70) : 150;
-    const defaultDueDate = currentParentNode?.dueDate || addDays(getTodayString(), 7);
+    const defaultDueDate = getTodayString();
     const parentId = currentParentNode ? currentParentNode.id : null;
 
-    await addNode('New Task', defaultDueDate, parentId, { x: posX, y: posY });
+    const newNode = await addNode('New Task', defaultDueDate, parentId, { x: posX, y: posY });
+    if (newNode) {
+      lastFocusedNodeIdRef.current = newNode.id;
+      setSelectedNode(newNode);
+    }
   };
 
   const handleDecomposeSubmit = async (e: React.FormEvent) => {
@@ -621,13 +912,16 @@ const GraphCanvas: React.FC = () => {
       const isEGN = nodeObj.id === project.endGoalNodeId;
       const nodeNotesCount = notes.filter((note) => note.nodeId === nodeObj.id).length;
       const subtaskCount = nodes.filter((n) => n.parentNodeId === nodeObj.id).length;
+      const hasInProgressChild = nodes.some((n) => n.parentNodeId === nodeObj.id && n.status === 'in_progress');
 
       const nodeData: GraphNodeData = {
         node: nodeObj,
         isEGN,
         notesCount: nodeNotesCount,
         subtaskCount,
+        hasInProgressChild,
         viewDensity,
+        layoutDir,
         nodeScale,
         totalNodesInScope: scopedNodes.length,
         onStatusChange: (status: NodeStatus) => updateNodeStatus(nodeObj.id, status),
@@ -637,7 +931,7 @@ const GraphCanvas: React.FC = () => {
           setSelectedNode(nodeObj);
           setIsNotesDrawerOpen(true);
         },
-        onOpenDecompose: () => setDecomposingNode(nodeObj),
+        onOpenDecompose: isEGN ? undefined : () => handleDrillDown(nodeObj),
         onDeleteNode: isEGN
           ? undefined
           : () => {
@@ -660,8 +954,11 @@ const GraphCanvas: React.FC = () => {
         onDrillDown: isEGN ? undefined : () => handleDrillDown(nodeObj),
       };
 
+      const isSelected = selectedNode?.id === nodeObj.id;
+
       return {
         ...rfNode,
+        selected: isSelected || Boolean(rfNode.selected),
         data: nodeData,
       };
     });
@@ -671,12 +968,14 @@ const GraphCanvas: React.FC = () => {
     project.endGoalNodeId,
     notes,
     viewDensity,
+    layoutDir,
     nodeScale,
     scopedNodes.length,
     updateNodeStatus,
     updateNode,
     deleteNode,
     moveNodeDate,
+    selectedNode?.id,
     setSelectedNode,
     setIsNotesDrawerOpen,
     handleDrillDown,
@@ -689,18 +988,25 @@ const GraphCanvas: React.FC = () => {
 
     return rfEdges.map((e) => {
       const isSelected = e.id === selectedEdgeId;
+      const isTargetForDrop = e.id === targetEdgeForDropId;
       return {
         ...e,
         selected: isSelected,
         type: 'smoothstep',
-        animated: false,
+        animated: isTargetForDrop,
         interactionWidth,
-        style: { strokeWidth },
+        style: {
+          strokeWidth: isTargetForDrop ? Math.max(3.5, strokeWidth + 1.5) : strokeWidth,
+          stroke: isTargetForDrop ? '#10b981' : undefined,
+          strokeDasharray: isTargetForDrop ? '6 4' : undefined,
+        },
         markerEnd: {
           type: MarkerType.ArrowClosed,
-          width: arrowSize,
-          height: arrowSize,
-          color: isSelected
+          width: isTargetForDrop ? arrowSize + 4 : arrowSize,
+          height: isTargetForDrop ? arrowSize + 4 : arrowSize,
+          color: isTargetForDrop
+            ? '#10b981'
+            : isSelected
             ? '#10b981'
             : preferences.theme === 'dark'
             ? '#94a3b8'
@@ -708,17 +1014,17 @@ const GraphCanvas: React.FC = () => {
         },
       };
     });
-  }, [rfEdges, selectedEdgeId, preferences.theme, nodeScale]);
+  }, [rfEdges, selectedEdgeId, targetEdgeForDropId, preferences.theme, nodeScale]);
 
   return (
-    <div className="flex-1 h-full relative dark:bg-slate-950 bg-slate-50 flex flex-col overflow-hidden transition-colors duration-150">
+    <div className="flex-1 h-full relative dark:bg-slate-950 bg-slate-50 flex flex-col overflow-clip transition-colors duration-150">
       {/* Breadcrumb & Task Hierarchy Scope Header */}
       <div className="bg-white/95 dark:bg-slate-900/90 border-b border-slate-200 dark:border-slate-800 px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 shadow-xs z-20 backdrop-blur-md shrink-0">
         {/* Left: Breadcrumbs Trail */}
-        <div className="flex items-center space-x-1.5 text-xs font-medium overflow-x-auto py-0.5">
+        <div className="flex items-center space-x-1.5 text-xs font-medium overflow-x-auto no-scrollbar py-0.5">
           <button
             onClick={() => handleNavigateToBreadcrumb(-1)}
-            className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+            className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md transition-colors cursor-pointer shrink-0 ${
               scopeStack.length === 0
                 ? 'text-emerald-700 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
@@ -735,7 +1041,7 @@ const GraphCanvas: React.FC = () => {
                 <ChevronRight className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 shrink-0" />
                 <button
                   onClick={() => handleNavigateToBreadcrumb(idx)}
-                  className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md transition-colors cursor-pointer truncate max-w-[200px] sm:max-w-xs ${
+                  className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md transition-colors cursor-pointer truncate max-w-[140px] sm:max-w-xs shrink-0 ${
                     isLast
                       ? 'text-emerald-700 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 shadow-xs'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
@@ -752,7 +1058,7 @@ const GraphCanvas: React.FC = () => {
 
         {/* Right: Parent Context & Back Up button */}
         {currentParentNode && (
-          <div className="flex items-center space-x-3 text-xs">
+          <div className="flex items-center space-x-3 text-xs shrink-0">
             <div className="hidden sm:flex items-center space-x-2 text-slate-500 dark:text-slate-400">
               <span>Parent Due: <span className="font-mono text-slate-700 dark:text-slate-300 font-medium">{currentParentNode.dueDate}</span></span>
               <span>•</span>
@@ -772,7 +1078,7 @@ const GraphCanvas: React.FC = () => {
       </div>
 
       {/* Floating Toolbar */}
-      <div className="absolute top-14 left-4 z-20 flex flex-wrap items-center gap-2 bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 p-1.5 rounded-xl shadow-lg backdrop-blur-md">
+      <div className="absolute top-12 sm:top-14 left-2.5 sm:left-4 z-20 flex items-center gap-1.5 sm:gap-2 bg-white/95 dark:bg-slate-900/95 border border-slate-200 dark:border-slate-800 p-1 sm:p-1.5 rounded-xl shadow-lg backdrop-blur-md overflow-x-auto no-scrollbar max-w-[calc(100vw-1.25rem)] sm:max-w-none sm:flex-wrap shrink-0">
         <button
           onClick={handleQuickAddNode}
           className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition-all cursor-pointer"
@@ -781,6 +1087,36 @@ const GraphCanvas: React.FC = () => {
           <Plus className="w-3.5 h-3.5" />
           <span>{currentParentNode ? 'Add Subtask' : 'Add Task'}</span>
         </button>
+
+        {/* Undo / Redo controls */}
+        <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
+          <button
+            onClick={() => undo()}
+            disabled={!canUndo}
+            className={`p-1.5 rounded text-xs font-medium transition-colors ${
+              canUndo
+                ? 'text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white hover:bg-white dark:hover:bg-slate-700 shadow-xs cursor-pointer'
+                : 'text-slate-300 dark:text-slate-600 cursor-not-allowed opacity-50'
+            }`}
+            title="Undo (Ctrl+Z)"
+            aria-label="Undo"
+          >
+            <Undo2 className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => redo()}
+            disabled={!canRedo}
+            className={`p-1.5 rounded text-xs font-medium transition-colors ${
+              canRedo
+                ? 'text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white hover:bg-white dark:hover:bg-slate-700 shadow-xs cursor-pointer'
+                : 'text-slate-300 dark:text-slate-600 cursor-not-allowed opacity-50'
+            }`}
+            title="Redo (Ctrl+Y or Ctrl+Shift+Z)"
+            aria-label="Redo"
+          >
+            <Redo2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
 
         <button
           onClick={() => handleAutoLayout()}
@@ -967,6 +1303,18 @@ const GraphCanvas: React.FC = () => {
           onEdgesChange={onEdgesChange}
           onNodeDrag={onNodeDrag}
           onNodeDragStop={onNodeDragStop}
+          onNodeClick={(_event, rfN) => {
+            const nObj = nodes.find((n) => n.id === rfN.id);
+            if (nObj) {
+              lastFocusedNodeIdRef.current = nObj.id;
+              setSelectedNode(nObj);
+              setSelectedEdgeId(null);
+            }
+          }}
+          onPaneClick={() => {
+            setSelectedNode(null);
+            setSelectedEdgeId(null);
+          }}
           onNodeDoubleClick={(_event, rfN) => {
             const nObj = nodes.find((n) => n.id === rfN.id);
             if (nObj) handleDrillDown(nObj);
@@ -996,7 +1344,8 @@ const GraphCanvas: React.FC = () => {
           }}
           deleteKeyCode={['Backspace', 'Delete']}
           zoomOnDoubleClick={false}
-          fitView
+          fitView={typeof window !== 'undefined' ? window.innerWidth >= 768 : true}
+          fitViewOptions={{ padding: 0.2, maxZoom: 1.15, minZoom: 0.2 }}
           minZoom={0.2}
           maxZoom={1.5}
         >
@@ -1017,7 +1366,7 @@ const GraphCanvas: React.FC = () => {
               return '#475569';
             }}
             maskColor={preferences.theme === 'dark' ? 'rgba(15, 23, 42, 0.7)' : 'rgba(241, 245, 249, 0.7)'}
-            className="!bg-white dark:!bg-slate-950 !border-slate-200 dark:!border-slate-800 shadow-sm"
+            className="hidden sm:block !bg-white dark:!bg-slate-950 !border-slate-200 dark:!border-slate-800 shadow-sm"
           />
         </ReactFlow>
       </div>

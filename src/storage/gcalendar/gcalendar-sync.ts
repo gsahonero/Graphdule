@@ -11,6 +11,7 @@ import {
 import { IStorageProvider } from '../base/storage-provider';
 import { NodeStatus, ProjectDocument } from '../../domain/models/types';
 import { addDays } from '../../domain/utils/date';
+import { DEFAULT_SAMPLE_PROJECT_ID } from '../../config/sample-project';
 
 const GCAL_EVENT_MAP_KEY = 'graphdule_gcal_event_map';
 const GCAL_CONFIG_KEY = 'graphdule_gcal_config';
@@ -163,7 +164,7 @@ export class GCalendarSync {
     projectName?: string;
   }): Promise<void> {
     const config = this.getConfig();
-    if (!config.enabled || !GDriveAuth.isAuthenticated()) return;
+    if (!config.enabled || !GDriveAuth.isAuthenticated() || params.projectId === DEFAULT_SAMPLE_PROJECT_ID) return;
 
     try {
       const { calendarId } = await this.resolveEffectiveCalendarId();
@@ -237,7 +238,7 @@ export class GCalendarSync {
     projectName?: string;
   }): Promise<void> {
     const config = this.getConfig();
-    if (!config.enabled || !GDriveAuth.isAuthenticated()) return;
+    if (!config.enabled || !GDriveAuth.isAuthenticated() || params.projectId === DEFAULT_SAMPLE_PROJECT_ID) return;
 
     try {
       const { calendarId } = await this.resolveEffectiveCalendarId();
@@ -439,6 +440,7 @@ export class GCalendarSync {
       const allTasks: TaskItem[] = [];
 
       for (const doc of projectDocs) {
+        if (doc.project.id === DEFAULT_SAMPLE_PROJECT_ID) continue;
         for (const node of doc.nodes) {
           if (node.dueDate) {
             allTasks.push({

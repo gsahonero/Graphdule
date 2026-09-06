@@ -6,6 +6,9 @@ import {
   NodeStatus,
   ProjectSummary,
   ProjectStyle,
+  IdeaSeed,
+  Note,
+  ProjectNote,
 } from '../models/types';
 import { getTodayString } from '../utils/date';
 import { GraphService } from './graph-service';
@@ -81,7 +84,7 @@ export class ProjectService {
   public static createNode(
     projectId: string,
     text: string,
-    dueDate: string,
+    dueDate: string = getTodayString(),
     parentNodeId: string | null = null,
     position?: { x: number; y: number }
   ): Node {
@@ -91,7 +94,7 @@ export class ProjectService {
       projectId,
       parentNodeId: parentNodeId || null,
       text,
-      dueDate,
+      dueDate: dueDate || getTodayString(),
       status: 'planned',
       position,
       createdAt: now,
@@ -186,6 +189,148 @@ export class ProjectService {
       status,
       updatedAt: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Cascades completion up to parent node(s) when all subtask nodes inside a parent are completed.
+   * Recursively bubbles up to grandparents if all of the parent's siblings are also completed.
+   */
+  public static cascadeParentCompletion(
+    nodes: readonly Node[],
+    completedNodeId: string
+  ): { updatedNodes: Node[]; completedParentIds: string[] } {
+    const updatedNodes = [...nodes];
+    const completedParentIds: string[] = [];
+
+    let currentChild = updatedNodes.find((n) => n.id === completedNodeId);
+
+    while (currentChild && currentChild.parentNodeId) {
+      const parentId = currentChild.parentNodeId;
+      const subtasks = updatedNodes.filter((n) => n.parentNodeId === parentId);
+
+      // If there are subtasks and all of them have status === 'completed'
+      if (subtasks.length > 0 && subtasks.every((s) => s.status === 'completed')) {
+        const parentIdx = updatedNodes.findIndex((n) => n.id === parentId);
+        if (parentIdx !== -1) {
+          const parentNode = updatedNodes[parentIdx];
+          if (parentNode.status !== 'completed') {
+            const updatedParent: Node = {
+              ...parentNode,
+              status: 'completed',
+              updatedAt: new Date().toISOString(),
+            };
+            updatedNodes[parentIdx] = updatedParent;
+            completedParentIds.push(parentId);
+            currentChild = updatedParent; // Check next level up (grandparent)
+            continue;
+          }
+        }
+      }
+      break;
+    }
+
+    return { updatedNodes, completedParentIds };
+  }
+
+  /**
+   * Cascades in_progress status up to parent node(s) when any subtask node inside a parent is in progress.
+   * Recursively bubbles up to grandparents and ancestors.
+   * Invariant: When any child node is in progress, the parent node is also in progress.
+   */
+  public static cascadeParentInProgress(
+    nodes: readonly Node[],
+    inProgressNodeId: string
+  ): { updatedNodes: Node[]; inProgressParentIds: string[] } {
+    const updatedNodes = [...nodes];
+    const inProgressParentIds: string[] = [];
+
+    let currentChild = updatedNodes.find((n) => n.id === inProgressNodeId);
+
+    while (currentChild && currentChild.parentNodeId) {
+      const parentId = currentChild.parentNodeId;
+      const parentIdx = updatedNodes.findIndex((n) => n.id === parentId);
+      if (parentIdx !== -1) {
+        const parentNode = updatedNodes[parentIdx];
+        if (parentNode.status !== 'in_progress') {
+          const updatedParent: Node = {
+            ...parentNode,
+            status: 'in_progress',
+            updatedAt: new Date().toISOString(),
+          };
+          updatedNodes[parentIdx] = updatedParent;
+          inProgressParentIds.push(parentId);
+          currentChild = updatedParent; // Check next level up (grandparent)
+          continue;
+        } else {
+          currentChild = parentNode; // Still check up the chain
+          continue;
+        }
+      }
+      break;
+    }
+
+    return { updatedNodes, inProgressParentIds };
+  }
+
+  /**
+   * Checks whether a parent node has any direct child node that is currently in progress.
+   */
+  public static hasInProgressChild(nodes: readonly Node[], parentNodeId: string): boolean {
+    return nodes.some((n) => n.parentNodeId === parentNodeId && n.status === 'in_progress');
+  }
+
+  /**
+   * Checks whether a node's status can be modified.
+   * Invariant: When any child node is in progress, the parent node is also in progress and cannot be modified away from in_progress.
+   */
+  public static canModifyNodeStatus(
+    nodes: readonly Node[],
+    nodeId: string,
+    targetStatus: NodeStatus
+  ): { allowed: boolean; reason?: string } {
+    if (targetStatus !== 'in_progress' && this.hasInProgressChild(nodes, nodeId)) {
+      return {
+        allowed: false,
+        reason: 'Cannot modify status: child node is in progress. Parent node must remain in progress.',
+      };
+    }
+    return { allowed: true };
+  }
+
+  /**
+   * Full hierarchy status synchronization: ensures that for all nodes in the document,
+   * if any child node is in progress, the parent node is also in progress.
+   */
+  public static syncParentStatusHierarchy(nodes: readonly Node[]): {
+    updatedNodes: Node[];
+    affectedParentIds: string[];
+  } {
+    const updatedNodes = [...nodes];
+    const affectedParentIds: string[] = [];
+    let changed = true;
+
+    while (changed) {
+      changed = false;
+      for (let i = 0; i < updatedNodes.length; i++) {
+        const parent = updatedNodes[i];
+        const hasInProgress = updatedNodes.some(
+          (n) => n.parentNodeId === parent.id && n.status === 'in_progress'
+        );
+        if (hasInProgress && parent.status !== 'in_progress') {
+          updatedNodes[i] = {
+            ...parent,
+            status: 'in_progress',
+            updatedAt: new Date().toISOString(),
+          };
+          if (!affectedParentIds.includes(parent.id)) {
+            affectedParentIds.push(parent.id);
+          }
+          changed = true;
+        }
+      }
+    }
+
+    return { updatedNodes, affectedParentIds };
   }
 
   /**
@@ -323,6 +468,202 @@ export class ProjectService {
   }
 
   /**
+   * Moves an active project to the Idea Parking Lot, removing attention.
+   * Graph nodes and edges are 100% preserved.
+   */
+  public static parkProject(project: Project): Project {
+    const now = new Date().toISOString();
+    return {
+      ...project,
+      status: 'parked',
+      isAttention: false,
+      attentionPromotedAt: undefined,
+      updatedAt: now,
+    };
+  }
+
+  /**
+   * Unparks a project from the Idea Parking Lot back into active status.
+   */
+  public static unparkProject(project: Project): Project {
+    const now = new Date().toISOString();
+    return {
+      ...project,
+      status: 'active',
+      updatedAt: now,
+    };
+  }
+
+  /**
+   * Promotes or demotes a project to/from Priority Attention status.
+   */
+  public static setProjectAttention(project: Project, isAttention: boolean): Project {
+    const now = new Date().toISOString();
+    return {
+      ...project,
+      isAttention,
+      attentionPromotedAt: isAttention ? now : undefined,
+      // If promoting a parked project to attention, unpark it automatically
+      status: isAttention && project.status === 'parked' ? 'active' : project.status,
+      updatedAt: now,
+    };
+  }
+
+  /**
+   * Creates a lightweight Idea Seed (uncluttered, non-graph thought).
+   */
+  public static createIdeaSeed(
+    title: string,
+    rawNotesOrOptions?:
+      | string
+      | {
+          rawNotes?: string;
+          seedThoughts?: string[];
+          tags?: string[];
+        },
+    seedThoughts?: string[],
+    tags?: string[]
+  ): IdeaSeed {
+    const now = new Date().toISOString();
+    let rawNotes: string | undefined;
+    let thoughts: string[] = [];
+    let initialTags: string[] = [];
+
+    if (typeof rawNotesOrOptions === 'object' && rawNotesOrOptions !== null) {
+      rawNotes = rawNotesOrOptions.rawNotes?.trim() || undefined;
+      thoughts = rawNotesOrOptions.seedThoughts || [];
+      initialTags = rawNotesOrOptions.tags || [];
+    } else {
+      rawNotes = typeof rawNotesOrOptions === 'string' ? rawNotesOrOptions.trim() || undefined : undefined;
+      thoughts = seedThoughts || [];
+      initialTags = tags || [];
+    }
+
+    return {
+      id: ProjectService.generateId('seed'),
+      title: title.trim(),
+      rawNotes,
+      seedThoughts: thoughts.map((t) => t.trim()).filter(Boolean),
+      tags: ProjectService.normalizeTags(initialTags),
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  /**
+   * Updates an existing Idea Seed.
+   */
+  public static updateIdeaSeed(
+    seed: IdeaSeed,
+    updates: Partial<Omit<IdeaSeed, 'id' | 'createdAt'>>
+  ): IdeaSeed {
+    const now = new Date().toISOString();
+    return {
+      ...seed,
+      title: updates.title !== undefined ? updates.title.trim() : seed.title,
+      rawNotes: updates.rawNotes !== undefined ? updates.rawNotes.trim() : seed.rawNotes,
+      seedThoughts:
+        updates.seedThoughts !== undefined
+          ? updates.seedThoughts.map((t) => t.trim()).filter(Boolean)
+          : seed.seedThoughts,
+      tags: updates.tags !== undefined ? ProjectService.normalizeTags(updates.tags) : seed.tags,
+      updatedAt: now,
+    };
+  }
+
+  /**
+   * Germinates a lightweight Idea Seed into a full Graphdule Project.
+   * The seed's title becomes the Project Title & End Goal Node (EGN).
+   * Any seedThoughts become initial predecessor nodes connected into the EGN.
+   */
+  public static germinateSeedToProject(
+    seed: IdeaSeed,
+    deadline?: string,
+    style?: ProjectStyle
+  ): {
+    project: Project;
+    egnNode: Node;
+    nodes: Node[];
+    predecessorNodes: Node[];
+    edges: Edge[];
+    note?: ProjectNote;
+  } {
+    const now = new Date().toISOString();
+    const projectId = ProjectService.generateId('proj');
+    const egnId = ProjectService.generateId('egn');
+    const projectDeadline = deadline || getTodayString();
+
+    const egnNode: Node = {
+      id: egnId,
+      projectId,
+      parentNodeId: null,
+      text: seed.title,
+      dueDate: projectDeadline,
+      status: 'planned',
+      position: { x: 700, y: 250 },
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const nodes: Node[] = [egnNode];
+    const predecessorNodes: Node[] = [];
+    const edges: Edge[] = [];
+
+    const thoughts = seed.seedThoughts || [];
+    const stepY = 120;
+    const startY = Math.max(100, 250 - Math.floor(thoughts.length / 2) * stepY);
+
+    thoughts.forEach((thought, idx) => {
+      const nodeId = ProjectService.generateId('node');
+      const node: Node = {
+        id: nodeId,
+        projectId,
+        parentNodeId: null,
+        text: thought,
+        dueDate: projectDeadline,
+        status: 'planned',
+        position: { x: 300, y: startY + idx * stepY },
+        createdAt: now,
+        updatedAt: now,
+      };
+      nodes.push(node);
+      predecessorNodes.push(node);
+
+      edges.push({
+        id: ProjectService.generateId('edge'),
+        projectId,
+        fromNodeId: nodeId,
+        toNodeId: egnId,
+        createdAt: now,
+      });
+    });
+
+    const project: Project = {
+      id: projectId,
+      name: seed.title,
+      endGoalNodeId: egnId,
+      tags: seed.tags ? [...seed.tags] : [],
+      status: 'active',
+      isAttention: false,
+      style: style || { color: 'emerald', icon: 'sparkles' },
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const note: Note | undefined = seed.rawNotes
+      ? {
+          id: ProjectService.generateId('note'),
+          nodeId: egnId,
+          text: seed.rawNotes,
+          createdAt: now,
+          updatedAt: now,
+        }
+      : undefined;
+
+    return { project, egnNode, nodes, predecessorNodes, edges, note };
+  }
+
+  /**
    * Computes a high-level summary of a project for cards & dashboards.
    */
   public static getProjectSummary(project: Project, nodes: readonly Node[]): ProjectSummary {
@@ -349,6 +690,8 @@ export class ProjectService {
     }
 
     const isArchived = status === 'archived' || status === 'completed' || status === 'abandoned';
+    const isParked = status === 'parked';
+    const isAttention = Boolean(project.isAttention && status === 'active');
 
     return {
       id: project.id,
@@ -358,6 +701,8 @@ export class ProjectService {
       tags: project.tags ? [...project.tags] : [],
       status,
       isArchived,
+      isParked,
+      isAttention,
       archivedAt: project.archivedAt,
       style: project.style || { color: 'emerald', icon: 'target' },
       progressPercentage,
@@ -367,5 +712,17 @@ export class ProjectService {
       abandonedTaskCount,
       updatedAt: project.updatedAt,
     };
+  }
+
+  /**
+   * Sorts priority attention projects chronologically from nearest due date to furthest due date.
+   * Earlier deadlines appear first (ascending order).
+   */
+  public static sortAttentionProjects(projects: readonly ProjectSummary[]): ProjectSummary[] {
+    return [...projects].sort((a, b) => {
+      if (!a.deadline) return 1;
+      if (!b.deadline) return -1;
+      return a.deadline.localeCompare(b.deadline);
+    });
   }
 }

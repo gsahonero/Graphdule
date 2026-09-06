@@ -86,7 +86,13 @@ function flattenTaskTree(
 
 export const TimelineView: React.FC = () => {
   const { activeProjectDoc, setSelectedNode, setIsNotesDrawerOpen, formatDateDisplay } = useApp();
-  const [orientation, setOrientation] = useState<'horizontal' | 'vertical'>('horizontal');
+  // On mobile screens (< 768px), default to vertical hierarchical list for natural phone scrolling
+  const [orientation, setOrientation] = useState<'horizontal' | 'vertical'>(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      return 'vertical';
+    }
+    return 'horizontal';
+  });
   const [trackWidth, setTrackWidth] = useState<number>(1400);
 
   // Scrubber cursor state (day focused at cursor position)

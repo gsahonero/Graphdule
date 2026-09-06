@@ -1,13 +1,15 @@
 import { ProjectDocument } from '../domain/models/types';
 import { addDays, getTodayString } from '../domain/utils/date';
 
+export const DEFAULT_SAMPLE_PROJECT_ID = 'sample_phd_paper';
+
 export function createDefaultSampleProject(): ProjectDocument {
   const now = new Date().toISOString();
   return {
     schemaVersion: 1,
     exportedAt: now,
     project: {
-      id: 'sample_phd_paper',
+      id: DEFAULT_SAMPLE_PROJECT_ID,
       name: 'Submit PhD Paper',
       endGoalNodeId: 'node_submit_paper',
       tags: ['Research', 'Academia'],
@@ -18,7 +20,7 @@ export function createDefaultSampleProject(): ProjectDocument {
     nodes: [
       {
         id: 'node_submit_paper',
-        projectId: 'sample_phd_paper',
+        projectId: DEFAULT_SAMPLE_PROJECT_ID,
         parentNodeId: null,
         text: 'Submit PhD Paper to Journal',
         dueDate: addDays(getTodayString(), 60),
@@ -29,7 +31,7 @@ export function createDefaultSampleProject(): ProjectDocument {
       },
       {
         id: 'node_write_paper',
-        projectId: 'sample_phd_paper',
+        projectId: DEFAULT_SAMPLE_PROJECT_ID,
         parentNodeId: null,
         text: 'Write PhD Paper Manuscript',
         dueDate: addDays(getTodayString(), 50),
@@ -40,7 +42,7 @@ export function createDefaultSampleProject(): ProjectDocument {
       },
       {
         id: 'node_run_exp',
-        projectId: 'sample_phd_paper',
+        projectId: DEFAULT_SAMPLE_PROJECT_ID,
         parentNodeId: null,
         text: 'Run Phantom Experiments',
         dueDate: addDays(getTodayString(), 20),
@@ -51,7 +53,7 @@ export function createDefaultSampleProject(): ProjectDocument {
       },
       {
         id: 'node_prep_phantom',
-        projectId: 'sample_phd_paper',
+        projectId: DEFAULT_SAMPLE_PROJECT_ID,
         parentNodeId: 'node_run_exp',
         text: 'Prepare Phantom Samples',
         dueDate: addDays(getTodayString(), 10),
@@ -62,7 +64,7 @@ export function createDefaultSampleProject(): ProjectDocument {
       },
       {
         id: 'node_analyze',
-        projectId: 'sample_phd_paper',
+        projectId: DEFAULT_SAMPLE_PROJECT_ID,
         parentNodeId: null,
         text: 'Analyze Reconstruction Noise',
         dueDate: addDays(getTodayString(), 35),
@@ -73,7 +75,7 @@ export function createDefaultSampleProject(): ProjectDocument {
       },
       {
         id: 'node_validate',
-        projectId: 'sample_phd_paper',
+        projectId: DEFAULT_SAMPLE_PROJECT_ID,
         parentNodeId: null,
         text: 'Validate Against Benchmark',
         dueDate: addDays(getTodayString(), 40),
@@ -86,42 +88,42 @@ export function createDefaultSampleProject(): ProjectDocument {
     edges: [
       {
         id: 'e1',
-        projectId: 'sample_phd_paper',
+        projectId: DEFAULT_SAMPLE_PROJECT_ID,
         fromNodeId: 'node_prep_phantom',
         toNodeId: 'node_run_exp',
         createdAt: now,
       },
       {
         id: 'e2',
-        projectId: 'sample_phd_paper',
+        projectId: DEFAULT_SAMPLE_PROJECT_ID,
         fromNodeId: 'node_run_exp',
         toNodeId: 'node_analyze',
         createdAt: now,
       },
       {
         id: 'e3',
-        projectId: 'sample_phd_paper',
+        projectId: DEFAULT_SAMPLE_PROJECT_ID,
         fromNodeId: 'node_run_exp',
         toNodeId: 'node_validate',
         createdAt: now,
       },
       {
         id: 'e4',
-        projectId: 'sample_phd_paper',
+        projectId: DEFAULT_SAMPLE_PROJECT_ID,
         fromNodeId: 'node_analyze',
         toNodeId: 'node_write_paper',
         createdAt: now,
       },
       {
         id: 'e5',
-        projectId: 'sample_phd_paper',
+        projectId: DEFAULT_SAMPLE_PROJECT_ID,
         fromNodeId: 'node_validate',
         toNodeId: 'node_write_paper',
         createdAt: now,
       },
       {
         id: 'e6',
-        projectId: 'sample_phd_paper',
+        projectId: DEFAULT_SAMPLE_PROJECT_ID,
         fromNodeId: 'node_write_paper',
         toNodeId: 'node_submit_paper',
         createdAt: now,

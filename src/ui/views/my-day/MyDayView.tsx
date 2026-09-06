@@ -21,9 +21,44 @@ import {
   AlertTriangle,
   RotateCw,
   CalendarCheck,
+  Zap,
+  Layers,
+  List,
 } from 'lucide-react';
-import { NodeStatus, RecurrenceRule } from '../../../domain/models/types';
+import { Node, NodeStatus, ProjectSummary, RecurrenceRule, StandaloneTask } from '../../../domain/models/types';
 import { getProjectColorTheme, ProjectIconDisplay } from '../../utils/project-style';
+
+type LateTasksGroupMode = 'hierarchy' | 'attention' | 'time' | 'flat';
+type TodayProjectTasksGroupMode = 'hierarchy' | 'attention' | 'flat';
+type StandaloneTasksGroupMode = 'schedule' | 'recurrence' | 'flat';
+
+interface ProjectLateHierarchyGroup {
+  projectId: string;
+  projectName: string;
+  project?: ProjectSummary;
+  isAttention: boolean;
+  rootTasks: Node[];
+  subtaskGroups: {
+    key: string;
+    breadcrumbs: Node[];
+    tasks: Node[];
+  }[];
+  allTasks: Node[];
+}
+
+interface TodayProjectHierarchyGroup {
+  projectId: string;
+  projectName: string;
+  project?: ProjectSummary;
+  isAttention: boolean;
+  rootTasks: Node[];
+  subtaskGroups: {
+    key: string;
+    breadcrumbs: Node[];
+    tasks: Node[];
+  }[];
+  allTasks: Node[];
+}
 
 export const MyDayView: React.FC = () => {
   const {
@@ -52,19 +87,54 @@ export const MyDayView: React.FC = () => {
   const [showCompleted, setShowCompleted] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Collapsible & filter state for Other / All Standalone Tasks
-  const [isAllStandaloneOpen, setIsAllStandaloneOpen] = useState(true);
-  const [standaloneFilter, setStandaloneFilter] = useState<'all' | 'upcoming' | 'overdue'>('all');
+  const [standaloneFilter, setStandaloneFilter] = useState<'all' | 'overdue' | 'today' | 'upcoming'>('all');
   const [activeCalendarTaskId, setActiveCalendarTaskId] = useState<string | null>(null);
+  const [activeRecurrenceTaskId, setActiveRecurrenceTaskId] = useState<string | null>(null);
+  const [isNewRecurrenceOpen, setIsNewRecurrenceOpen] = useState(false);
 
   // Collapsible & state for Late / Overdue Tasks section
   const [isLateTasksOpen, setIsLateTasksOpen] = useState(false);
   const [activeCalendarLateId, setActiveCalendarLateId] = useState<string | null>(null);
+  const [activeCalendarTodayProjectId, setActiveCalendarTodayProjectId] = useState<string | null>(null);
+
+  // Attention-only filter for project tasks
+  const [attentionOnlyFilter, setAttentionOnlyFilter] = useState(false);
 
   // Map projectId -> project summary for quick label lookups
   const projectsMap = useMemo(() => {
     return new Map(projects.map((p) => [p.id, p]));
   }, [projects]);
+
+  // Map nodeId -> node for quick lookup of parent nodes / subtask hierarchy
+  const allNodesMap = useMemo(() => {
+    return new Map(allActiveNodes.map((n) => [n.id, n]));
+  }, [allActiveNodes]);
+
+  // Helper to retrieve the parent breadcrumb hierarchy for a subtask inside a node
+  const getParentBreadcrumbs = (task: { parentNodeId?: string | null }): Node[] => {
+    const chain: Node[] = [];
+    let currentParentId = task.parentNodeId;
+    const visited = new Set<string>();
+
+    while (currentParentId && !visited.has(currentParentId)) {
+      visited.add(currentParentId);
+      const parentNode = allNodesMap.get(currentParentId);
+      if (parentNode) {
+        chain.unshift(parentNode);
+        currentParentId = parentNode.parentNodeId;
+      } else {
+        break;
+      }
+    }
+    return chain;
+  };
+
+  const handleOpenTaskInProject = (task: { id: string; projectId?: string }, targetNode?: Node | string) => {
+    if (task.projectId) {
+      const nodeToSelect = targetNode || allNodesMap.get(task.id) || task.id;
+      openProject(task.projectId, nodeToSelect);
+    }
+  };
 
   // Ensure data is freshly updated on mount
   useEffect(() => {
@@ -94,6 +164,16 @@ export const MyDayView: React.FC = () => {
       .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   }, [allActiveNodes, today]);
 
+  const displayLateProjectTasks = useMemo(() => {
+    if (!attentionOnlyFilter) return lateProjectTasks;
+    return lateProjectTasks.filter((t) => t.projectId && projectsMap.get(t.projectId)?.isAttention);
+  }, [lateProjectTasks, attentionOnlyFilter, projectsMap]);
+
+  const displayProjectTasks = useMemo(() => {
+    if (!attentionOnlyFilter) return myDayData.projectTasks;
+    return myDayData.projectTasks.filter((t) => t.projectId && projectsMap.get(t.projectId)?.isAttention);
+  }, [myDayData.projectTasks, attentionOnlyFilter, projectsMap]);
+
   const lateStandaloneTasks = useMemo(() => {
     return standaloneTasks
       .filter((t) => isBefore(t.dueDate, today) && (t.status === 'planned' || t.status === 'in_progress'))
@@ -112,6 +192,228 @@ export const MyDayView: React.FC = () => {
     await refreshData();
   };
 
+  const [lateTasksGroupMode, setLateTasksGroupMode] = useState<LateTasksGroupMode>(() => {
+    const saved = localStorage.getItem('graphdule_late_tasks_group_by');
+    if (saved === 'hierarchy' || saved === 'attention' || saved === 'time' || saved === 'flat') {
+      return saved;
+    }
+    return 'hierarchy';
+  });
+  const [collapsedLateProjects, setCollapsedLateProjects] = useState<Record<string, boolean>>({});
+
+  const handleGroupModeChange = (mode: LateTasksGroupMode) => {
+    setLateTasksGroupMode(mode);
+    localStorage.setItem('graphdule_late_tasks_group_by', mode);
+  };
+
+  const toggleProjectCollapse = (projectId: string) => {
+    setCollapsedLateProjects((prev) => ({ ...prev, [projectId]: !prev[projectId] }));
+  };
+
+  // Grouping state for Today's Project Tasks
+  const [todayProjectTasksGroupMode, setTodayProjectTasksGroupMode] = useState<TodayProjectTasksGroupMode>(() => {
+    const saved = localStorage.getItem('graphdule_today_project_tasks_group_by');
+    if (saved === 'hierarchy' || saved === 'attention' || saved === 'flat') {
+      return saved;
+    }
+    return 'hierarchy';
+  });
+  const [collapsedTodayProjects, setCollapsedTodayProjects] = useState<Record<string, boolean>>({});
+
+  const handleTodayProjectGroupModeChange = (mode: TodayProjectTasksGroupMode) => {
+    setTodayProjectTasksGroupMode(mode);
+    localStorage.setItem('graphdule_today_project_tasks_group_by', mode);
+  };
+
+  const toggleTodayProjectCollapse = (projectId: string) => {
+    setCollapsedTodayProjects((prev) => ({ ...prev, [projectId]: !prev[projectId] }));
+  };
+
+  // Grouping state for Standalone Tasks
+  const [standaloneGroupMode, setStandaloneGroupMode] = useState<StandaloneTasksGroupMode>(() => {
+    const saved = localStorage.getItem('graphdule_standalone_tasks_group_by');
+    if (saved === 'schedule' || saved === 'recurrence' || saved === 'flat') {
+      return saved;
+    }
+    return 'schedule';
+  });
+  const [collapsedStandaloneGroups, setCollapsedStandaloneGroups] = useState<Record<string, boolean>>({});
+
+  const handleStandaloneGroupModeChange = (mode: StandaloneTasksGroupMode) => {
+    setStandaloneGroupMode(mode);
+    localStorage.setItem('graphdule_standalone_tasks_group_by', mode);
+  };
+
+  const toggleStandaloneGroupCollapse = (groupKey: string) => {
+    setCollapsedStandaloneGroups((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }));
+  };
+
+  const handleRescheduleBatchToToday = async (tasks: (Node | StandaloneTask)[]) => {
+    for (const task of tasks) {
+      if ('projectId' in task && (task as Node).projectId) {
+        await moveNodeDate(task.id, today, true);
+      } else {
+        await updateStandaloneTask({ ...(task as StandaloneTask), dueDate: today });
+      }
+    }
+    await refreshData();
+  };
+
+  // Hierarchy grouping for late tasks: projects with root tasks & subtask chains
+  const lateHierarchyGroups = useMemo<ProjectLateHierarchyGroup[]>(() => {
+    const projectMap = new Map<
+      string,
+      {
+        project: ProjectSummary | undefined;
+        rootTasks: Node[];
+        subtaskGroupsMap: Map<string, { breadcrumbs: Node[]; tasks: Node[] }>;
+        allTasks: Node[];
+      }
+    >();
+
+    for (const task of displayLateProjectTasks) {
+      const pid = task.projectId || 'unknown';
+      if (!projectMap.has(pid)) {
+        projectMap.set(pid, {
+          project: projectsMap.get(pid),
+          rootTasks: [],
+          subtaskGroupsMap: new Map(),
+          allTasks: [],
+        });
+      }
+      const pData = projectMap.get(pid)!;
+      pData.allTasks.push(task);
+
+      if (!task.parentNodeId) {
+        pData.rootTasks.push(task);
+      } else {
+        const breadcrumbs = getParentBreadcrumbs(task);
+        if (breadcrumbs.length === 0) {
+          pData.rootTasks.push(task);
+        } else {
+          const key = breadcrumbs.map((b) => b.id).join('->');
+          if (!pData.subtaskGroupsMap.has(key)) {
+            pData.subtaskGroupsMap.set(key, {
+              breadcrumbs,
+              tasks: [],
+            });
+          }
+          pData.subtaskGroupsMap.get(key)!.tasks.push(task);
+        }
+      }
+    }
+
+    const groups: ProjectLateHierarchyGroup[] = [];
+    projectMap.forEach((pData, pid) => {
+      const isAttention = !!pData.project?.isAttention;
+      const projectName = pData.project?.name || 'Project';
+
+      pData.rootTasks.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+
+      const subtaskGroups = Array.from(pData.subtaskGroupsMap.values()).map((sg) => {
+        sg.tasks.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+        return {
+          key: sg.breadcrumbs.map((b) => b.id).join('->'),
+          breadcrumbs: sg.breadcrumbs,
+          tasks: sg.tasks,
+        };
+      });
+
+      subtaskGroups.sort((a, b) => {
+        const aName = a.breadcrumbs.map((n) => n.text).join(' / ');
+        const bName = b.breadcrumbs.map((n) => n.text).join(' / ');
+        return aName.localeCompare(bName);
+      });
+
+      groups.push({
+        projectId: pid,
+        projectName,
+        project: pData.project,
+        isAttention,
+        rootTasks: pData.rootTasks,
+        subtaskGroups,
+        allTasks: pData.allTasks,
+      });
+    });
+
+    groups.sort((a, b) => {
+      if (a.isAttention && !b.isAttention) return -1;
+      if (!a.isAttention && b.isAttention) return 1;
+      return a.projectName.localeCompare(b.projectName);
+    });
+
+    return groups;
+  }, [displayLateProjectTasks, projectsMap, allNodesMap]);
+
+  // Attention grouping for late tasks: priority attention vs standard projects vs standalone
+  const lateAttentionGroups = useMemo(() => {
+    const attentionProjectTasks: Node[] = [];
+    const regularProjectTasks: Node[] = [];
+
+    for (const task of displayLateProjectTasks) {
+      const isAttention = task.projectId && projectsMap.get(task.projectId)?.isAttention;
+      if (isAttention) {
+        attentionProjectTasks.push(task);
+      } else {
+        regularProjectTasks.push(task);
+      }
+    }
+
+    return {
+      attentionTasks: attentionProjectTasks,
+      regularTasks: regularProjectTasks,
+      standaloneTasks: lateStandaloneTasks,
+    };
+  }, [displayLateProjectTasks, lateStandaloneTasks, projectsMap]);
+
+  // Time / Overdue duration grouping for late tasks
+  const lateTimeGroups = useMemo(() => {
+    const overWeek: (Node | StandaloneTask)[] = [];
+    const midWeek: (Node | StandaloneTask)[] = [];
+    const recent: (Node | StandaloneTask)[] = [];
+
+    const allLate: (Node | StandaloneTask)[] = [
+      ...displayLateProjectTasks,
+      ...lateStandaloneTasks,
+    ];
+
+    for (const item of allLate) {
+      const overdueDays = Math.max(1, daysBetween(item.dueDate, today));
+      if (overdueDays > 7) {
+        overWeek.push(item);
+      } else if (overdueDays >= 3) {
+        midWeek.push(item);
+      } else {
+        recent.push(item);
+      }
+    }
+
+    overWeek.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    midWeek.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    recent.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+
+    return [
+      {
+        id: 'over-week',
+        title: 'Over 1 Week Late',
+        description: 'More than 7 days overdue',
+        tasks: overWeek,
+      },
+      {
+        id: '3-7-days',
+        title: '3 to 7 Days Late',
+        description: 'Overdue this past week',
+        tasks: midWeek,
+      },
+      {
+        id: '1-2-days',
+        title: '1 to 2 Days Late',
+        description: 'Due recently',
+        tasks: recent,
+      },
+    ].filter((g) => g.tasks.length > 0);
+  }, [displayLateProjectTasks, lateStandaloneTasks, today]);
+
   // Incomplete standalone tasks that are NOT in today's main list
   const otherStandaloneTasks = useMemo(() => {
     const currentListIds = new Set(myDayData.standaloneTasks.map((t) => t.id));
@@ -120,19 +422,212 @@ export const MyDayView: React.FC = () => {
       .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   }, [standaloneTasks, myDayData.standaloneTasks]);
 
-  const upcomingStandaloneTasks = useMemo(() => {
-    return otherStandaloneTasks.filter((t) => isAfter(t.dueDate, today));
-  }, [otherStandaloneTasks, today]);
+
+  // Hierarchy grouping for Today's Project Tasks
+  const todayHierarchyGroups = useMemo<TodayProjectHierarchyGroup[]>(() => {
+    const projectMap = new Map<
+      string,
+      {
+        project: ProjectSummary | undefined;
+        rootTasks: Node[];
+        subtaskGroupsMap: Map<string, { breadcrumbs: Node[]; tasks: Node[] }>;
+        allTasks: Node[];
+      }
+    >();
+
+    for (const task of displayProjectTasks) {
+      const pid = task.projectId || 'unknown';
+      if (!projectMap.has(pid)) {
+        projectMap.set(pid, {
+          project: projectsMap.get(pid),
+          rootTasks: [],
+          subtaskGroupsMap: new Map(),
+          allTasks: [],
+        });
+      }
+      const pData = projectMap.get(pid)!;
+      pData.allTasks.push(task);
+
+      if (!task.parentNodeId) {
+        pData.rootTasks.push(task);
+      } else {
+        const breadcrumbs = getParentBreadcrumbs(task);
+        if (breadcrumbs.length === 0) {
+          pData.rootTasks.push(task);
+        } else {
+          const key = breadcrumbs.map((b) => b.id).join('->');
+          if (!pData.subtaskGroupsMap.has(key)) {
+            pData.subtaskGroupsMap.set(key, {
+              breadcrumbs,
+              tasks: [],
+            });
+          }
+          pData.subtaskGroupsMap.get(key)!.tasks.push(task);
+        }
+      }
+    }
+
+    const groups: TodayProjectHierarchyGroup[] = [];
+    projectMap.forEach((pData, pid) => {
+      const isAttention = !!pData.project?.isAttention;
+      const projectName = pData.project?.name || 'Project';
+
+      const subtaskGroups = Array.from(pData.subtaskGroupsMap.values()).map((sg) => {
+        return {
+          key: sg.breadcrumbs.map((b) => b.id).join('->'),
+          breadcrumbs: sg.breadcrumbs,
+          tasks: sg.tasks,
+        };
+      });
+
+      subtaskGroups.sort((a, b) => {
+        const aName = a.breadcrumbs.map((n) => n.text).join(' / ');
+        const bName = b.breadcrumbs.map((n) => n.text).join(' / ');
+        return aName.localeCompare(bName);
+      });
+
+      groups.push({
+        projectId: pid,
+        projectName,
+        project: pData.project,
+        isAttention,
+        rootTasks: pData.rootTasks,
+        subtaskGroups,
+        allTasks: pData.allTasks,
+      });
+    });
+
+    groups.sort((a, b) => {
+      if (a.isAttention && !b.isAttention) return -1;
+      if (!a.isAttention && b.isAttention) return 1;
+      return a.projectName.localeCompare(b.projectName);
+    });
+
+    return groups;
+  }, [displayProjectTasks, projectsMap, allNodesMap]);
+
+  // Attention grouping for Today's Project Tasks
+  const todayAttentionGroups = useMemo(() => {
+    const attentionTasks: Node[] = [];
+    const regularTasks: Node[] = [];
+
+    for (const task of displayProjectTasks) {
+      const isAttention = task.projectId && projectsMap.get(task.projectId)?.isAttention;
+      if (isAttention) {
+        attentionTasks.push(task);
+      } else {
+        regularTasks.push(task);
+      }
+    }
+
+    return {
+      attentionTasks,
+      regularTasks,
+    };
+  }, [displayProjectTasks, projectsMap]);
+
+  // Unified list of standalone tasks for multi-mode display
+  // Unified list of standalone tasks for multi-mode display:
+  // Ordered: Overdue first (earliest due first), then Today's, then Upcoming (soonest due first)
+  const allDisplayStandaloneTasks = useMemo(() => {
+    const seen = new Set<string>();
+    const list: StandaloneTask[] = [];
+    for (const t of myDayData.standaloneTasks) {
+      if (!seen.has(t.id)) {
+        seen.add(t.id);
+        list.push(t);
+      }
+    }
+    for (const t of otherStandaloneTasks) {
+      if (!seen.has(t.id)) {
+        seen.add(t.id);
+        list.push(t);
+      }
+    }
+
+    list.sort((a, b) => {
+      const aOverdue = isBefore(a.dueDate, today);
+      const bOverdue = isBefore(b.dueDate, today);
+      const aToday = a.dueDate === today;
+      const bToday = b.dueDate === today;
+
+      const aRank = aOverdue ? 0 : aToday ? 1 : 2;
+      const bRank = bOverdue ? 0 : bToday ? 1 : 2;
+
+      if (aRank !== bRank) {
+        return aRank - bRank;
+      }
+      return a.dueDate.localeCompare(b.dueDate);
+    });
+
+    return list;
+  }, [myDayData.standaloneTasks, otherStandaloneTasks, today]);
 
   const overdueStandaloneTasks = useMemo(() => {
-    return otherStandaloneTasks.filter((t) => isBefore(t.dueDate, today));
-  }, [otherStandaloneTasks, today]);
+    return allDisplayStandaloneTasks.filter((t) => isBefore(t.dueDate, today));
+  }, [allDisplayStandaloneTasks, today]);
 
-  const filteredOtherTasks = useMemo(() => {
-    if (standaloneFilter === 'upcoming') return upcomingStandaloneTasks;
-    if (standaloneFilter === 'overdue') return overdueStandaloneTasks;
-    return otherStandaloneTasks;
-  }, [standaloneFilter, otherStandaloneTasks, upcomingStandaloneTasks, overdueStandaloneTasks]);
+  const todayStandaloneTasks = useMemo(() => {
+    return allDisplayStandaloneTasks.filter((t) => t.dueDate === today);
+  }, [allDisplayStandaloneTasks, today]);
+
+  const upcomingStandaloneTasks = useMemo(() => {
+    return allDisplayStandaloneTasks.filter((t) => isAfter(t.dueDate, today));
+  }, [allDisplayStandaloneTasks, today]);
+
+  // Schedule grouping for Standalone Tasks: Overdue first, then Today, then Upcoming
+  const standaloneScheduleGroups = useMemo(() => {
+    return [
+      {
+        id: 'overdue',
+        title: 'Overdue Standalone Tasks',
+        badgeClass: 'bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-200 border-amber-300 dark:border-amber-800',
+        tasks: overdueStandaloneTasks,
+      },
+      {
+        id: 'today',
+        title: "Today's Tasks",
+        badgeClass: 'bg-teal-100 text-teal-800 dark:bg-teal-950/80 dark:text-teal-200 border-teal-300 dark:border-teal-800',
+        tasks: todayStandaloneTasks,
+      },
+      {
+        id: 'upcoming',
+        title: 'Upcoming Tasks',
+        badgeClass: 'bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-200 border-blue-300 dark:border-blue-800',
+        tasks: upcomingStandaloneTasks,
+      },
+    ].filter((g) => g.tasks.length > 0 || g.id === 'today');
+  }, [overdueStandaloneTasks, todayStandaloneTasks, upcomingStandaloneTasks]);
+
+  // Recurrence grouping for Standalone Tasks
+  const standaloneRecurrenceGroups = useMemo(() => {
+    const recurring: StandaloneTask[] = [];
+    const oneOff: StandaloneTask[] = [];
+
+    for (const t of allDisplayStandaloneTasks) {
+      if (t.recurrence) {
+        recurring.push(t);
+      } else {
+        oneOff.push(t);
+      }
+    }
+
+    recurring.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    oneOff.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+
+    return [
+      {
+        id: 'recurring',
+        title: 'Recurring Standalone Tasks',
+        tasks: recurring,
+      },
+      {
+        id: 'one_off',
+        title: 'One-Off Standalone Tasks',
+        tasks: oneOff,
+      },
+    ].filter((g) => g.tasks.length > 0);
+  }, [allDisplayStandaloneTasks]);
 
   const handleAddStandalone = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -143,6 +638,9 @@ export const MyDayView: React.FC = () => {
   };
 
   const handleToggleNodeStatus = async (nodeId: string, currentStatus: NodeStatus) => {
+    if (allActiveNodes.some((n) => n.parentNodeId === nodeId && n.status === 'in_progress')) {
+      return;
+    }
     const newStatus: NodeStatus = currentStatus === 'completed' ? 'planned' : 'completed';
     await updateNodeStatus(nodeId, newStatus);
   };
@@ -154,6 +652,547 @@ export const MyDayView: React.FC = () => {
 
   const handleModeChange = async (mode: 'today' | 'current_tasks') => {
     await updatePreferences({ myDayMode: mode });
+  };
+
+  const renderLateProjectTaskRow = (
+    task: Node,
+    options?: {
+      hideProjectBadge?: boolean;
+      hideParentBreadcrumbs?: boolean;
+    }
+  ) => {
+    const project = task.projectId ? projectsMap.get(task.projectId) : undefined;
+    const projectTheme = getProjectColorTheme(project?.style?.color);
+    const overdueDays = Math.max(1, daysBetween(task.dueDate, today));
+    const parentBreadcrumbs = getParentBreadcrumbs(task);
+    const parentNode = task.parentNodeId ? allNodesMap.get(task.parentNodeId) : undefined;
+    const hasInProgressChild = allActiveNodes.some(
+      (n) => n.parentNodeId === task.id && n.status === 'in_progress'
+    );
+    const isCalendarOpen = activeCalendarLateId === task.id;
+
+    return (
+      <div
+        key={task.id}
+        className={`bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-900/60 hover:border-rose-300 dark:hover:border-rose-700 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0 group transition-all shadow-xs ${
+          isCalendarOpen ? 'relative z-30' : ''
+        }`}
+      >
+        <div className="flex items-start sm:items-center space-x-3 min-w-0 flex-1 sm:mr-2">
+          <button
+            onClick={() => handleToggleNodeStatus(task.id, task.status)}
+            disabled={hasInProgressChild}
+            className={`transition-colors shrink-0 mt-0.5 sm:mt-0 ${
+              hasInProgressChild
+                ? 'text-amber-500 cursor-not-allowed opacity-90'
+                : 'text-slate-400 hover:text-emerald-500 cursor-pointer'
+            }`}
+            title={
+              hasInProgressChild
+                ? 'In Progress: subtasks are in progress (status cannot be modified)'
+                : 'Mark complete'
+            }
+          >
+            {hasInProgressChild ? (
+              <Clock className="w-5 h-5 text-amber-500 animate-pulse" />
+            ) : task.status === 'completed' ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+            ) : (
+              <Circle className="w-5 h-5" />
+            )}
+          </button>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center space-x-2">
+              {!options?.hideParentBreadcrumbs && parentNode && (
+                <button
+                  type="button"
+                  onClick={() => handleOpenTaskInProject(task)}
+                  className="flex items-center space-x-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/60 px-2 py-0.5 rounded shrink-0 shadow-2xs hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors cursor-pointer"
+                  title={`Subtask inside "${parentNode.text}" - Click to open task in project`}
+                >
+                  <Layers className="w-3 h-3" />
+                  <span>Subtask</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => handleOpenTaskInProject(task)}
+                className={`text-sm font-medium text-slate-800 dark:text-slate-200 truncate hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-colors cursor-pointer text-left ${
+                  task.status === 'completed' ? 'line-through text-slate-400 dark:text-slate-500' : ''
+                }`}
+                title={`Open task "${task.text}" in project`}
+              >
+                {task.text}
+              </button>
+            </div>
+            {!options?.hideParentBreadcrumbs && parentBreadcrumbs.length > 0 && (
+              <div className="flex items-center space-x-1.5 text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                <span className="text-slate-400 dark:text-slate-500 font-mono text-xs">↳</span>
+                <span className="text-slate-400 dark:text-slate-500 shrink-0">Inside:</span>
+                <div className="flex items-center space-x-1 truncate">
+                  {parentBreadcrumbs.map((pNode, idx) => (
+                    <React.Fragment key={pNode.id}>
+                      {idx > 0 && <span className="text-slate-400 dark:text-slate-600">→</span>}
+                      <button
+                        type="button"
+                        className="font-medium text-slate-600 dark:text-slate-300 truncate hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-colors cursor-pointer text-left"
+                        onClick={() => handleOpenTaskInProject(task, pNode)}
+                        title={`Go to parent node "${pNode.text}"`}
+                      >
+                        {pNode.text}
+                      </button>
+                    </React.Fragment>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-2 shrink-0 ml-8 sm:ml-auto flex-wrap sm:flex-nowrap gap-y-1">
+          {/* Project Badge if not hidden */}
+          {!options?.hideProjectBadge && task.projectId && (
+            <button
+              onClick={() => handleOpenTaskInProject(task)}
+              className={`hidden sm:flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-xs font-medium ${projectTheme.badgeBg} hover:opacity-85 transition-all cursor-pointer max-w-[140px] truncate shadow-xs`}
+              title={`Open project "${project?.name || 'Project'}"`}
+            >
+              <ProjectIconDisplay icon={project?.style?.icon} emoji={project?.style?.emoji} className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{project?.name || 'Project'}</span>
+            </button>
+          )}
+
+          {/* Priority Attention Badge if not hidden */}
+          {!options?.hideProjectBadge && project?.isAttention && (
+            <span
+              className="hidden xs:flex items-center space-x-1 px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60 shadow-2xs shrink-0"
+              title="Priority Attention Project"
+            >
+              <Zap className="w-3 h-3 fill-current text-amber-500" />
+              <span>Attention</span>
+            </span>
+          )}
+
+          {/* Overdue Badge */}
+          <span
+            className="text-xs font-semibold px-2 py-0.5 rounded-md bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/60 flex items-center space-x-1"
+            title={`Due date: ${formatDateDisplay(task.dueDate)}`}
+          >
+            <Clock className="w-3.5 h-3.5 text-rose-500" />
+            <span>{overdueDays}d late</span>
+            <span className="hidden sm:inline text-rose-500/80 font-normal">({formatDateDisplay(task.dueDate)})</span>
+          </span>
+
+          {/* Quick Move to Today Button */}
+          <button
+            onClick={() => moveNodeDate(task.id, today, true)}
+            className="px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 transition-colors cursor-pointer"
+            title="Move due date to Today"
+          >
+            <span className="hidden xs:inline">Move to Today</span>
+            <span className="xs:hidden">Today</span>
+          </button>
+
+          {/* Custom Date Picker */}
+          <div className={`relative ${isCalendarOpen ? 'z-50' : ''}`}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setActiveCalendarLateId((prev) => (prev === task.id ? null : task.id));
+              }}
+              className="p-1 rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              title="Reschedule to custom date"
+            >
+              <Calendar className="w-3.5 h-3.5" />
+            </button>
+
+            {activeCalendarLateId === task.id && (
+              <CalendarPicker
+                value={task.dueDate}
+                onChange={(newDate) => {
+                  moveNodeDate(task.id, newDate, true);
+                  setActiveCalendarLateId(null);
+                }}
+                onClose={() => setActiveCalendarLateId(null)}
+                position="bottom"
+                align="right"
+              />
+            )}
+          </div>
+
+          {task.projectId && (
+            <button
+              onClick={() => handleOpenTaskInProject(task)}
+              className="p-1 rounded text-slate-400 hover:text-emerald-500 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              title="Open Project Graph"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderLateStandaloneTaskRow = (
+    task: StandaloneTask,
+    options?: { hideStandaloneBadge?: boolean }
+  ) => {
+    const overdueDays = Math.max(1, daysBetween(task.dueDate, today));
+    const isCalendarOpen = activeCalendarLateId === task.id;
+
+    return (
+      <div
+        key={task.id}
+        className={`bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-900/60 hover:border-rose-300 dark:hover:border-rose-700 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0 group transition-all shadow-xs ${
+          isCalendarOpen ? 'relative z-30' : ''
+        }`}
+      >
+        <div className="flex items-start sm:items-center space-x-3 min-w-0 flex-1 sm:mr-2">
+          <button
+            onClick={() => handleToggleStandaloneStatus(task.id, task.status)}
+            className="text-slate-400 hover:text-teal-500 transition-colors shrink-0 cursor-pointer mt-0.5 sm:mt-0"
+            title="Mark complete"
+          >
+            {task.status === 'completed' ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+            ) : (
+              <Circle className="w-5 h-5" />
+            )}
+          </button>
+          <span
+            className={`text-sm font-medium text-slate-800 dark:text-slate-200 truncate ${
+              task.status === 'completed' ? 'line-through text-slate-400 dark:text-slate-500' : ''
+            }`}
+          >
+            {task.text}
+          </span>
+        </div>
+
+        <div className="flex items-center space-x-2 shrink-0 ml-8 sm:ml-auto flex-wrap sm:flex-nowrap gap-y-1">
+          {!options?.hideStandaloneBadge && (
+            <span className="hidden sm:inline-block text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+              Standalone
+            </span>
+          )}
+
+          {/* Overdue Badge */}
+          <span
+            className="text-xs font-semibold px-2 py-0.5 rounded-md bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/60 flex items-center space-x-1"
+            title={`Due date: ${formatDateDisplay(task.dueDate)}`}
+          >
+            <Clock className="w-3.5 h-3.5 text-rose-500" />
+            <span>{overdueDays}d late</span>
+            <span className="hidden sm:inline text-rose-500/80 font-normal">({formatDateDisplay(task.dueDate)})</span>
+          </span>
+
+          {/* Quick Move to Today Button */}
+          <button
+            onClick={() => updateStandaloneTask({ ...task, dueDate: today })}
+            className="px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 transition-colors cursor-pointer"
+            title="Move due date to Today"
+          >
+            <span className="hidden xs:inline">Move to Today</span>
+            <span className="xs:hidden">Today</span>
+          </button>
+
+          {/* Custom Date Picker */}
+          <div className={`relative ${isCalendarOpen ? 'z-50' : ''}`}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setActiveCalendarLateId((prev) => (prev === task.id ? null : task.id));
+              }}
+              className="p-1.5 sm:p-1 rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              title="Reschedule to custom date"
+            >
+              <Calendar className="w-3.5 h-3.5" />
+            </button>
+
+            {activeCalendarLateId === task.id && (
+              <CalendarPicker
+                value={task.dueDate}
+                onChange={(newDate) => {
+                  updateStandaloneTask({ ...task, dueDate: newDate });
+                  setActiveCalendarLateId(null);
+                }}
+                onClose={() => setActiveCalendarLateId(null)}
+                position="bottom"
+                align="right"
+              />
+            )}
+          </div>
+
+          <button
+            onClick={() => deleteStandaloneTask(task.id)}
+            className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 p-1.5 sm:p-1 transition-opacity cursor-pointer"
+            title="Delete standalone task"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  const renderTodayProjectTaskRow = (
+    task: Node,
+    options?: {
+      hideProjectBadge?: boolean;
+      hideParentBreadcrumbs?: boolean;
+    }
+  ) => {
+    const project = task.projectId ? projectsMap.get(task.projectId) : undefined;
+    const projectTheme = getProjectColorTheme(project?.style?.color);
+    const parentBreadcrumbs = getParentBreadcrumbs(task);
+    const parentNode = task.parentNodeId ? allNodesMap.get(task.parentNodeId) : undefined;
+    const hasInProgressChild = allActiveNodes.some(
+      (n) => n.parentNodeId === task.id && n.status === 'in_progress'
+    );
+    const isCalendarOpen = activeCalendarTodayProjectId === task.id;
+
+    return (
+      <div
+        key={task.id}
+        className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0 group transition-all shadow-xs ${
+          isCalendarOpen ? 'relative z-30' : ''
+        }`}
+      >
+        <div className="flex items-start sm:items-center space-x-3 min-w-0 flex-1 sm:mr-2">
+          <button
+            onClick={() => handleToggleNodeStatus(task.id, task.status)}
+            disabled={hasInProgressChild}
+            className={`transition-colors shrink-0 mt-0.5 sm:mt-0 ${
+              hasInProgressChild
+                ? 'text-amber-500 cursor-not-allowed opacity-90'
+                : 'text-slate-400 hover:text-emerald-500 cursor-pointer'
+            }`}
+            title={
+              hasInProgressChild
+                ? 'In Progress: subtasks are in progress (status cannot be modified)'
+                : task.status === 'completed'
+                ? 'Mark incomplete'
+                : 'Mark complete'
+            }
+          >
+            {hasInProgressChild ? (
+              <Clock className="w-5 h-5 text-amber-500 animate-pulse" />
+            ) : task.status === 'completed' ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+            ) : (
+              <Circle className="w-5 h-5" />
+            )}
+          </button>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center space-x-2">
+              {!options?.hideParentBreadcrumbs && parentNode && (
+                <button
+                  type="button"
+                  onClick={() => handleOpenTaskInProject(task)}
+                  className="flex items-center space-x-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/60 px-2 py-0.5 rounded shrink-0 shadow-2xs hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors cursor-pointer"
+                  title={`Subtask inside "${parentNode.text}" - Click to open task in project`}
+                >
+                  <Layers className="w-3 h-3" />
+                  <span>Subtask</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => handleOpenTaskInProject(task)}
+                className={`text-sm font-medium text-slate-800 dark:text-slate-200 truncate hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-colors cursor-pointer text-left ${
+                  task.status === 'completed' ? 'line-through text-slate-400 dark:text-slate-500' : ''
+                }`}
+                title={`Open task "${task.text}" in project`}
+              >
+                {task.text}
+              </button>
+            </div>
+
+            {!options?.hideParentBreadcrumbs && parentBreadcrumbs.length > 0 && (
+              <div className="flex items-center space-x-1.5 text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                <span className="text-slate-400 dark:text-slate-500 font-mono text-xs">↳</span>
+                <span className="text-slate-400 dark:text-slate-500 shrink-0">Inside:</span>
+                <div className="flex items-center space-x-1 truncate">
+                  {parentBreadcrumbs.map((pNode, idx) => (
+                    <React.Fragment key={pNode.id}>
+                      {idx > 0 && <span className="text-slate-400 dark:text-slate-600">→</span>}
+                      <button
+                        type="button"
+                        className="font-medium text-slate-600 dark:text-slate-300 truncate hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-colors cursor-pointer text-left"
+                        onClick={() => handleOpenTaskInProject(task, pNode)}
+                        title={`Go to parent node "${pNode.text}"`}
+                      >
+                        {pNode.text}
+                      </button>
+                    </React.Fragment>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-2 shrink-0 ml-8 sm:ml-auto flex-wrap sm:flex-nowrap gap-y-1">
+          {/* Project Badge if not hidden */}
+          {!options?.hideProjectBadge && task.projectId && (
+            <button
+              onClick={() => handleOpenTaskInProject(task)}
+              className={`hidden sm:flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-xs font-medium ${projectTheme.badgeBg} hover:opacity-85 transition-all cursor-pointer max-w-[140px] truncate shadow-xs`}
+              title={`Open project "${project?.name || 'Project'}"`}
+            >
+              <ProjectIconDisplay icon={project?.style?.icon} emoji={project?.style?.emoji} className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{project?.name || 'Project'}</span>
+            </button>
+          )}
+
+          {/* Priority Attention Badge if not hidden */}
+          {!options?.hideProjectBadge && project?.isAttention && (
+            <span
+              className="hidden xs:flex items-center space-x-1 px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60 shadow-2xs shrink-0"
+              title="Priority Attention Project"
+            >
+              <Zap className="w-3 h-3 fill-current text-amber-500" />
+              <span>Attention</span>
+            </span>
+          )}
+
+          {/* Reschedule Date Button with CalendarPicker */}
+          <div className={`relative ${isCalendarOpen ? 'z-50' : ''}`}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setActiveCalendarTodayProjectId((prev) => (prev === task.id ? null : task.id));
+              }}
+              className="flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-xs font-mono font-medium border bg-slate-100 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:bg-slate-200 dark:hover:bg-slate-800 hover:text-emerald-600 dark:hover:text-emerald-400 hover:border-emerald-300 dark:hover:border-emerald-700/60 transition-colors cursor-pointer group/date"
+              title="Reschedule task to a different day"
+            >
+              <Calendar className="w-3.5 h-3.5 opacity-70 group-hover/date:opacity-100 transition-opacity" />
+              <span>{formatDateDisplay(task.dueDate)}</span>
+            </button>
+
+            {activeCalendarTodayProjectId === task.id && (
+              <CalendarPicker
+                value={task.dueDate}
+                onChange={(newDate) => {
+                  moveNodeDate(task.id, newDate, true);
+                  setActiveCalendarTodayProjectId(null);
+                }}
+                onClose={() => setActiveCalendarTodayProjectId(null)}
+                position="bottom"
+                align="right"
+              />
+            )}
+          </div>
+
+          {task.projectId && (
+            <button
+              onClick={() => handleOpenTaskInProject(task)}
+              className="p-1 rounded text-slate-400 hover:text-emerald-500 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              title="Open Project Graph"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderStandaloneTaskRow = (task: StandaloneTask) => {
+    const isElevated = activeCalendarTaskId === task.id || activeRecurrenceTaskId === task.id;
+    const isTaskOverdue = isBefore(task.dueDate, today);
+
+    return (
+      <div
+        key={task.id}
+        className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0 group transition-all shadow-xs ${
+          isElevated ? 'relative z-30' : ''
+        }`}
+      >
+        <div className="flex items-start sm:items-center space-x-3 min-w-0 flex-1 sm:mr-2">
+          <button
+            onClick={() => handleToggleStandaloneStatus(task.id, task.status)}
+            className="text-slate-400 hover:text-teal-500 transition-colors shrink-0 cursor-pointer mt-0.5 sm:mt-0"
+            title={task.status === 'completed' ? 'Mark incomplete' : 'Mark complete'}
+          >
+            {task.status === 'completed' ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+            ) : (
+              <Circle className="w-5 h-5" />
+            )}
+          </button>
+          <span
+            className={`text-sm font-medium text-slate-800 dark:text-slate-200 truncate ${
+              task.status === 'completed' ? 'line-through text-slate-400 dark:text-slate-500' : ''
+            }`}
+          >
+            {task.text}
+          </span>
+        </div>
+
+        <div className="flex items-center space-x-2 shrink-0 ml-8 sm:ml-auto flex-wrap sm:flex-nowrap gap-y-1">
+          {/* Recurrence Badge / Picker */}
+          <RecurrencePicker
+            value={task.recurrence}
+            baseDate={task.dueDate}
+            onChange={(newRule) => updateStandaloneTask({ ...task, recurrence: newRule })}
+            onOpenChange={(open) => setActiveRecurrenceTaskId(open ? task.id : null)}
+            buttonVariant={task.recurrence ? 'badge' : 'icon'}
+            align="right"
+          />
+
+          {/* Due Date Button & Picker */}
+          <div className={`relative ${activeCalendarTaskId === task.id ? 'z-50' : ''}`}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setActiveCalendarTaskId((prev) => (prev === task.id ? null : task.id));
+              }}
+              className={`flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-xs font-mono font-medium border transition-colors cursor-pointer group/date ${
+                isTaskOverdue
+                  ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-800/60 hover:bg-amber-100'
+                  : 'bg-slate-100 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:text-emerald-600 dark:hover:text-emerald-400'
+              }`}
+              title="Reschedule standalone task"
+            >
+              <Calendar className="w-3.5 h-3.5 opacity-70 group-hover/date:opacity-100 transition-opacity" />
+              <span>{formatDateDisplay(task.dueDate)}</span>
+              {isTaskOverdue && (
+                <span className="text-xs font-sans font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                  Overdue
+                </span>
+              )}
+            </button>
+
+            {activeCalendarTaskId === task.id && (
+              <CalendarPicker
+                value={task.dueDate}
+                onChange={(newDate) => {
+                  updateStandaloneTask({ ...task, dueDate: newDate });
+                  setActiveCalendarTaskId(null);
+                }}
+                onClose={() => setActiveCalendarTaskId(null)}
+                position="bottom"
+                align="right"
+              />
+            )}
+          </div>
+
+          <button
+            onClick={() => deleteStandaloneTask(task.id)}
+            className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 p-1.5 sm:p-1 transition-opacity cursor-pointer"
+            title="Delete standalone task"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -269,212 +1308,439 @@ export const MyDayView: React.FC = () => {
               </div>
             </button>
 
-            <div className="flex items-center space-x-2 shrink-0">
+            <div className="flex items-center space-x-2 shrink-0 flex-wrap gap-y-2">
+              {/* Grouping Mode Switcher */}
+              <div className="flex items-center bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-900/60 p-0.5 rounded-lg shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => handleGroupModeChange('hierarchy')}
+                  className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                    lateTasksGroupMode === 'hierarchy'
+                      ? 'bg-rose-600 text-white shadow-xs font-semibold'
+                      : 'text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                  }`}
+                  title="Group by Project & Subtask Hierarchy"
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Hierarchy</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleGroupModeChange('attention')}
+                  className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                    lateTasksGroupMode === 'attention'
+                      ? 'bg-rose-600 text-white shadow-xs font-semibold'
+                      : 'text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                  }`}
+                  title="Group by Priority Attention"
+                >
+                  <Zap className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Attention</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleGroupModeChange('time')}
+                  className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                    lateTasksGroupMode === 'time'
+                      ? 'bg-rose-600 text-white shadow-xs font-semibold'
+                      : 'text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                  }`}
+                  title="Group by Overdue Time"
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Time</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleGroupModeChange('flat')}
+                  className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                    lateTasksGroupMode === 'flat'
+                      ? 'bg-rose-600 text-white shadow-xs font-semibold'
+                      : 'text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                  }`}
+                  title="Show all late tasks in a flat list"
+                >
+                  <List className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Flat</span>
+                </button>
+              </div>
+
+              {/* Reschedule All to Today */}
               <button
                 onClick={handleRescheduleAllLateToToday}
-                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-rose-50 dark:hover:bg-slate-800 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/60 text-xs font-semibold transition-all cursor-pointer shadow-xs"
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-rose-50 dark:hover:bg-slate-800 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/60 text-xs font-semibold transition-all cursor-pointer shadow-xs"
                 title="Reschedule all late tasks to today"
               >
                 <CalendarCheck className="w-3.5 h-3.5 text-rose-500" />
-                <span>Reschedule All to Today</span>
+                <span className="hidden sm:inline">Reschedule All to Today</span>
+                <span className="sm:hidden">All to Today</span>
               </button>
             </div>
           </div>
 
           {/* Expanded List of Late Tasks */}
           {isLateTasksOpen && (
-            <div className="px-4 pb-4 space-y-2 border-t border-rose-100 dark:border-rose-900/40 pt-3">
-              {/* Late Project Tasks */}
-              {lateProjectTasks.map((task) => {
-                const project = task.projectId ? projectsMap.get(task.projectId) : undefined;
-                const projectTheme = getProjectColorTheme(project?.style?.color);
-                const overdueDays = Math.max(1, daysBetween(task.dueDate, today));
+            <div className="px-4 pb-4 space-y-3 border-t border-rose-100 dark:border-rose-900/40 pt-3">
+              {/* 1. HIERARCHY MODE */}
+              {lateTasksGroupMode === 'hierarchy' && (
+                <div className="space-y-3">
+                  {lateHierarchyGroups.map((group) => {
+                    const isCollapsed = !!collapsedLateProjects[group.projectId];
+                    const projectTheme = getProjectColorTheme(group.project?.style?.color);
 
-                return (
-                  <div
-                    key={task.id}
-                    className="bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-900/60 hover:border-rose-300 dark:hover:border-rose-700 rounded-xl p-3.5 flex items-center justify-between group transition-all shadow-xs"
-                  >
-                    <div className="flex items-center space-x-3 truncate">
-                      <button
-                        onClick={() => handleToggleNodeStatus(task.id, task.status)}
-                        className="text-slate-400 hover:text-emerald-500 transition-colors shrink-0 cursor-pointer"
-                        title="Mark complete"
+                    return (
+                      <div
+                        key={group.projectId}
+                        className="bg-white/90 dark:bg-slate-900/90 border border-rose-200/80 dark:border-rose-900/50 rounded-xl p-3.5 space-y-3 shadow-xs"
                       >
-                        {task.status === 'completed' ? (
-                          <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                        ) : (
-                          <Circle className="w-5 h-5" />
-                        )}
-                      </button>
-                      <span
-                        className={`text-xs font-medium text-slate-800 dark:text-slate-200 truncate ${
-                          task.status === 'completed' ? 'line-through text-slate-400 dark:text-slate-500' : ''
-                        }`}
-                      >
-                        {task.text}
-                      </span>
-                    </div>
+                        {/* Project Group Header */}
+                        <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-rose-100 dark:border-rose-900/30">
+                          <div className="flex items-center space-x-2.5 min-w-0">
+                            <button
+                              type="button"
+                              onClick={() => toggleProjectCollapse(group.projectId)}
+                              className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
+                              title={isCollapsed ? 'Expand project tasks' : 'Collapse project tasks'}
+                            >
+                              {isCollapsed ? (
+                                <ChevronRight className="w-3.5 h-3.5" />
+                              ) : (
+                                <ChevronDown className="w-3.5 h-3.5" />
+                              )}
+                            </button>
 
-                    <div className="flex items-center space-x-2.5 shrink-0 ml-4">
-                      {/* Project Badge */}
-                      {task.projectId && (
-                        <button
-                          onClick={() => openProject(task.projectId!)}
-                          className={`flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-[10px] font-medium ${projectTheme.badgeBg} hover:opacity-85 transition-all cursor-pointer max-w-[130px] truncate shadow-xs`}
-                          title={`Open project "${project?.name || 'Project'}"`}
-                        >
-                          <ProjectIconDisplay icon={project?.style?.icon} emoji={project?.style?.emoji} className="w-3 h-3 shrink-0" />
-                          <span className="truncate">{project?.name || 'Project'}</span>
-                        </button>
-                      )}
+                            <button
+                              type="button"
+                              onClick={() => group.project && openProject(group.projectId)}
+                              className="flex items-center space-x-2 group/title cursor-pointer hover:opacity-80 transition-opacity"
+                              title={`Open project "${group.projectName}"`}
+                            >
+                              <div className={`p-1.5 rounded-lg ${projectTheme.badgeBg}`}>
+                                <ProjectIconDisplay
+                                  icon={group.project?.style?.icon}
+                                  emoji={group.project?.style?.emoji}
+                                  className="w-4 h-4"
+                                />
+                              </div>
+                              <span className="text-sm font-semibold text-slate-900 dark:text-slate-100 group-hover/title:text-indigo-600 dark:hover/title:text-indigo-400 transition-colors truncate">
+                                {group.projectName}
+                              </span>
+                            </button>
 
-                      {/* Overdue Badge */}
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/60 flex items-center space-x-1">
-                        <Clock className="w-3 h-3 text-rose-500" />
-                        <span>{overdueDays}d late ({formatDateDisplay(task.dueDate)})</span>
-                      </span>
+                            {group.isAttention && (
+                              <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60 shadow-2xs shrink-0">
+                                <Zap className="w-3 h-3 fill-current text-amber-500" />
+                                <span>Attention</span>
+                              </span>
+                            )}
 
-                      {/* Quick Move to Today Button */}
-                      <button
-                        onClick={() => moveNodeDate(task.id, today, true)}
-                        className="px-2 py-0.5 rounded-md text-[10px] font-medium bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 transition-colors cursor-pointer"
-                        title="Move due date to Today"
-                      >
-                        Move to Today
-                      </button>
+                            <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 font-semibold shrink-0">
+                              {group.allTasks.length} {group.allTasks.length === 1 ? 'task' : 'tasks'}
+                            </span>
+                          </div>
 
-                      {/* Custom Date Picker */}
-                      <div className="relative">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setActiveCalendarLateId((prev) => (prev === task.id ? null : task.id));
-                          }}
-                          className="p-1 rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                          title="Reschedule to custom date"
-                        >
-                          <Calendar className="w-3.5 h-3.5" />
-                        </button>
+                          {/* Batch Action: Reschedule Project to Today */}
+                          <div className="flex items-center space-x-2 shrink-0 ml-auto">
+                            <button
+                              type="button"
+                              onClick={() => handleRescheduleBatchToToday(group.allTasks)}
+                              className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/50 transition-colors cursor-pointer shadow-2xs"
+                              title={`Reschedule all ${group.allTasks.length} late tasks in "${group.projectName}" to Today`}
+                            >
+                              <CalendarCheck className="w-3.5 h-3.5 text-rose-500" />
+                              <span className="hidden xs:inline">Move Project to Today</span>
+                              <span className="xs:hidden">Move to Today</span>
+                            </button>
 
-                        {activeCalendarLateId === task.id && (
-                          <CalendarPicker
-                            value={task.dueDate}
-                            onChange={(newDate) => {
-                              moveNodeDate(task.id, newDate, true);
-                              setActiveCalendarLateId(null);
-                            }}
-                            onClose={() => setActiveCalendarLateId(null)}
-                            position="bottom"
-                            align="right"
-                          />
-                        )}
-                      </div>
+                            {group.project && (
+                              <button
+                                type="button"
+                                onClick={() => openProject(group.projectId)}
+                                className="p-1 rounded text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                                title={`Open project "${group.projectName}" graph`}
+                              >
+                                <ChevronRight className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
 
-                      {task.projectId && (
-                        <button
-                          onClick={() => openProject(task.projectId!)}
-                          className="p-1 rounded text-slate-400 hover:text-emerald-500 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                          title="Open Project Graph"
-                        >
-                          <ChevronRight className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+                        {/* Project Tasks Body (when not collapsed) */}
+                        {!isCollapsed && (
+                          <div className="space-y-2.5 pt-1">
+                            {/* Root Tasks */}
+                            {group.rootTasks.length > 0 && (
+                              <div className="space-y-1.5">
+                                {group.rootTasks.map((task) =>
+                                  renderLateProjectTaskRow(task, { hideProjectBadge: true, hideParentBreadcrumbs: true })
+                                )}
+                              </div>
+                            )}
 
-              {/* Late Standalone Tasks */}
-              {lateStandaloneTasks.map((task) => {
-                const overdueDays = Math.max(1, daysBetween(task.dueDate, today));
+                            {/* Subtask Hierarchical Groups */}
+                            {group.subtaskGroups.map((subGroup) => (
+                              <div
+                                key={subGroup.key}
+                                className="bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-800/70 rounded-lg p-2.5 space-y-1.5"
+                              >
+                                {/* Breadcrumbs trail header */}
+                                <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-300 px-1 pb-1">
+                                  <div className="flex items-center space-x-1.5 truncate">
+                                    <Layers className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                                    <span className="font-semibold text-slate-500 dark:text-slate-400 shrink-0">
+                                      Inside:
+                                    </span>
+                                    <div className="flex items-center space-x-1 truncate font-medium">
+                                      {subGroup.breadcrumbs.map((bNode, idx) => (
+                                        <React.Fragment key={bNode.id}>
+                                          {idx > 0 && <span className="text-slate-400">→</span>}
+                                          <button
+                                            type="button"
+                                            onClick={() => openProject(group.projectId, bNode)}
+                                            className="hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline cursor-pointer truncate"
+                                            title={`Open node "${bNode.text}" in project`}
+                                          >
+                                            {bNode.text}
+                                          </button>
+                                        </React.Fragment>
+                                      ))}
+                                    </div>
+                                  </div>
+                                  <span className="text-xs font-mono text-slate-400 dark:text-slate-500 shrink-0 pl-2">
+                                    {subGroup.tasks.length} {subGroup.tasks.length === 1 ? 'task' : 'tasks'}
+                                  </span>
+                                </div>
 
-                return (
-                  <div
-                    key={task.id}
-                    className="bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-900/60 hover:border-rose-300 dark:hover:border-rose-700 rounded-xl p-3.5 flex items-center justify-between group transition-all shadow-xs"
-                  >
-                    <div className="flex items-center space-x-3 truncate">
-                      <button
-                        onClick={() => handleToggleStandaloneStatus(task.id, task.status)}
-                        className="text-slate-400 hover:text-teal-500 transition-colors shrink-0 cursor-pointer"
-                        title="Mark complete"
-                      >
-                        {task.status === 'completed' ? (
-                          <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                        ) : (
-                          <Circle className="w-5 h-5" />
-                        )}
-                      </button>
-                      <span
-                        className={`text-xs font-medium text-slate-800 dark:text-slate-200 truncate ${
-                          task.status === 'completed' ? 'line-through text-slate-400 dark:text-slate-500' : ''
-                        }`}
-                      >
-                        {task.text}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center space-x-2.5 shrink-0 ml-4">
-                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
-                        Standalone
-                      </span>
-
-                      {/* Overdue Badge */}
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/60 flex items-center space-x-1">
-                        <Clock className="w-3 h-3 text-rose-500" />
-                        <span>{overdueDays}d late ({formatDateDisplay(task.dueDate)})</span>
-                      </span>
-
-                      {/* Quick Move to Today Button */}
-                      <button
-                        onClick={() => updateStandaloneTask({ ...task, dueDate: today })}
-                        className="px-2 py-0.5 rounded-md text-[10px] font-medium bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 transition-colors cursor-pointer"
-                        title="Move due date to Today"
-                      >
-                        Move to Today
-                      </button>
-
-                      {/* Custom Date Picker */}
-                      <div className="relative">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setActiveCalendarLateId((prev) => (prev === task.id ? null : task.id));
-                          }}
-                          className="p-1 rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                          title="Reschedule to custom date"
-                        >
-                          <Calendar className="w-3.5 h-3.5" />
-                        </button>
-
-                        {activeCalendarLateId === task.id && (
-                          <CalendarPicker
-                            value={task.dueDate}
-                            onChange={(newDate) => {
-                              updateStandaloneTask({ ...task, dueDate: newDate });
-                              setActiveCalendarLateId(null);
-                            }}
-                            onClose={() => setActiveCalendarLateId(null)}
-                            position="bottom"
-                            align="right"
-                          />
+                                {/* Task Rows in Subtask Group */}
+                                <div className="space-y-1.5">
+                                  {subGroup.tasks.map((task) =>
+                                    renderLateProjectTaskRow(task, { hideProjectBadge: true, hideParentBreadcrumbs: true })
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         )}
                       </div>
+                    );
+                  })}
 
-                      <button
-                        onClick={() => deleteStandaloneTask(task.id)}
-                        className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 p-1 transition-opacity cursor-pointer"
-                        title="Delete standalone task"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                  {/* Standalone Tasks (Hierarchy mode bottom group) */}
+                  {lateStandaloneTasks.length > 0 && (
+                    <div className="bg-white/90 dark:bg-slate-900/90 border border-rose-200/80 dark:border-rose-900/50 rounded-xl p-3.5 space-y-2.5 shadow-xs">
+                      <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-rose-100 dark:border-rose-900/30">
+                        <div className="flex items-center space-x-2">
+                          <div className="p-1.5 rounded-lg bg-teal-50 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 border border-teal-200 dark:border-teal-800">
+                            <ListTodo className="w-4 h-4" />
+                          </div>
+                          <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                            Standalone Tasks
+                          </span>
+                          <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 font-semibold">
+                            {lateStandaloneTasks.length} {lateStandaloneTasks.length === 1 ? 'task' : 'tasks'}
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRescheduleBatchToToday(lateStandaloneTasks)}
+                          className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/50 transition-colors cursor-pointer shadow-2xs"
+                          title="Reschedule all late standalone tasks to Today"
+                        >
+                          <CalendarCheck className="w-3.5 h-3.5 text-rose-500" />
+                          <span className="hidden xs:inline">Move Standalone to Today</span>
+                          <span className="xs:hidden">Move to Today</span>
+                        </button>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        {lateStandaloneTasks.map((task) =>
+                          renderLateStandaloneTaskRow(task, { hideStandaloneBadge: true })
+                        )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  )}
+                </div>
+              )}
+
+              {/* 2. ATTENTION MODE */}
+              {lateTasksGroupMode === 'attention' && (
+                <div className="space-y-3">
+                  {/* Priority Attention Tasks */}
+                  {lateAttentionGroups.attentionTasks.length > 0 && (
+                    <div className="bg-amber-50/40 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 rounded-xl p-3.5 space-y-2.5 shadow-xs">
+                      <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-amber-200/60 dark:border-amber-900/40">
+                        <div className="flex items-center space-x-2">
+                          <div className="p-1.5 rounded-lg bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60">
+                            <Zap className="w-4 h-4 fill-current text-amber-500" />
+                          </div>
+                          <span className="text-sm font-semibold text-amber-950 dark:text-amber-100">
+                            Priority Attention Tasks
+                          </span>
+                          <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-amber-200/80 dark:bg-amber-900/80 text-amber-900 dark:text-amber-100 font-semibold">
+                            {lateAttentionGroups.attentionTasks.length}
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRescheduleBatchToToday(lateAttentionGroups.attentionTasks)}
+                          className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-white dark:bg-slate-900 hover:bg-amber-100 dark:hover:bg-slate-800 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700/60 transition-colors cursor-pointer shadow-2xs"
+                          title="Reschedule all priority attention tasks to Today"
+                        >
+                          <CalendarCheck className="w-3.5 h-3.5 text-amber-600" />
+                          <span>Move Attention to Today</span>
+                        </button>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        {lateAttentionGroups.attentionTasks.map((task) =>
+                          renderLateProjectTaskRow(task, { hideProjectBadge: false, hideParentBreadcrumbs: false })
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Regular Project Tasks */}
+                  {lateAttentionGroups.regularTasks.length > 0 && (
+                    <div className="bg-white/90 dark:bg-slate-900/90 border border-rose-200/80 dark:border-rose-900/50 rounded-xl p-3.5 space-y-2.5 shadow-xs">
+                      <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-rose-100 dark:border-rose-900/30">
+                        <div className="flex items-center space-x-2">
+                          <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                            <Folder className="w-4 h-4 text-slate-500" />
+                          </div>
+                          <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                            Standard Projects
+                          </span>
+                          <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 font-semibold">
+                            {lateAttentionGroups.regularTasks.length}
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRescheduleBatchToToday(lateAttentionGroups.regularTasks)}
+                          className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/50 transition-colors cursor-pointer shadow-2xs"
+                          title="Reschedule all standard project tasks to Today"
+                        >
+                          <CalendarCheck className="w-3.5 h-3.5 text-rose-500" />
+                          <span>Move Standard to Today</span>
+                        </button>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        {lateAttentionGroups.regularTasks.map((task) =>
+                          renderLateProjectTaskRow(task, { hideProjectBadge: false, hideParentBreadcrumbs: false })
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Standalone Tasks in Attention Mode */}
+                  {lateAttentionGroups.standaloneTasks.length > 0 && (
+                    <div className="bg-white/90 dark:bg-slate-900/90 border border-rose-200/80 dark:border-rose-900/50 rounded-xl p-3.5 space-y-2.5 shadow-xs">
+                      <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-rose-100 dark:border-rose-900/30">
+                        <div className="flex items-center space-x-2">
+                          <div className="p-1.5 rounded-lg bg-teal-50 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 border border-teal-200 dark:border-teal-800">
+                            <ListTodo className="w-4 h-4" />
+                          </div>
+                          <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                            Standalone Tasks
+                          </span>
+                          <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 font-semibold">
+                            {lateAttentionGroups.standaloneTasks.length}
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRescheduleBatchToToday(lateAttentionGroups.standaloneTasks)}
+                          className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/50 transition-colors cursor-pointer shadow-2xs"
+                          title="Reschedule all standalone tasks to Today"
+                        >
+                          <CalendarCheck className="w-3.5 h-3.5 text-rose-500" />
+                          <span>Move Standalone to Today</span>
+                        </button>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        {lateAttentionGroups.standaloneTasks.map((task) =>
+                          renderLateStandaloneTaskRow(task, { hideStandaloneBadge: true })
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 3. TIME / OVERDUE DURATION MODE */}
+              {lateTasksGroupMode === 'time' && (
+                <div className="space-y-3">
+                  {lateTimeGroups.map((tGroup) => (
+                    <div
+                      key={tGroup.id}
+                      className="bg-white/90 dark:bg-slate-900/90 border border-rose-200/80 dark:border-rose-900/50 rounded-xl p-3.5 space-y-2.5 shadow-xs"
+                    >
+                      <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-rose-100 dark:border-rose-900/30">
+                        <div className="flex items-center space-x-2.5">
+                          <div className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800">
+                            <Clock className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <div className="flex items-center space-x-2">
+                              <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                                {tGroup.title}
+                              </span>
+                              <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 font-semibold">
+                                {tGroup.tasks.length}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                              {tGroup.description}
+                            </p>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRescheduleBatchToToday(tGroup.tasks)}
+                          className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/50 transition-colors cursor-pointer shadow-2xs"
+                          title={`Reschedule all ${tGroup.tasks.length} tasks in "${tGroup.title}" to Today`}
+                        >
+                          <CalendarCheck className="w-3.5 h-3.5 text-rose-500" />
+                          <span>Move Group to Today</span>
+                        </button>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        {tGroup.tasks.map((task) => {
+                          if ('projectId' in task && (task as Node).projectId) {
+                            return renderLateProjectTaskRow(task as Node, {
+                              hideProjectBadge: false,
+                              hideParentBreadcrumbs: false,
+                            });
+                          }
+                          return renderLateStandaloneTaskRow(task as StandaloneTask, {
+                            hideStandaloneBadge: false,
+                          });
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* 4. FLAT MODE */}
+              {lateTasksGroupMode === 'flat' && (
+                <div className="space-y-1.5">
+                  {displayLateProjectTasks.map((task) =>
+                    renderLateProjectTaskRow(task, { hideProjectBadge: false, hideParentBreadcrumbs: false })
+                  )}
+                  {lateStandaloneTasks.map((task) =>
+                    renderLateStandaloneTaskRow(task, { hideStandaloneBadge: false })
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -482,129 +1748,385 @@ export const MyDayView: React.FC = () => {
 
       {/* 1. Project Tasks Section */}
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center space-x-2">
             <Folder className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
             <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
               Project Tasks
             </h2>
             <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono">
-              {myDayData.projectTasks.length}
+              {displayProjectTasks.length}
             </span>
+          </div>
+
+          <div className="flex items-center space-x-2 flex-wrap gap-y-2">
+            {/* Grouping Mode Switcher for Today's Project Tasks */}
+            <div className="flex items-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-0.5 rounded-lg shadow-2xs">
+              <button
+                type="button"
+                onClick={() => handleTodayProjectGroupModeChange('hierarchy')}
+                className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                  todayProjectTasksGroupMode === 'hierarchy'
+                    ? 'bg-emerald-600 text-white shadow-xs font-semibold'
+                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+                title="Group by Project & Subtask Hierarchy"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Hierarchy</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTodayProjectGroupModeChange('attention')}
+                className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                  todayProjectTasksGroupMode === 'attention'
+                    ? 'bg-emerald-600 text-white shadow-xs font-semibold'
+                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+                title="Group by Priority Attention"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Attention</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTodayProjectGroupModeChange('flat')}
+                className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                  todayProjectTasksGroupMode === 'flat'
+                    ? 'bg-emerald-600 text-white shadow-xs font-semibold'
+                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+                title="Show all project tasks in a flat list"
+              >
+                <List className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Flat</span>
+              </button>
+            </div>
+
+            {/* Attention Filter Toggle Pills */}
+            <div className="flex items-center bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-0.5 rounded-lg text-xs">
+              <button
+                onClick={() => setAttentionOnlyFilter(false)}
+                className={`px-2.5 py-1 rounded-md font-medium transition-all cursor-pointer ${
+                  !attentionOnlyFilter
+                    ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                }`}
+              >
+                All Projects
+              </button>
+              <button
+                onClick={() => setAttentionOnlyFilter(true)}
+                className={`flex items-center space-x-1 px-2.5 py-1 rounded-md font-medium transition-all cursor-pointer ${
+                  attentionOnlyFilter
+                    ? 'bg-amber-500 text-white shadow-xs font-semibold'
+                    : 'text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300'
+                }`}
+              >
+                <Zap className="w-3 h-3 fill-current" />
+                <span>Attention Only</span>
+              </button>
+            </div>
           </div>
         </div>
 
-        {myDayData.projectTasks.length === 0 ? (
+        {displayProjectTasks.length === 0 ? (
           <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800/80 rounded-xl p-6 text-center text-xs text-slate-500">
-            No project tasks scheduled for today across your active projects.
+            {attentionOnlyFilter
+              ? 'No tasks scheduled for today from your priority attention projects.'
+              : 'No project tasks scheduled for today across your active projects.'}
           </div>
         ) : (
-          <div className="space-y-2">
-            {myDayData.projectTasks.map((task) => {
-              const project = task.projectId ? projectsMap.get(task.projectId) : undefined;
-              const projectTheme = getProjectColorTheme(project?.style?.color);
-              return (
-                <div
-                  key={task.id}
-                  className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 rounded-xl p-3.5 flex items-center justify-between group transition-all shadow-sm"
-                >
-                  <div className="flex items-center space-x-3 truncate">
-                    <button
-                      onClick={() => handleToggleNodeStatus(task.id, task.status)}
-                      className="text-slate-400 hover:text-emerald-500 transition-colors shrink-0 cursor-pointer"
+          <div className="space-y-3">
+            {/* 1. HIERARCHY MODE */}
+            {todayProjectTasksGroupMode === 'hierarchy' && (
+              <div className="space-y-3">
+                {todayHierarchyGroups.map((group) => {
+                  const isCollapsed = !!collapsedTodayProjects[group.projectId];
+                  const projectTheme = getProjectColorTheme(group.project?.style?.color);
+
+                  return (
+                    <div
+                      key={group.projectId}
+                      className="bg-white/90 dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800/80 rounded-xl p-3.5 space-y-3 shadow-xs"
                     >
-                      {task.status === 'completed' ? (
-                        <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                      ) : (
-                        <Circle className="w-5 h-5" />
+                      {/* Project Group Header */}
+                      <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-slate-100 dark:border-slate-800/60">
+                        <div className="flex items-center space-x-2.5 min-w-0">
+                          <button
+                            type="button"
+                            onClick={() => toggleTodayProjectCollapse(group.projectId)}
+                            className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                            title={isCollapsed ? 'Expand project tasks' : 'Collapse project tasks'}
+                          >
+                            {isCollapsed ? (
+                              <ChevronRight className="w-3.5 h-3.5" />
+                            ) : (
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => group.project && openProject(group.projectId)}
+                            className="flex items-center space-x-2 group/title cursor-pointer hover:opacity-80 transition-opacity"
+                            title={`Open project "${group.projectName}"`}
+                          >
+                            <div className={`p-1.5 rounded-lg ${projectTheme.badgeBg}`}>
+                              <ProjectIconDisplay
+                                icon={group.project?.style?.icon}
+                                emoji={group.project?.style?.emoji}
+                                className="w-4 h-4"
+                              />
+                            </div>
+                            <span className="text-sm font-semibold text-slate-900 dark:text-slate-100 group-hover/title:text-indigo-600 dark:group-hover/title:text-indigo-400 transition-colors truncate">
+                              {group.projectName}
+                            </span>
+                          </button>
+
+                          {group.isAttention && (
+                            <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60 shadow-2xs shrink-0">
+                              <Zap className="w-3 h-3 fill-current text-amber-500" />
+                              <span>Attention</span>
+                            </span>
+                          )}
+
+                          <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold shrink-0">
+                            {group.allTasks.length} {group.allTasks.length === 1 ? 'task' : 'tasks'}
+                          </span>
+                        </div>
+
+                        {group.project && (
+                          <button
+                            type="button"
+                            onClick={() => openProject(group.projectId)}
+                            className="p-1 rounded text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer ml-auto"
+                            title={`Open project "${group.projectName}" graph`}
+                          >
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Project Tasks Body */}
+                      {!isCollapsed && (
+                        <div className="space-y-2.5 pt-1">
+                          {/* Root Tasks */}
+                          {group.rootTasks.length > 0 && (
+                            <div className="space-y-1.5">
+                              {group.rootTasks.map((task) =>
+                                renderTodayProjectTaskRow(task, { hideProjectBadge: true, hideParentBreadcrumbs: true })
+                              )}
+                            </div>
+                          )}
+
+                          {/* Subtask Hierarchical Groups */}
+                          {group.subtaskGroups.map((subGroup) => (
+                            <div
+                              key={subGroup.key}
+                              className="bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-800/70 rounded-lg p-2.5 space-y-1.5"
+                            >
+                              {/* Breadcrumbs trail header */}
+                              <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-300 px-1 pb-1">
+                                <div className="flex items-center space-x-1.5 truncate">
+                                  <Layers className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                                  <span className="font-semibold text-slate-500 dark:text-slate-400 shrink-0">
+                                    Inside:
+                                  </span>
+                                  <div className="flex items-center space-x-1 truncate font-medium">
+                                    {subGroup.breadcrumbs.map((bNode, idx) => (
+                                      <React.Fragment key={bNode.id}>
+                                        {idx > 0 && <span className="text-slate-400">→</span>}
+                                        <button
+                                          type="button"
+                                          onClick={() => openProject(group.projectId, bNode)}
+                                          className="hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline cursor-pointer truncate"
+                                          title={`Open node "${bNode.text}" in project`}
+                                        >
+                                          {bNode.text}
+                                        </button>
+                                      </React.Fragment>
+                                    ))}
+                                  </div>
+                                </div>
+                                <span className="text-xs font-mono text-slate-400 dark:text-slate-500 shrink-0 pl-2">
+                                  {subGroup.tasks.length} {subGroup.tasks.length === 1 ? 'task' : 'tasks'}
+                                </span>
+                              </div>
+
+                              {/* Task Rows in Subtask Group */}
+                              <div className="space-y-1.5">
+                                {subGroup.tasks.map((task) =>
+                                  renderTodayProjectTaskRow(task, { hideProjectBadge: true, hideParentBreadcrumbs: true })
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       )}
-                    </button>
-                    <span
-                      className={`text-xs font-medium text-slate-800 dark:text-slate-200 truncate ${
-                        task.status === 'completed' ? 'line-through text-slate-400 dark:text-slate-500' : ''
-                      }`}
-                    >
-                      {task.text}
-                    </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* 2. ATTENTION MODE */}
+            {todayProjectTasksGroupMode === 'attention' && (
+              <div className="space-y-3">
+                {/* Priority Attention Tasks */}
+                {todayAttentionGroups.attentionTasks.length > 0 && (
+                  <div className="bg-amber-50/40 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 rounded-xl p-3.5 space-y-2.5 shadow-xs">
+                    <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-amber-200/60 dark:border-amber-900/40">
+                      <div className="flex items-center space-x-2">
+                        <div className="p-1.5 rounded-lg bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60">
+                          <Zap className="w-4 h-4 fill-current text-amber-500" />
+                        </div>
+                        <span className="text-sm font-semibold text-amber-950 dark:text-amber-100">
+                          Priority Attention Tasks
+                        </span>
+                        <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-amber-200/80 dark:bg-amber-900/80 text-amber-900 dark:text-amber-100 font-semibold">
+                          {todayAttentionGroups.attentionTasks.length}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      {todayAttentionGroups.attentionTasks.map((task) =>
+                        renderTodayProjectTaskRow(task, { hideProjectBadge: false, hideParentBreadcrumbs: false })
+                      )}
+                    </div>
                   </div>
+                )}
 
-                  <div className="flex items-center space-x-2.5 shrink-0 ml-4">
-                    {/* Project Name Badge with Custom Icon & Color Theme */}
-                    {task.projectId && (
-                      <button
-                        onClick={() => openProject(task.projectId!)}
-                        className={`flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-[10px] font-medium ${projectTheme.badgeBg} hover:opacity-85 transition-all cursor-pointer max-w-[140px] truncate shadow-xs`}
-                        title={`Open project "${project?.name || 'Project'}"`}
-                      >
-                        <ProjectIconDisplay icon={project?.style?.icon} emoji={project?.style?.emoji} className="w-3 h-3 shrink-0" />
-                        <span className="truncate">{project?.name || 'Project'}</span>
-                      </button>
-                    )}
+                {/* Regular Tasks */}
+                {todayAttentionGroups.regularTasks.length > 0 && (
+                  <div className="bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 space-y-2.5 shadow-xs">
+                    <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-slate-100 dark:border-slate-800/60">
+                      <div className="flex items-center space-x-2">
+                        <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                          <Folder className="w-4 h-4 text-slate-500" />
+                        </div>
+                        <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                          Standard Projects
+                        </span>
+                        <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
+                          {todayAttentionGroups.regularTasks.length}
+                        </span>
+                      </div>
+                    </div>
 
-                    <span className="text-[11px] font-mono text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-950 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-800">
-                      {formatDateDisplay(task.dueDate)}
-                    </span>
-
-                    {task.projectId && (
-                      <button
-                        onClick={() => openProject(task.projectId!)}
-                        className="p-1 rounded text-slate-400 hover:text-emerald-500 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                        title="Open Project Graph"
-                      >
-                        <ChevronRight className="w-4 h-4" />
-                      </button>
-                    )}
+                    <div className="space-y-1.5">
+                      {todayAttentionGroups.regularTasks.map((task) =>
+                        renderTodayProjectTaskRow(task, { hideProjectBadge: false, hideParentBreadcrumbs: false })
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                )}
+              </div>
+            )}
+
+            {/* 3. FLAT MODE */}
+            {todayProjectTasksGroupMode === 'flat' && (
+              <div className="space-y-1.5">
+                {displayProjectTasks.map((task) =>
+                  renderTodayProjectTaskRow(task, { hideProjectBadge: false, hideParentBreadcrumbs: false })
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
 
       {/* 2. Standalone Tasks Section */}
       <div className="space-y-3 pt-4 border-t border-slate-200 dark:border-slate-800">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center space-x-2">
             <CheckCircle2 className="w-4 h-4 text-teal-500 dark:text-teal-400" />
             <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
               Standalone Tasks
             </h2>
             <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono">
-              {myDayData.standaloneTasks.length}
+              {allDisplayStandaloneTasks.length}
             </span>
+          </div>
+
+          {/* Grouping Mode Switcher for Standalone Tasks */}
+          <div className="flex items-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-0.5 rounded-lg shadow-2xs">
+            <button
+              type="button"
+              onClick={() => handleStandaloneGroupModeChange('schedule')}
+              className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                standaloneGroupMode === 'schedule'
+                  ? 'bg-teal-600 text-white shadow-xs font-semibold'
+                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+              title="Group by Schedule (Overdue, Today, Upcoming)"
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">By Schedule</span>
+              <span className="sm:hidden">Schedule</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleStandaloneGroupModeChange('recurrence')}
+              className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                standaloneGroupMode === 'recurrence'
+                  ? 'bg-teal-600 text-white shadow-xs font-semibold'
+                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+              title="Group by Recurrence (Recurring vs One-Off)"
+            >
+              <RotateCw className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">By Recurrence</span>
+              <span className="sm:hidden">Recurrence</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleStandaloneGroupModeChange('flat')}
+              className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                standaloneGroupMode === 'flat'
+                  ? 'bg-teal-600 text-white shadow-xs font-semibold'
+                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+              title="Show all standalone tasks in a flat list with filters"
+            >
+              <List className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Flat</span>
+            </button>
           </div>
         </div>
 
         {/* Inline Add Standalone Task */}
-        <form onSubmit={handleAddStandalone} className="flex items-center space-x-2">
-          <div className="relative flex-1 flex items-center">
+        <form onSubmit={handleAddStandalone} className={`flex flex-col sm:flex-row sm:items-center gap-2 ${isCalendarOpen || isNewRecurrenceOpen ? 'relative z-30' : ''}`}>
+          <div className="relative flex-1">
             <input
               type="text"
               placeholder="Add a standalone task (e.g. Call dentist, buy printer paper)..."
               value={newStandaloneText}
               onChange={(e) => setNewStandaloneText(e.target.value)}
-              className="w-full text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg py-2.5 pl-3 pr-48 text-slate-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500 shadow-sm"
+              className="w-full text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg py-2.5 pl-3 pr-3 sm:pr-48 text-slate-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500 shadow-sm"
             />
-            <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center space-x-1">
+            {/* Desktop right controls inside input */}
+            <div className="hidden sm:flex absolute right-1.5 top-1/2 -translate-y-1/2 items-center space-x-1">
               {/* Recurrence Selector */}
               <RecurrencePicker
                 value={newStandaloneRecurrence}
                 baseDate={newStandaloneDueDate}
                 onChange={setNewStandaloneRecurrence}
+                onOpenChange={setIsNewRecurrenceOpen}
                 buttonVariant={newStandaloneRecurrence ? 'badge' : 'icon'}
                 align="right"
               />
 
               {/* Due Date Selector */}
-              <div className="relative">
+              <div className={`relative ${isCalendarOpen ? 'z-50' : ''}`}>
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     setIsCalendarOpen((prev) => !prev);
                   }}
-                  className="flex items-center space-x-1 px-2 py-1 text-[11px] font-mono font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 border border-slate-200 dark:border-slate-700 rounded-md transition-colors cursor-pointer group/cal"
+                  className="flex items-center space-x-1.5 px-2.5 py-1 text-xs font-mono font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 border border-slate-200 dark:border-slate-700 rounded-md transition-colors cursor-pointer group/cal"
                   title="Click to select due date"
                 >
                   <Calendar className="w-3.5 h-3.5 text-slate-400 group-hover/cal:text-emerald-500 transition-colors shrink-0" />
@@ -623,231 +2145,227 @@ export const MyDayView: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {/* Mobile-only action row */}
+          <div className="flex sm:hidden items-center justify-between gap-2">
+            <div className="flex items-center space-x-1.5">
+              <RecurrencePicker
+                value={newStandaloneRecurrence}
+                baseDate={newStandaloneDueDate}
+                onChange={setNewStandaloneRecurrence}
+                onOpenChange={setIsNewRecurrenceOpen}
+                buttonVariant={newStandaloneRecurrence ? 'badge' : 'icon'}
+                align="left"
+              />
+
+              <div className={`relative ${isCalendarOpen ? 'z-50' : ''}`}>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsCalendarOpen((prev) => !prev);
+                  }}
+                  className="flex items-center space-x-1.5 px-2.5 py-1.5 text-xs font-mono font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 border border-slate-200 dark:border-slate-700 rounded-md transition-colors cursor-pointer group/cal"
+                  title="Click to select due date"
+                >
+                  <Calendar className="w-3.5 h-3.5 text-slate-400 group-hover/cal:text-emerald-500 transition-colors shrink-0" />
+                  <span>{formatDateDisplay(newStandaloneDueDate)}</span>
+                </button>
+
+                {isCalendarOpen && (
+                  <CalendarPicker
+                    value={newStandaloneDueDate}
+                    onChange={(newDate) => setNewStandaloneDueDate(newDate)}
+                    onClose={() => setIsCalendarOpen(false)}
+                    position="bottom"
+                    align="left"
+                  />
+                )}
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={!newStandaloneText.trim()}
+              className="flex items-center justify-center space-x-1 px-4 py-1.5 rounded-lg text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-colors shrink-0 cursor-pointer shadow-sm"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add</span>
+            </button>
+          </div>
+
+          {/* Desktop-only submit button */}
           <button
             type="submit"
             disabled={!newStandaloneText.trim()}
-            className="px-4 py-2.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-colors shrink-0 cursor-pointer shadow-sm"
+            className="hidden sm:flex px-4 py-2.5 rounded-lg text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-colors shrink-0 cursor-pointer shadow-sm"
           >
             <Plus className="w-4 h-4" />
           </button>
         </form>
 
-        {myDayData.standaloneTasks.length === 0 ? (
-          <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800/80 rounded-xl p-6 text-center text-xs text-slate-500">
+        {allDisplayStandaloneTasks.length === 0 ? (
+          <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800/80 rounded-xl p-6 text-center text-sm text-slate-500">
             No active standalone tasks. Tasks created here exist outside project graphs.
           </div>
         ) : (
-          <div className="space-y-2">
-            {myDayData.standaloneTasks.map((task) => (
-              <div
-                key={task.id}
-                className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 rounded-xl p-3.5 flex items-center justify-between group transition-all shadow-sm"
-              >
-                <div className="flex items-center space-x-3 truncate">
+          <div className="space-y-3">
+            {/* 1. SCHEDULE MODE (Overdue, Today, Upcoming) */}
+            {standaloneGroupMode === 'schedule' && (
+              <div className="space-y-3">
+                {standaloneScheduleGroups.map((sGroup) => {
+                  const isCollapsed = !!collapsedStandaloneGroups[sGroup.id];
+
+                  return (
+                    <div
+                      key={sGroup.id}
+                      className="bg-white/90 dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800/80 rounded-xl p-3.5 space-y-2.5 shadow-xs"
+                    >
+                      <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-slate-100 dark:border-slate-800/60">
+                        <div className="flex items-center space-x-2">
+                          <button
+                            type="button"
+                            onClick={() => toggleStandaloneGroupCollapse(sGroup.id)}
+                            className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                            title={isCollapsed ? 'Expand group' : 'Collapse group'}
+                          >
+                            {isCollapsed ? (
+                              <ChevronRight className="w-3.5 h-3.5" />
+                            ) : (
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                          <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                            {sGroup.title}
+                          </span>
+                          <span className={`text-xs font-mono px-2 py-0.5 rounded-full font-semibold ${sGroup.badgeClass}`}>
+                            {sGroup.tasks.length}
+                          </span>
+                        </div>
+                      </div>
+
+                      {!isCollapsed && (
+                        <div className="space-y-1.5">
+                          {sGroup.tasks.map((task) => renderStandaloneTaskRow(task))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* 2. RECURRENCE MODE */}
+            {standaloneGroupMode === 'recurrence' && (
+              <div className="space-y-3">
+                {standaloneRecurrenceGroups.map((rGroup) => {
+                  const isCollapsed = !!collapsedStandaloneGroups[rGroup.id];
+
+                  return (
+                    <div
+                      key={rGroup.id}
+                      className="bg-white/90 dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800/80 rounded-xl p-3.5 space-y-2.5 shadow-xs"
+                    >
+                      <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-slate-100 dark:border-slate-800/60">
+                        <div className="flex items-center space-x-2">
+                          <button
+                            type="button"
+                            onClick={() => toggleStandaloneGroupCollapse(rGroup.id)}
+                            className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                            title={isCollapsed ? 'Expand group' : 'Collapse group'}
+                          >
+                            {isCollapsed ? (
+                              <ChevronRight className="w-3.5 h-3.5" />
+                            ) : (
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                          <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                            {rGroup.title}
+                          </span>
+                          <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
+                            {rGroup.tasks.length}
+                          </span>
+                        </div>
+                      </div>
+
+                      {!isCollapsed && (
+                        <div className="space-y-1.5">
+                          {rGroup.tasks.map((task) => renderStandaloneTaskRow(task))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* 3. FLAT MODE WITH FILTER PILLS (Overdue first, then Today, then Upcoming) */}
+            {standaloneGroupMode === 'flat' && (
+              <div className="space-y-2">
+                <div className="flex items-center space-x-1 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-0.5 rounded-lg text-xs self-start">
                   <button
-                    onClick={() => handleToggleStandaloneStatus(task.id, task.status)}
-                    className="text-slate-400 hover:text-teal-500 transition-colors shrink-0 cursor-pointer"
-                  >
-                    {task.status === 'completed' ? (
-                      <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                    ) : (
-                      <Circle className="w-5 h-5" />
-                    )}
-                  </button>
-                  <span
-                    className={`text-xs font-medium text-slate-800 dark:text-slate-200 truncate ${
-                      task.status === 'completed' ? 'line-through text-slate-400 dark:text-slate-500' : ''
+                    onClick={() => setStandaloneFilter('all')}
+                    className={`px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                      standaloneFilter === 'all'
+                        ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-xs font-semibold'
+                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
                     }`}
                   >
-                    {task.text}
-                  </span>
-                </div>
-
-                <div className="flex items-center space-x-2 shrink-0 ml-4">
-                  {/* Recurrence Badge / Picker */}
-                  <RecurrencePicker
-                    value={task.recurrence}
-                    baseDate={task.dueDate}
-                    onChange={(newRule) => updateStandaloneTask({ ...task, recurrence: newRule })}
-                    buttonVariant={task.recurrence ? 'badge' : 'icon'}
-                    align="right"
-                  />
-
-                  <span className="text-[11px] font-mono text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-950 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-800">
-                    {formatDateDisplay(task.dueDate)}
-                  </span>
-                  <button
-                    onClick={() => deleteStandaloneTask(task.id)}
-                    className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 p-1 transition-opacity cursor-pointer"
-                    title="Delete standalone task"
-                  >
-                    <Trash2 className="w-4 h-4" />
+                    All ({allDisplayStandaloneTasks.length})
                   </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* 3. All Standalone Tasks (Other dates / Upcoming / Overdue) */}
-      {otherStandaloneTasks.length > 0 && (
-        <div className="space-y-3 pt-4 border-t border-slate-200 dark:border-slate-800">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <button
-              onClick={() => setIsAllStandaloneOpen(!isAllStandaloneOpen)}
-              className="flex items-center space-x-2 text-left group cursor-pointer"
-            >
-              <div className="p-1 rounded-md bg-slate-100 dark:bg-slate-800 group-hover:bg-slate-200 dark:group-hover:bg-slate-700 transition-colors text-slate-500 dark:text-slate-400">
-                {isAllStandaloneOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-              </div>
-              <div className="flex items-center space-x-2">
-                <ListTodo className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
-                  All Other Standalone Tasks
-                </h2>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono">
-                  {otherStandaloneTasks.length}
-                </span>
-              </div>
-            </button>
-
-            {/* Filter Pills */}
-            {isAllStandaloneOpen && (
-              <div className="flex items-center space-x-1 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-0.5 rounded-lg text-xs self-start sm:self-auto">
-                <button
-                  onClick={() => setStandaloneFilter('all')}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
-                    standaloneFilter === 'all'
-                      ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-xs'
-                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                  }`}
-                >
-                  All ({otherStandaloneTasks.length})
-                </button>
-                <button
-                  onClick={() => setStandaloneFilter('upcoming')}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer flex items-center space-x-1 ${
-                    standaloneFilter === 'upcoming'
-                      ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs'
-                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                  }`}
-                >
-                  <CalendarDays className="w-3 h-3" />
-                  <span>Upcoming ({upcomingStandaloneTasks.length})</span>
-                </button>
-                {overdueStandaloneTasks.length > 0 && (
+                  {overdueStandaloneTasks.length > 0 && (
+                    <button
+                      onClick={() => setStandaloneFilter('overdue')}
+                      className={`px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center space-x-1.5 ${
+                        standaloneFilter === 'overdue'
+                          ? 'bg-white dark:bg-slate-800 text-amber-600 dark:text-amber-400 shadow-xs font-semibold'
+                          : 'text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40'
+                      }`}
+                    >
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      <span>Overdue ({overdueStandaloneTasks.length})</span>
+                    </button>
+                  )}
                   <button
-                    onClick={() => setStandaloneFilter('overdue')}
-                    className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer flex items-center space-x-1 ${
-                      standaloneFilter === 'overdue'
-                        ? 'bg-white dark:bg-slate-800 text-amber-600 dark:text-amber-400 shadow-xs'
-                        : 'text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40'
+                    onClick={() => setStandaloneFilter('today')}
+                    className={`px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center space-x-1.5 ${
+                      standaloneFilter === 'today'
+                        ? 'bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 shadow-xs font-semibold'
+                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
                     }`}
                   >
-                    <AlertCircle className="w-3 h-3" />
-                    <span>Overdue ({overdueStandaloneTasks.length})</span>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Today ({todayStandaloneTasks.length})</span>
                   </button>
-                )}
+                  <button
+                    onClick={() => setStandaloneFilter('upcoming')}
+                    className={`px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center space-x-1.5 ${
+                      standaloneFilter === 'upcoming'
+                        ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs font-semibold'
+                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <CalendarDays className="w-3.5 h-3.5" />
+                    <span>Upcoming ({upcomingStandaloneTasks.length})</span>
+                  </button>
+                </div>
+
+                <div className="space-y-1.5 pt-1">
+                  {(standaloneFilter === 'all'
+                    ? allDisplayStandaloneTasks
+                    : standaloneFilter === 'overdue'
+                    ? overdueStandaloneTasks
+                    : standaloneFilter === 'today'
+                    ? todayStandaloneTasks
+                    : upcomingStandaloneTasks
+                  ).map((task) => renderStandaloneTaskRow(task))}
+                </div>
               </div>
             )}
           </div>
-
-          {/* List of Tasks */}
-          {isAllStandaloneOpen && (
-            <div className="space-y-2 pt-1">
-              {filteredOtherTasks.length === 0 ? (
-                <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800/80 rounded-xl p-4 text-center text-xs text-slate-400">
-                  No tasks match this filter.
-                </div>
-              ) : (
-                filteredOtherTasks.map((task) => {
-                  const isTaskOverdue = isBefore(task.dueDate, today);
-                  return (
-                    <div
-                      key={task.id}
-                      className="bg-white dark:bg-slate-900/90 hover:bg-slate-50 dark:hover:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 rounded-xl p-3.5 flex items-center justify-between group transition-all shadow-sm"
-                    >
-                      <div className="flex items-center space-x-3 truncate">
-                        <button
-                          onClick={() => handleToggleStandaloneStatus(task.id, task.status)}
-                          className="text-slate-400 hover:text-teal-500 transition-colors shrink-0 cursor-pointer"
-                        >
-                          {task.status === 'completed' ? (
-                            <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                          ) : (
-                            <Circle className="w-5 h-5" />
-                          )}
-                        </button>
-                        <span
-                          className={`text-xs font-medium text-slate-800 dark:text-slate-200 truncate ${
-                            task.status === 'completed' ? 'line-through text-slate-400 dark:text-slate-500' : ''
-                          }`}
-                        >
-                          {task.text}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center space-x-2 shrink-0 ml-4 relative">
-                        {/* Recurrence Badge / Picker */}
-                        <RecurrencePicker
-                          value={task.recurrence}
-                          baseDate={task.dueDate}
-                          onChange={(newRule) => updateStandaloneTask({ ...task, recurrence: newRule })}
-                          buttonVariant={task.recurrence ? 'badge' : 'icon'}
-                          align="right"
-                        />
-
-                        {/* Interactive Date Pill with Calendar Picker */}
-                        <div className="relative">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActiveCalendarTaskId((prev) => (prev === task.id ? null : task.id));
-                            }}
-                            className={`flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-[11px] font-mono font-medium border transition-colors cursor-pointer group/date ${
-                              isTaskOverdue
-                                ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-800/60 hover:bg-amber-100'
-                                : 'bg-slate-100 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:text-emerald-600 dark:hover:text-emerald-400'
-                            }`}
-                            title="Click to change date"
-                          >
-                            <Calendar className="w-3 h-3 opacity-70 group-hover/date:opacity-100 transition-opacity" />
-                            <span>{formatDateDisplay(task.dueDate)}</span>
-                            {isTaskOverdue && <span className="text-[9px] font-sans font-bold uppercase tracking-wider">Overdue</span>}
-                          </button>
-
-                          {activeCalendarTaskId === task.id && (
-                            <CalendarPicker
-                              value={task.dueDate}
-                              onChange={(newDate) => {
-                                updateStandaloneTask({ ...task, dueDate: newDate });
-                                setActiveCalendarTaskId(null);
-                              }}
-                              onClose={() => setActiveCalendarTaskId(null)}
-                              position="bottom"
-                              align="right"
-                            />
-                          )}
-                        </div>
-
-                        <button
-                          onClick={() => deleteStandaloneTask(task.id)}
-                          className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 p-1 transition-opacity cursor-pointer"
-                          title="Delete standalone task"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          )}
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Completed Today Toggle */}
       {(myDayData.completedTodayProjectTasks.length > 0 ||
@@ -855,7 +2373,7 @@ export const MyDayView: React.FC = () => {
         <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
           <button
             onClick={() => setShowCompleted(!showCompleted)}
-            className="text-xs text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-medium flex items-center space-x-1.5 cursor-pointer"
+            className="text-sm text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-medium flex items-center space-x-1.5 cursor-pointer"
           >
             <span>
               {showCompleted ? 'Hide' : 'Show'} Completed Today (
@@ -867,28 +2385,108 @@ export const MyDayView: React.FC = () => {
 
           {showCompleted && (
             <div className="space-y-2 mt-3 opacity-75">
-              {myDayData.completedTodayProjectTasks.map((task) => (
-                <div
-                  key={task.id}
-                  className="bg-slate-100 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl p-3 flex items-center justify-between text-xs"
-                >
-                  <div className="flex items-center space-x-3">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                    <span className="line-through text-slate-400">{task.text}</span>
+              {myDayData.completedTodayProjectTasks.map((task) => {
+                const project = task.projectId ? projectsMap.get(task.projectId) : undefined;
+                const parentNode = task.parentNodeId ? allNodesMap.get(task.parentNodeId) : undefined;
+                const parentBreadcrumbs = getParentBreadcrumbs(task);
+
+                return (
+                  <div
+                    key={task.id}
+                    className="bg-slate-100 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl p-3 flex items-center justify-between text-sm group"
+                  >
+                    <div className="flex items-center space-x-3 min-w-0 flex-1 mr-3">
+                      <button
+                        onClick={() => handleToggleNodeStatus(task.id, task.status)}
+                        className="text-emerald-500 hover:text-slate-400 transition-colors shrink-0 cursor-pointer"
+                        title="Mark uncompleted"
+                      >
+                        <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                      </button>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center space-x-2">
+                          {parentNode && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenTaskInProject(task)}
+                              className="flex items-center space-x-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/60 px-2 py-0.5 rounded shrink-0 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors cursor-pointer"
+                              title={`Subtask inside "${parentNode.text}" - Click to open task in project`}
+                            >
+                              <Layers className="w-3 h-3" />
+                              <span>Subtask</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenTaskInProject(task)}
+                            className="text-sm line-through text-slate-400 truncate hover:text-indigo-500 hover:underline transition-colors cursor-pointer text-left"
+                            title={`Open task "${task.text}" in project`}
+                          >
+                            {task.text}
+                          </button>
+                        </div>
+                        {parentBreadcrumbs.length > 0 && (
+                          <div className="flex items-center space-x-1.5 text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                            <span className="text-slate-400 dark:text-slate-500 font-mono text-xs">↳</span>
+                            <span className="text-slate-400 dark:text-slate-500 shrink-0">Inside:</span>
+                            <div className="flex items-center space-x-1 truncate">
+                              {parentBreadcrumbs.map((pNode, idx) => (
+                                <React.Fragment key={pNode.id}>
+                                  {idx > 0 && <span className="text-slate-400 dark:text-slate-600">→</span>}
+                                  <button
+                                    type="button"
+                                    className="font-medium text-slate-500 dark:text-slate-400 truncate hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-colors cursor-pointer text-left"
+                                    onClick={() => handleOpenTaskInProject(task, pNode)}
+                                    title={`Go to parent node "${pNode.text}"`}
+                                  >
+                                    {pNode.text}
+                                  </button>
+                                </React.Fragment>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center space-x-2 shrink-0">
+                      {parentNode && (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenTaskInProject(task, parentNode)}
+                          className="hidden sm:flex items-center space-x-1 px-2 py-0.5 rounded text-xs bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/50 max-w-[130px] truncate hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors cursor-pointer"
+                          title={`Subtask inside "${parentNode.text}" - Click to open parent node`}
+                        >
+                          <Layers className="w-3 h-3 shrink-0" />
+                          <span className="truncate">{parentNode.text}</span>
+                        </button>
+                      )}
+                      {project ? (
+                        <button
+                          onClick={() => handleOpenTaskInProject(task)}
+                          className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 font-mono flex items-center space-x-1 cursor-pointer"
+                          title={`Open project "${project.name}"`}
+                        >
+                          <span className="truncate max-w-[110px]">{project.name}</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      ) : (
+                        <span className="text-xs text-slate-500 font-mono">Project Task</span>
+                      )}
+                    </div>
                   </div>
-                  <span className="text-[10px] text-slate-500 font-mono">Project Task</span>
-                </div>
-              ))}
+                );
+              })}
               {myDayData.completedTodayStandaloneTasks.map((task) => (
                 <div
                   key={task.id}
-                  className="bg-slate-100 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl p-3 flex items-center justify-between text-xs"
+                  className="bg-slate-100 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl p-3 flex items-center justify-between text-sm"
                 >
                   <div className="flex items-center space-x-3">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                    <span className="line-through text-slate-400">{task.text}</span>
+                    <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                    <span className="text-sm line-through text-slate-400">{task.text}</span>
                   </div>
-                  <span className="text-[10px] text-slate-500 font-mono">Standalone</span>
+                  <span className="text-xs text-slate-500 font-mono">Standalone</span>
                 </div>
               ))}
             </div>

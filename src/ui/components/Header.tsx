@@ -11,6 +11,7 @@ import {
   Calendar,
   Smartphone,
   MoreVertical,
+  Coffee,
 } from 'lucide-react';
 import { SyncStatusIndicator } from './SyncStatusIndicator';
 
@@ -214,7 +215,7 @@ export const Header: React.FC = () => {
         <button
           onClick={toggleTheme}
           title={`Switch to ${preferences.theme === 'dark' ? 'Light' : 'Dark'} mode`}
-          className="p-1.5 rounded-md text-slate-500 dark:text-slate-400 hover:text-amber-500 dark:hover:text-amber-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+          className="p-2 sm:p-1.5 rounded-md text-slate-500 dark:text-slate-400 hover:text-amber-500 dark:hover:text-amber-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
         >
           {preferences.theme === 'dark' ? (
             <Sun className="w-4 h-4 text-amber-400" />
@@ -227,7 +228,7 @@ export const Header: React.FC = () => {
         <div className="relative md:hidden">
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="p-1.5 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            className="p-2 sm:p-1.5 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
             title="More Options"
           >
             <MoreVertical className="w-4 h-4" />
@@ -246,7 +247,7 @@ export const Header: React.FC = () => {
                     toggleDateFormat();
                     setIsMobileMenuOpen(false);
                   }}
-                  className="w-full px-3 py-2 text-left text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between cursor-pointer"
+                  className="w-full px-3.5 py-2.5 text-left text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between cursor-pointer"
                 >
                   <span className="flex items-center space-x-2">
                     <Calendar className="w-4 h-4 text-emerald-500" />
@@ -263,7 +264,7 @@ export const Header: React.FC = () => {
                     exportAllData();
                     setIsMobileMenuOpen(false);
                   }}
-                  className="w-full px-3 py-2 text-left text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center space-x-2 cursor-pointer"
+                  className="w-full px-3.5 py-2.5 text-left text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center space-x-2 cursor-pointer"
                 >
                   <Download className="w-4 h-4 text-slate-400" />
                   <span>Export Backup (JSON)</span>
@@ -275,7 +276,7 @@ export const Header: React.FC = () => {
                     fileInputRef.current?.click();
                     setIsMobileMenuOpen(false);
                   }}
-                  className="w-full px-3 py-2 text-left text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center space-x-2 cursor-pointer"
+                  className="w-full px-3.5 py-2.5 text-left text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center space-x-2 cursor-pointer"
                 >
                   <Upload className="w-4 h-4 text-slate-400" />
                   <span>Import Project (JSON)</span>
@@ -288,7 +289,7 @@ export const Header: React.FC = () => {
                       handleInstallApp();
                       setIsMobileMenuOpen(false);
                     }}
-                    className="w-full px-3 py-2 text-left text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 flex items-center space-x-2 font-medium cursor-pointer"
+                    className="w-full px-3.5 py-2.5 text-left text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 flex items-center space-x-2 font-medium cursor-pointer"
                   >
                     <Smartphone className="w-4 h-4" />
                     <span>Install App</span>
@@ -303,11 +304,23 @@ export const Header: React.FC = () => {
                     setIsOnboardingOpen(true);
                     setIsMobileMenuOpen(false);
                   }}
-                  className="w-full px-3 py-2 text-left text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center space-x-2 cursor-pointer"
+                  className="w-full px-3.5 py-2.5 text-left text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center space-x-2 cursor-pointer"
                 >
                   <HelpCircle className="w-4 h-4 text-slate-400" />
                   <span>Tour & Guide</span>
                 </button>
+
+                {/* Support / Donate */}
+                <a
+                  href="https://ko-fi.com/thepolygon"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="w-full px-3.5 py-2.5 text-left text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center space-x-2 cursor-pointer"
+                >
+                  <Coffee className="w-4 h-4 text-amber-500" />
+                  <span>Support / Donate</span>
+                </a>
               </div>
             </>
           )}

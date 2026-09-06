@@ -51,12 +51,14 @@ export class JsonFileProvider {
   }
 
   /**
-   * Exports an entire workspace backup (all projects, standalone tasks, preferences).
+   * Exports an entire workspace backup (all projects, standalone tasks, preferences, idea seeds, activity telemetry).
    */
   public static exportFullWorkspaceBackup(payload: {
     projects: ProjectDocument[];
     standaloneTasks: unknown[];
     preferences: unknown;
+    ideaSeeds?: unknown[];
+    activityLog?: unknown[];
   }): void {
     const dateStr = new Date().toISOString().split('T')[0];
     const filename = `graphdule-backup-${dateStr}.json`;

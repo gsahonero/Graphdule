@@ -19,6 +19,8 @@ import {
   ArchiveRestore,
   AlertCircle,
   Palette,
+  Undo2,
+  Redo2,
 } from 'lucide-react';
 import { getProjectColorTheme, ProjectIconDisplay } from '../../utils/project-style';
 import { ProjectStylePicker } from '../../components/ProjectStylePicker';
@@ -36,6 +38,10 @@ export const ProjectDetailView: React.FC = () => {
     unarchiveProject,
     allAvailableTags,
     exportActiveProject,
+    canUndo,
+    canRedo,
+    undo,
+    redo,
   } = useApp();
 
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -162,7 +168,7 @@ export const ProjectDetailView: React.FC = () => {
             </button>
 
             {isEditingStyle && (
-              <div className="absolute top-full left-0 mt-2 p-3.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl z-50 min-w-[300px] animate-in fade-in zoom-in-95">
+              <div className="absolute top-full left-0 mt-2 p-3.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl z-50 min-w-[280px] sm:min-w-[300px] max-w-[calc(100vw-1.5rem)] animate-in fade-in zoom-in-95">
                 <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100 dark:border-slate-800">
                   <div className="flex items-center space-x-1.5 text-xs font-bold text-slate-800 dark:text-slate-100">
                     <Palette className="w-3.5 h-3.5 text-slate-400" />
@@ -220,7 +226,7 @@ export const ProjectDetailView: React.FC = () => {
                 <h2 className="font-bold text-xs sm:text-sm text-slate-800 dark:text-slate-100 truncate max-w-[80px] xs:max-w-[120px] sm:max-w-xs">
                   {project.name}
                 </h2>
-                <Edit2 className="w-3 h-3 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                <Edit2 className="w-3 h-3 text-slate-400 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0" />
               </div>
             )}
 
@@ -359,8 +365,38 @@ export const ProjectDetailView: React.FC = () => {
           </button>
         </div>
 
-        {/* Right: Progress, Archive/Restore & Export */}
-        <div className="flex items-center space-x-1.5 sm:space-x-3 shrink-0">
+        {/* Right: Undo/Redo, Progress, Archive/Restore & Export */}
+        <div className="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
+          {/* Undo / Redo Actions */}
+          <div className="flex items-center bg-slate-100 dark:bg-slate-950/80 p-0.5 rounded-lg border border-slate-200 dark:border-slate-800 shrink-0">
+            <button
+              onClick={() => undo()}
+              disabled={!canUndo}
+              className={`p-1.5 rounded-md text-xs font-medium transition-all ${
+                canUndo
+                  ? 'text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-white dark:hover:bg-slate-800 cursor-pointer shadow-xs'
+                  : 'text-slate-300 dark:text-slate-700 cursor-not-allowed opacity-50'
+              }`}
+              title="Undo (Ctrl+Z)"
+              aria-label="Undo"
+            >
+              <Undo2 className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => redo()}
+              disabled={!canRedo}
+              className={`p-1.5 rounded-md text-xs font-medium transition-all ${
+                canRedo
+                  ? 'text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-white dark:hover:bg-slate-800 cursor-pointer shadow-xs'
+                  : 'text-slate-300 dark:text-slate-700 cursor-not-allowed opacity-50'
+              }`}
+              title="Redo (Ctrl+Y or Ctrl+Shift+Z)"
+              aria-label="Redo"
+            >
+              <Redo2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
           <div className="hidden md:flex items-center space-x-2">
             <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Progress:</div>
             <div className="w-20 bg-slate-200 dark:bg-slate-800 h-2 rounded-full overflow-hidden">

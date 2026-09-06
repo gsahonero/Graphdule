@@ -1,9 +1,16 @@
-import { ProjectDocument, StandaloneTask, UserPreferences } from '../../domain/models/types';
+import {
+  ProjectDocument,
+  StandaloneTask,
+  UserPreferences,
+  IdeaSeed,
+  ActivityEvent,
+} from '../../domain/models/types';
 import { IStorageProvider, CloudSyncStatus, CloudUserInfo } from '../base/storage-provider';
 import { GDriveAuth } from '../gdrive/gdrive-auth';
 import { GDriveClient } from '../gdrive/gdrive-client';
 import { OneDriveAuth } from '../onedrive/onedrive-auth';
 import { OneDriveClient } from '../onedrive/onedrive-client';
+import { DEFAULT_SAMPLE_PROJECT_ID } from '../../config/sample-project';
 
 const LAST_SYNC_KEY = 'graphdule_last_sync_time';
 const ACTIVE_CLOUD_PROVIDER_KEY = 'graphdule_active_cloud_provider';
@@ -155,16 +162,22 @@ export class SyncCoordinator {
       if (doc) localProjectDocs.set(doc.project.id, doc);
     }
 
-    // Identify project files in cloud (named project_{id}.json)
-    const cloudProjectFiles = cloudFiles.filter((f) => f.name.startsWith('project_') && f.name.endsWith('.json'));
+    // Identify project files in cloud (named project_{id}.json), excluding the default sample project
+    const cloudProjectFiles = cloudFiles.filter(
+      (f) =>
+        f.name.startsWith('project_') &&
+        f.name.endsWith('.json') &&
+        f.name !== `project_${DEFAULT_SAMPLE_PROJECT_ID}.json`
+    );
     const cloudProjectIds = new Set<string>();
 
     for (const cf of cloudProjectFiles) {
       const projectId = cf.name.replace('project_', '').replace('.json', '');
+      if (projectId === DEFAULT_SAMPLE_PROJECT_ID) continue;
       cloudProjectIds.add(projectId);
 
       const cloudDoc = await GDriveClient.downloadJson<ProjectDocument>(cf.id);
-      if (!cloudDoc || !cloudDoc.project) continue;
+      if (!cloudDoc || !cloudDoc.project || cloudDoc.project.id === DEFAULT_SAMPLE_PROJECT_ID) continue;
 
       const localDoc = localProjectDocs.get(projectId);
       if (!localDoc) {
@@ -185,8 +198,19 @@ export class SyncCoordinator {
       }
     }
 
-    // Projects that exist locally but not yet on cloud -> upload to cloud
+    // When importing projects through synchronization, remove the by-default sample project if present locally
+    if (cloudProjectFiles.length > 0 && localProjectDocs.has(DEFAULT_SAMPLE_PROJECT_ID)) {
+      await localProvider.deleteProject(DEFAULT_SAMPLE_PROJECT_ID);
+      try {
+        localStorage.setItem('graphdule_sample_deleted', 'true');
+      } catch {
+        // ignore
+      }
+    }
+
+    // Projects that exist locally but not yet on cloud -> upload to cloud (excluding by-default sample project)
     for (const [id, localDoc] of localProjectDocs.entries()) {
+      if (id === DEFAULT_SAMPLE_PROJECT_ID) continue;
       if (!cloudProjectIds.has(id)) {
         await GDriveClient.uploadJson(`project_${id}.json`, localDoc, folderId);
       }
@@ -211,13 +235,45 @@ export class SyncCoordinator {
 
     if (cloudPrefsFile) {
       const cloudPrefs = (await GDriveClient.downloadJson<UserPreferences>(cloudPrefsFile.id)) || localPrefs;
-      const mergedPrefs: UserPreferences = {
-        ...cloudPrefs,
-        ...localPrefs,
-      };
+      const mergedPrefs = this.mergePreferences(localPrefs, cloudPrefs);
       await localProvider.writePreferences(mergedPrefs);
+      await GDriveClient.uploadJson('preferences.json', mergedPrefs, folderId);
     } else {
       await GDriveClient.uploadJson('preferences.json', localPrefs, folderId);
+    }
+
+    // 4. Sync Idea Seeds
+    if (localProvider.readIdeaSeeds && localProvider.writeIdeaSeeds) {
+      const localSeeds = await localProvider.readIdeaSeeds();
+      const cloudSeedsFile = await GDriveClient.findFileByName('idea_seeds.json', folderId);
+
+      if (cloudSeedsFile) {
+        const cloudSeeds = (await GDriveClient.downloadJson<IdeaSeed[]>(cloudSeedsFile.id)) || [];
+        const mergedSeeds = this.mergeIdeaSeeds(localSeeds, cloudSeeds);
+        await localProvider.writeIdeaSeeds(mergedSeeds);
+        await GDriveClient.uploadJson('idea_seeds.json', mergedSeeds, folderId);
+      } else if (localSeeds.length > 0) {
+        await GDriveClient.uploadJson('idea_seeds.json', localSeeds, folderId);
+      }
+    }
+
+    // 5. Sync Activity Log
+    if (localProvider.readActivityLog && localProvider.appendActivityEvents) {
+      const localLog = await localProvider.readActivityLog();
+      const cloudLogFile = await GDriveClient.findFileByName('activity_log.json', folderId);
+
+      if (cloudLogFile) {
+        const cloudLog = (await GDriveClient.downloadJson<ActivityEvent[]>(cloudLogFile.id)) || [];
+        const mergedLog = this.mergeActivityLogs(localLog, cloudLog);
+        const localIds = new Set(localLog.map((e) => e.id));
+        const newToLocal = mergedLog.filter((e) => !localIds.has(e.id));
+        if (newToLocal.length > 0) {
+          await localProvider.appendActivityEvents(newToLocal);
+        }
+        await GDriveClient.uploadJson('activity_log.json', mergedLog, folderId);
+      } else if (localLog.length > 0) {
+        await GDriveClient.uploadJson('activity_log.json', localLog, folderId);
+      }
     }
   }
 
@@ -234,15 +290,22 @@ export class SyncCoordinator {
       if (doc) localProjectDocs.set(doc.project.id, doc);
     }
 
-    const cloudProjectFiles = cloudFiles.filter((f) => f.name.startsWith('project_') && f.name.endsWith('.json'));
+    // Identify project files in cloud (named project_{id}.json), excluding the default sample project
+    const cloudProjectFiles = cloudFiles.filter(
+      (f) =>
+        f.name.startsWith('project_') &&
+        f.name.endsWith('.json') &&
+        f.name !== `project_${DEFAULT_SAMPLE_PROJECT_ID}.json`
+    );
     const cloudProjectIds = new Set<string>();
 
     for (const cf of cloudProjectFiles) {
       const projectId = cf.name.replace('project_', '').replace('.json', '');
+      if (projectId === DEFAULT_SAMPLE_PROJECT_ID) continue;
       cloudProjectIds.add(projectId);
 
       const cloudDoc = await OneDriveClient.downloadJson<ProjectDocument>(cf.name);
-      if (!cloudDoc || !cloudDoc.project) continue;
+      if (!cloudDoc || !cloudDoc.project || cloudDoc.project.id === DEFAULT_SAMPLE_PROJECT_ID) continue;
 
       const localDoc = localProjectDocs.get(projectId);
       if (!localDoc) {
@@ -259,7 +322,19 @@ export class SyncCoordinator {
       }
     }
 
+    // When importing projects through synchronization, remove the by-default sample project if present locally
+    if (cloudProjectFiles.length > 0 && localProjectDocs.has(DEFAULT_SAMPLE_PROJECT_ID)) {
+      await localProvider.deleteProject(DEFAULT_SAMPLE_PROJECT_ID);
+      try {
+        localStorage.setItem('graphdule_sample_deleted', 'true');
+      } catch {
+        // ignore
+      }
+    }
+
+    // Projects that exist locally but not yet on cloud -> upload to cloud (excluding by-default sample project)
     for (const [id, localDoc] of localProjectDocs.entries()) {
+      if (id === DEFAULT_SAMPLE_PROJECT_ID) continue;
       if (!cloudProjectIds.has(id)) {
         await OneDriveClient.uploadJson(`project_${id}.json`, localDoc);
       }
@@ -282,13 +357,43 @@ export class SyncCoordinator {
     const cloudPrefs = await OneDriveClient.downloadJson<UserPreferences>('preferences.json');
 
     if (cloudPrefs) {
-      const mergedPrefs: UserPreferences = {
-        ...cloudPrefs,
-        ...localPrefs,
-      };
+      const mergedPrefs = this.mergePreferences(localPrefs, cloudPrefs);
       await localProvider.writePreferences(mergedPrefs);
+      await OneDriveClient.uploadJson('preferences.json', mergedPrefs);
     } else {
       await OneDriveClient.uploadJson('preferences.json', localPrefs);
+    }
+
+    // 4. Sync Idea Seeds
+    if (localProvider.readIdeaSeeds && localProvider.writeIdeaSeeds) {
+      const localSeeds = await localProvider.readIdeaSeeds();
+      const cloudSeeds = await OneDriveClient.downloadJson<IdeaSeed[]>('idea_seeds.json');
+
+      if (cloudSeeds) {
+        const mergedSeeds = this.mergeIdeaSeeds(localSeeds, cloudSeeds);
+        await localProvider.writeIdeaSeeds(mergedSeeds);
+        await OneDriveClient.uploadJson('idea_seeds.json', mergedSeeds);
+      } else if (localSeeds.length > 0) {
+        await OneDriveClient.uploadJson('idea_seeds.json', localSeeds);
+      }
+    }
+
+    // 5. Sync Activity Log
+    if (localProvider.readActivityLog && localProvider.appendActivityEvents) {
+      const localLog = await localProvider.readActivityLog();
+      const cloudLog = await OneDriveClient.downloadJson<ActivityEvent[]>('activity_log.json');
+
+      if (cloudLog) {
+        const mergedLog = this.mergeActivityLogs(localLog, cloudLog);
+        const localIds = new Set(localLog.map((e) => e.id));
+        const newToLocal = mergedLog.filter((e) => !localIds.has(e.id));
+        if (newToLocal.length > 0) {
+          await localProvider.appendActivityEvents(newToLocal);
+        }
+        await OneDriveClient.uploadJson('activity_log.json', mergedLog);
+      } else if (localLog.length > 0) {
+        await OneDriveClient.uploadJson('activity_log.json', localLog);
+      }
     }
   }
 
@@ -316,5 +421,77 @@ export class SyncCoordinator {
     }
 
     return Array.from(taskMap.values());
+  }
+
+  /**
+   * Intelligently merges local and cloud idea seeds by ID and updatedAt timestamp.
+   */
+  public static mergeIdeaSeeds(local: IdeaSeed[], cloud: IdeaSeed[]): IdeaSeed[] {
+    const seedMap = new Map<string, IdeaSeed>();
+
+    for (const s of local) {
+      seedMap.set(s.id, s);
+    }
+
+    for (const cs of cloud) {
+      const existing = seedMap.get(cs.id);
+      if (!existing) {
+        seedMap.set(cs.id, cs);
+      } else {
+        const localTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
+        const cloudTime = new Date(cs.updatedAt || cs.createdAt || 0).getTime();
+        if (cloudTime >= localTime) {
+          seedMap.set(cs.id, cs);
+        }
+      }
+    }
+
+    return Array.from(seedMap.values());
+  }
+
+  /**
+   * Merges local and cloud activity telemetry log events idempotently by UUID, sorted by timestamp.
+   */
+  public static mergeActivityLogs(local: ActivityEvent[], cloud: ActivityEvent[]): ActivityEvent[] {
+    const eventMap = new Map<string, ActivityEvent>();
+
+    for (const ev of local) {
+      eventMap.set(ev.id, ev);
+    }
+
+    for (const ev of cloud) {
+      if (!eventMap.has(ev.id)) {
+        eventMap.set(ev.id, ev);
+      }
+    }
+
+    return Array.from(eventMap.values()).sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  }
+
+  /**
+   * Merges user preferences, preserving the newer last active node timestamp.
+   */
+  public static mergePreferences(local: UserPreferences, cloud: UserPreferences): UserPreferences {
+    const localTime = new Date(local.lastActiveTimestamp || 0).getTime();
+    const cloudTime = new Date(cloud.lastActiveTimestamp || 0).getTime();
+
+    const activeNodePrefs =
+      cloudTime > localTime
+        ? {
+            lastActiveNodeId: cloud.lastActiveNodeId,
+            lastActiveProjectId: cloud.lastActiveProjectId,
+            lastActiveTimestamp: cloud.lastActiveTimestamp,
+          }
+        : {
+            lastActiveNodeId: local.lastActiveNodeId || cloud.lastActiveNodeId,
+            lastActiveProjectId: local.lastActiveProjectId || cloud.lastActiveProjectId,
+            lastActiveTimestamp: local.lastActiveTimestamp || cloud.lastActiveTimestamp,
+          };
+
+    return {
+      ...cloud,
+      ...local,
+      ...activeNodePrefs,
+    };
   }
 }

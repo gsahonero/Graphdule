@@ -27,11 +27,18 @@ export const OnboardingModal: React.FC = () => {
         <div className="p-6 space-y-5">
           {/* Header */}
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2 text-emerald-600 dark:text-emerald-400">
-              <Sparkles className="w-5 h-5" />
-              <span className="text-xs font-semibold uppercase tracking-wider">
-                Step {currentStepIndex + 1} of {steps.length}
-              </span>
+            <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-1.5 text-emerald-600 dark:text-emerald-400">
+                <Sparkles className="w-4 h-4" />
+                <span className="text-xs font-semibold uppercase tracking-wider">
+                  Step {currentStepIndex + 1} of {steps.length}
+                </span>
+              </div>
+              {currentStep.badge && (
+                <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/10 dark:bg-emerald-400/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                  {currentStep.badge}
+                </span>
+              )}
             </div>
             <button
               onClick={handleFinish}
@@ -42,13 +49,46 @@ export const OnboardingModal: React.FC = () => {
           </div>
 
           {/* Step Body */}
-          <div className="space-y-2 py-2">
+          <div className="space-y-3 py-1">
             <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 tracking-tight">
               {currentStep.title}
             </h3>
             <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
               {currentStep.description}
             </p>
+
+            {/* Step Highlights */}
+            {currentStep.highlights && currentStep.highlights.length > 0 && (
+              <div className="space-y-1.5 pt-2">
+                {currentStep.highlights.map((h, i) => (
+                  <div
+                    key={i}
+                    className="flex items-start space-x-2 text-xs text-slate-600 dark:text-slate-300"
+                  >
+                    <span className="text-emerald-500 font-bold shrink-0">✓</span>
+                    <span>{h}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Donate Message (exact wording from CVbuilder on the final step) */}
+            {(isLastStep || currentStep.donate) && (
+              <div className="mt-4 p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700/80 text-center shadow-xs">
+                <div className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                  Please consider{' '}
+                  <a
+                    href="https://ko-fi.com/thepolygon"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sky-600 dark:text-sky-400 underline font-semibold hover:text-sky-700 dark:hover:text-sky-300 transition-colors"
+                  >
+                    donating something
+                  </a>{' '}
+                  if you liked this project! ☕
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Stepper Dots */}

@@ -86,6 +86,28 @@ class InMemoryStorageProvider implements IStorageProvider {
   public async writeSnapshot(snapshot: ProjectSnapshot): Promise<void> {
     this.snapshots.push(snapshot);
   }
+
+  private ideaSeeds: any[] = [];
+  private activityLog: any[] = [];
+
+  public async readIdeaSeeds(): Promise<any[]> {
+    return this.ideaSeeds;
+  }
+  public async writeIdeaSeeds(seeds: any[]): Promise<void> {
+    this.ideaSeeds = seeds;
+  }
+  public async deleteIdeaSeed(seedId: string): Promise<void> {
+    this.ideaSeeds = this.ideaSeeds.filter((s) => s.id !== seedId);
+  }
+  public async readActivityLog(): Promise<any[]> {
+    return this.activityLog;
+  }
+  public async appendActivityEvents(events: any[]): Promise<void> {
+    this.activityLog.push(...events);
+  }
+  public async clearActivityLog(): Promise<void> {
+    this.activityLog = [];
+  }
 }
 
 describe('MCP Domain API', () => {

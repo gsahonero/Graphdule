@@ -1,35 +1,76 @@
 {
-  "version": 1,
+  "version": 2,
   "steps": [
     {
       "id": "welcome",
       "title": "Welcome to Graphdule",
-      "description": "Projects are graphs of evolving understanding. Decompose long-term goals into concrete work linked by dependency.",
-      "target": "header-brand"
+      "description": "Projects are graphs of evolving understanding. Decompose long-term goals into concrete tasks connected by explicit dependency arrows leading to a single End Goal.",
+      "target": "header-brand",
+      "badge": "Overview",
+      "highlights": [
+        "Single End Goal Node (EGN) anchor",
+        "Strict cycle-free dependency DAG"
+      ]
     },
     {
-      "id": "projects",
-      "title": "Projects Dashboard",
-      "description": "Every project has exactly one graph and exactly one Goal representing its ultimate objective.",
-      "target": "nav-projects"
+      "id": "graph-cascade",
+      "title": "Graph, Cascade & Timeline",
+      "description": "Visualize workflows left-to-right. Move tasks and let the intelligent cascade engine preview downstream date shifts before applying them. Switch to Timeline for temporal Gantt projections.",
+      "target": "nav-projects",
+      "badge": "Core Workflow",
+      "highlights": [
+        "Interactive left-to-right DAG with status colors",
+        "Topological cascade shifts and impact preview",
+        "Derived spans and detailed task notes drawer"
+      ]
     },
     {
       "id": "my-day",
-      "title": "My Day Execution",
-      "description": "See today's active project tasks alongside standalone non-project tasks.",
-      "target": "nav-my-day"
+      "title": "My Day Execution & Recurrence",
+      "description": "Focus on what matters today. Combine active project tasks with standalone recurring work (daily, weekly, monthly) and toggle between 'Today' and 'Current Active' tasks.",
+      "target": "nav-my-day",
+      "badge": "Daily Focus",
+      "highlights": [
+        "Daily execution surface with quick completion",
+        "Recurring tasks with configurable frequency",
+        "Toggle between Today and all Current tasks"
+      ]
     },
     {
-      "id": "graph-view",
-      "title": "Graph, Timeline & History",
-      "description": "Visualise dependencies left-to-right, explore derived temporal projections on the timeline, and inspect immutable version history.",
-      "target": "nav-tabs"
+      "id": "cloud-sync",
+      "title": "Cloud Sync & Google Calendar",
+      "description": "Seamlessly backup and synchronize your database across devices with Google Drive or Microsoft OneDrive. Sync deadlines two-way with Google Calendar so your schedule is always with you.",
+      "target": "storage-status-indicator",
+      "badge": "New Feature",
+      "highlights": [
+        "Direct Google Drive & OneDrive cloud integration",
+        "Google Calendar synchronization for deadlines",
+        "Live status badge and cross-device conflict resolution"
+      ]
     },
     {
-      "id": "storage",
-      "title": "Local-First & User Controlled",
-      "description": "Your data is stored locally in your browser. Export or sync your canonical JSON anytime to protect your work.",
-      "target": "storage-status-indicator"
+      "id": "storage-pwa",
+      "title": "Local-First & Installable PWA",
+      "description": "Your data stays 100% private and stored locally in browser IndexedDB with zero cloud lock-in. Export canonical JSON anytime, and install Graphdule as a native PWA on Desktop, iOS, or Android.",
+      "target": "storage-status-indicator",
+      "badge": "Ownership",
+      "highlights": [
+        "100% offline-capable local storage",
+        "One-click canonical JSON backup & restore",
+        "Install as standalone app on mobile & desktop"
+      ]
+    },
+    {
+      "id": "history-donate",
+      "title": "Version History & Ready to Go!",
+      "description": "Capture immutable snapshots over time, compare changes, and restore past working states safely. You're ready to start building your projects!",
+      "target": "header-brand",
+      "badge": "Get Started",
+      "highlights": [
+        "Immutable version snapshots with visual diffs",
+        "Rich markdown notes and dark/light themes"
+      ],
+      "donate": true
     }
   ]
 }

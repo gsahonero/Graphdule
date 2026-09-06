@@ -7,7 +7,9 @@ import {
   RecurrenceService,
   HistoryService,
   MigrationService,
+  ActivityLogService,
   formatDisplayDate,
+  getTodayString,
   Node,
   Edge,
   ProjectDocument,
@@ -655,6 +657,77 @@ describe('Graphdule Domain Invariants and Services', () => {
       }
     });
 
+    it('saves and restores attention projects, parked status, idea seeds, and activity log in full workspace backup file format', () => {
+      const { project, egnNode } = ProjectService.createProject('Attention Proj', 'EGN', '2026-12-31');
+      const focused = ProjectService.setProjectAttention(project, true);
+      const parkedProject = ProjectService.parkProject(
+        ProjectService.createProject('Parked Proj', 'EGN 2', '2026-11-30').project
+      );
+
+      const seed = ProjectService.createIdeaSeed('Seed 1', 'Raw notes', ['Thought 1'], ['Tag 1']);
+      const event = ActivityLogService.createEvent('task_completed', {
+        taskId: 'task_1',
+        taskText: 'Done task',
+        isAttentionProject: true,
+      });
+
+      const backupObj = {
+        schemaVersion: 1,
+        exportedAt: '2026-09-04T12:00:00.000Z',
+        backupType: 'full_workspace',
+        projects: [
+          {
+            schemaVersion: 1,
+            exportedAt: '2026-09-04T12:00:00.000Z',
+            project: focused,
+            nodes: [egnNode],
+            edges: [],
+            notes: [],
+          },
+          {
+            schemaVersion: 1,
+            exportedAt: '2026-09-04T12:00:00.000Z',
+            project: parkedProject,
+            nodes: [],
+            edges: [],
+            notes: [],
+          },
+        ],
+        standaloneTasks: [],
+        preferences: {
+          myDayMode: 'today',
+          theme: 'dark',
+          onboardingCompleted: true,
+          preferredStorageProvider: 'browser',
+          maxAttentionProjects: 4,
+        },
+        ideaSeeds: [seed],
+        activityLog: [event],
+      };
+
+      const result = MigrationService.parseAnyJsonPayload(backupObj);
+      expect(result.success).toBe(true);
+      if (result.success && result.payload.type === 'workspace') {
+        expect(result.payload.projects).toHaveLength(2);
+        const p1 = result.payload.projects.find((p) => p.project.id === focused.id);
+        expect(p1?.project.isAttention).toBe(true);
+        expect(p1?.project.attentionPromotedAt).toBeDefined();
+
+        const p2 = result.payload.projects.find((p) => p.project.id === parkedProject.id);
+        expect(p2?.project.status).toBe('parked');
+
+        expect(result.payload.preferences?.maxAttentionProjects).toBe(4);
+
+        expect(result.payload.ideaSeeds).toHaveLength(1);
+        expect(result.payload.ideaSeeds?.[0].title).toBe('Seed 1');
+        expect(result.payload.ideaSeeds?.[0].seedThoughts).toEqual(['Thought 1']);
+
+        expect(result.payload.activityLog).toHaveLength(1);
+        expect(result.payload.activityLog?.[0].type).toBe('task_completed');
+        expect(result.payload.activityLog?.[0].entityId).toBe('task_1');
+      }
+    });
+
     it('gracefully normalizes partial or relaxed project JSON structures', () => {
       // Partial format: missing notes, edges, nodes arrays
       const partialJson = {
@@ -749,6 +822,369 @@ describe('Graphdule Domain Invariants and Services', () => {
         expect(universalParsed.payload.document.project.style?.icon).toBe('graduation-cap');
         expect(universalParsed.payload.document.project.style?.emoji).toBe('🎓');
       }
+    });
+  });
+
+  describe('Parent Completion Cascade & Default Today Date Invariants', () => {
+    it('defaults new node due date to today if omitted or empty', () => {
+      const node1 = ProjectService.createNode('proj_1', 'Task without date');
+      expect(node1.dueDate).toBe(getTodayString());
+
+      const node2 = ProjectService.createNode('proj_1', 'Task with empty string date', '');
+      expect(node2.dueDate).toBe(getTodayString());
+    });
+
+    it('cascades completion to parent node when all child subtasks are completed', () => {
+      const parentNode = ProjectService.createNode('proj_1', 'Parent Task');
+      const child1 = ProjectService.createNode('proj_1', 'Child Task 1', getTodayString(), parentNode.id);
+      const child2 = ProjectService.createNode('proj_1', 'Child Task 2', getTodayString(), parentNode.id);
+
+      // Initially, parent and children are planned
+      expect(parentNode.status).toBe('planned');
+      expect(child1.status).toBe('planned');
+      expect(child2.status).toBe('planned');
+
+      // Mark child 1 as completed: parent should NOT complete yet
+      const completedChild1 = ProjectService.updateNodeStatus(child1, 'completed');
+      const step1Nodes = [parentNode, completedChild1, child2];
+      const step1Result = ProjectService.cascadeParentCompletion(step1Nodes, completedChild1.id);
+      expect(step1Result.completedParentIds).toHaveLength(0);
+      expect(step1Result.updatedNodes.find((n) => n.id === parentNode.id)?.status).toBe('planned');
+
+      // Mark child 2 as completed: all subtasks are now completed!
+      const completedChild2 = ProjectService.updateNodeStatus(child2, 'completed');
+      const step2Nodes = [parentNode, completedChild1, completedChild2];
+      const step2Result = ProjectService.cascadeParentCompletion(step2Nodes, completedChild2.id);
+
+      expect(step2Result.completedParentIds).toEqual([parentNode.id]);
+      const updatedParent = step2Result.updatedNodes.find((n) => n.id === parentNode.id);
+      expect(updatedParent?.status).toBe('completed');
+    });
+
+    it('cascades completion recursively to grandparents when all nested subtasks are completed', () => {
+      const grandParent = ProjectService.createNode('proj_1', 'Grandparent Goal');
+      const parent = ProjectService.createNode('proj_1', 'Parent Task', getTodayString(), grandParent.id);
+      const child = ProjectService.createNode('proj_1', 'Child Subtask', getTodayString(), parent.id);
+
+      // Mark child as completed
+      const completedChild = ProjectService.updateNodeStatus(child, 'completed');
+      const updatedList = [grandParent, parent, completedChild];
+      const result = ProjectService.cascadeParentCompletion(updatedList, completedChild.id);
+
+      // Both parent and grandparent should be completed
+      expect(result.completedParentIds).toContain(parent.id);
+      expect(result.completedParentIds).toContain(grandParent.id);
+
+      expect(result.updatedNodes.find((n) => n.id === parent.id)?.status).toBe('completed');
+      expect(result.updatedNodes.find((n) => n.id === grandParent.id)?.status).toBe('completed');
+    });
+  });
+
+  describe('Attention Allocation & Project Parking Invariants', () => {
+    it('sets and removes attention flags on projects with promotion timestamps', () => {
+      const { project } = ProjectService.createProject('Attention Proj', 'EGN', '2026-12-31');
+      expect(project.isAttention).toBeUndefined();
+
+      const promoted = ProjectService.setProjectAttention(project, true);
+      expect(promoted.isAttention).toBe(true);
+      expect(promoted.attentionPromotedAt).toBeDefined();
+
+      const demoted = ProjectService.setProjectAttention(promoted, false);
+      expect(demoted.isAttention).toBe(false);
+      expect(demoted.attentionPromotedAt).toBeUndefined();
+    });
+
+    it('parks an active project, preserving graph properties while removing attention', () => {
+      const { project, egnNode } = ProjectService.createProject('To Park', 'EGN', '2026-12-31');
+      const focused = ProjectService.setProjectAttention(project, true);
+
+      const parked = ProjectService.parkProject(focused);
+      expect(parked.status).toBe('parked');
+      expect(parked.isAttention).toBe(false);
+      expect(parked.endGoalNodeId).toBe(egnNode.id);
+
+      const summary = ProjectService.getProjectSummary(parked, [egnNode]);
+      expect(summary.isParked).toBe(true);
+      expect(summary.isAttention).toBe(false);
+    });
+
+    it('unparks a parked project back to active status', () => {
+      const { project, egnNode } = ProjectService.createProject('Parked Proj', 'EGN', '2026-12-31');
+      const parked = ProjectService.parkProject(project);
+      expect(parked.status).toBe('parked');
+
+      const unparked = ProjectService.unparkProject(parked);
+      expect(unparked.status).toBe('active');
+
+      const summary = ProjectService.getProjectSummary(unparked, [egnNode]);
+      expect(summary.isParked).toBe(false);
+    });
+
+    it('sorts priority attention projects chronologically from nearest due date to furthest due date', () => {
+      const { project: pLate, egnNode: eLate } = ProjectService.createProject('Late Due', 'Goal Late', '2026-12-31');
+      const { project: pSoon, egnNode: eSoon } = ProjectService.createProject('Soon Due', 'Goal Soon', '2026-09-10');
+      const { project: pMid, egnNode: eMid } = ProjectService.createProject('Mid Due', 'Goal Mid', '2026-10-15');
+
+      const sumLate = ProjectService.getProjectSummary(pLate, [eLate]);
+      const sumSoon = ProjectService.getProjectSummary(pSoon, [eSoon]);
+      const sumMid = ProjectService.getProjectSummary(pMid, [eMid]);
+
+      // Unordered input: Late, Soon, Mid
+      const sorted = ProjectService.sortAttentionProjects([sumLate, sumSoon, sumMid]);
+
+      // Expected order: Soon (Sep 10), Mid (Oct 15), Late (Dec 31)
+      expect(sorted.map((p) => p.name)).toEqual(['Soon Due', 'Mid Due', 'Late Due']);
+      expect(sorted.map((p) => p.deadline)).toEqual(['2026-09-10', '2026-10-15', '2026-12-31']);
+    });
+  });
+
+  describe('Idea Seeds & Organic Germination Invariants', () => {
+    it('creates an idea seed with title, clean thoughts, and normalized tags', () => {
+      const seed = ProjectService.createIdeaSeed(
+        'AI Agent Workflow',
+        'Consider building local first agents with sqlite',
+        ['Define tool call protocol', 'Wire telemetry journal', '  '],
+        ['  AI  ', 'Agent', 'AI']
+      );
+
+      expect(seed.id).toBeDefined();
+      expect(seed.title).toBe('AI Agent Workflow');
+      expect(seed.rawNotes).toBe('Consider building local first agents with sqlite');
+      expect(seed.seedThoughts).toEqual(['Define tool call protocol', 'Wire telemetry journal']);
+      expect(seed.tags).toEqual(['AI', 'Agent']);
+      expect(seed.createdAt).toBeDefined();
+    });
+
+    it('updates an idea seed and refreshes updatedAt timestamp', () => {
+      const seed = ProjectService.createIdeaSeed('Initial Seed');
+      const updated = ProjectService.updateIdeaSeed(seed, {
+        title: 'Updated Seed Title',
+        seedThoughts: ['First thought', 'Second thought'],
+      });
+
+      expect(updated.id).toBe(seed.id);
+      expect(updated.title).toBe('Updated Seed Title');
+      expect(updated.seedThoughts).toEqual(['First thought', 'Second thought']);
+    });
+
+    it('supports incrementally adding thoughts, updating raw notes, and tags to an idea seed', () => {
+      const seed = ProjectService.createIdeaSeed('Initial Seed', 'Initial notes', ['Thought 1']);
+      // Add more thoughts and change notes
+      const updated1 = ProjectService.updateIdeaSeed(seed, {
+        seedThoughts: [...(seed.seedThoughts || []), 'Thought 2', 'Thought 3'],
+        rawNotes: 'Expanded research notes and links',
+        tags: ['strategy', 'ai'],
+      });
+
+      expect(updated1.seedThoughts).toEqual(['Thought 1', 'Thought 2', 'Thought 3']);
+      expect(updated1.rawNotes).toBe('Expanded research notes and links');
+      expect(updated1.tags).toEqual(['strategy', 'ai']);
+
+      // Remove a thought and add another
+      const updated2 = ProjectService.updateIdeaSeed(updated1, {
+        seedThoughts: updated1.seedThoughts?.filter((t) => t !== 'Thought 2').concat('Thought 4'),
+      });
+
+      expect(updated2.seedThoughts).toEqual(['Thought 1', 'Thought 3', 'Thought 4']);
+    });
+
+    it('germinates an idea seed into a full DAG project with EGN, predecessor nodes, and note', () => {
+      const seed = ProjectService.createIdeaSeed(
+        'Launch Podcasting Show',
+        'Need to buy a Shure SM7B microphone and record 3 pilot episodes.',
+        ['Buy microphone', 'Record pilot episode', 'Distribute on RSS'],
+        ['Podcast', 'Media']
+      );
+
+      const targetDueDate = '2026-11-30';
+      const { project, egnNode, predecessorNodes, edges, note } = ProjectService.germinateSeedToProject(
+        seed,
+        targetDueDate
+      );
+
+      // Project invariants
+      expect(project.name).toBe('Launch Podcasting Show');
+      expect(project.status).toBe('active');
+      expect(project.endGoalNodeId).toBe(egnNode.id);
+      expect(project.tags).toEqual(['Podcast', 'Media']);
+
+      // EGN invariants
+      expect(egnNode.text).toBe('Launch Podcasting Show');
+      expect(egnNode.dueDate).toBe(targetDueDate);
+
+      // Predecessor nodes invariants
+      expect(predecessorNodes).toHaveLength(3);
+      expect(predecessorNodes.map((n) => n.text)).toEqual([
+        'Buy microphone',
+        'Record pilot episode',
+        'Distribute on RSS',
+      ]);
+
+      // All predecessor nodes must be wired to the EGN
+      expect(edges).toHaveLength(3);
+      for (const edge of edges) {
+        expect(edge.toNodeId).toBe(egnNode.id);
+        expect(predecessorNodes.some((p) => p.id === edge.fromNodeId)).toBe(true);
+      }
+
+      // Notes invariant
+      expect(note).toBeDefined();
+      expect(note?.nodeId).toBe(egnNode.id);
+      expect(note?.text).toContain('Shure SM7B');
+    });
+  });
+
+  describe('Activity Telemetry Journal & Pattern Analysis Invariants', () => {
+    it('creates structured activity events with timestamps and contextual metadata', () => {
+      const event = ActivityLogService.createEvent('task_completed', {
+        taskId: 'task_123',
+        taskText: 'Ship v1.0',
+        projectId: 'proj_456',
+        projectName: 'Graphdule Release',
+        fromStatus: 'in_progress',
+        toStatus: 'completed',
+        isAttentionProject: true,
+      });
+
+      expect(event.id).toBeDefined();
+      expect(event.timestamp).toBeDefined();
+      expect(event.type).toBe('task_completed');
+      expect(event.entityId).toBe('task_123');
+      expect(event.metadata?.isAttentionProject).toBe(true);
+      expect(event.toStatus).toBe('completed');
+    });
+
+    it('generates pattern analysis metrics and copy-ready LLM prompts', () => {
+      const events = [
+        ActivityLogService.createEvent('task_created', {
+          taskId: 't1',
+          taskText: 'Design wireframes',
+          projectId: 'p1',
+          isAttentionProject: true,
+        }),
+        ActivityLogService.createEvent('task_completed', {
+          taskId: 't1',
+          taskText: 'Design wireframes',
+          projectId: 'p1',
+          fromStatus: 'in_progress',
+          toStatus: 'completed',
+          isAttentionProject: true,
+        }),
+        ActivityLogService.createEvent('date_moved', {
+          taskId: 't2',
+          taskText: 'Write tests',
+          projectId: 'p2',
+          previousDate: '2026-09-01',
+          newDate: '2026-09-05',
+          isAttentionProject: false,
+        }),
+        ActivityLogService.createEvent('task_completed', {
+          taskId: 't3',
+          taskText: 'Fix typo',
+          projectId: 'p2',
+          fromStatus: 'planned',
+          toStatus: 'completed',
+          isAttentionProject: false,
+        }),
+      ];
+
+      const analysis = ActivityLogService.generatePatternAnalysis(events, 30);
+      expect(analysis.totalEvents).toBe(4);
+      expect(analysis.tasksCreated).toBe(1);
+      expect(analysis.tasksCompleted).toBe(2);
+      expect(analysis.tasksPostponed).toBe(1);
+      expect(analysis.completionsInAttention).toBe(1);
+      expect(analysis.completionsOutOfAttention).toBe(1);
+
+      // Prompt verification
+      expect(analysis.llmPrompt).toContain('Productivity & Attention Telemetry Analysis Prompt');
+      expect(analysis.llmPrompt).toContain('Tasks Completed:** 2');
+      expect(analysis.llmPrompt).toContain('Due Date Postponements / Reschedules:** 1');
+      expect(analysis.llmPrompt).toContain('Your Mission');
+    });
+  });
+
+  describe('Parent-Child In Progress Invariant', () => {
+    it('cascades in_progress status up to direct parent and recursive ancestors', () => {
+      const { project, egnNode } = ProjectService.createProject('Pipeline', 'Goal', '2026-12-31');
+      const rootTask = ProjectService.createNode(project.id, 'Root Task', '2026-11-01');
+      const childTask = ProjectService.createNode(project.id, 'Child Task', '2026-11-15', rootTask.id);
+      let grandChildTask = ProjectService.createNode(project.id, 'Grandchild Task', '2026-11-20', childTask.id);
+
+      // Set grandchild to in_progress
+      grandChildTask = ProjectService.updateNodeStatus(grandChildTask, 'in_progress');
+      const allNodes = [egnNode, rootTask, childTask, grandChildTask];
+
+      const { updatedNodes, inProgressParentIds } = ProjectService.cascadeParentInProgress(
+        allNodes,
+        grandChildTask.id
+      );
+
+      expect(inProgressParentIds).toEqual([childTask.id, rootTask.id]);
+      const updatedChild = updatedNodes.find((n) => n.id === childTask.id);
+      const updatedRoot = updatedNodes.find((n) => n.id === rootTask.id);
+      const updatedEGN = updatedNodes.find((n) => n.id === egnNode.id);
+
+      expect(updatedChild?.status).toBe('in_progress');
+      expect(updatedRoot?.status).toBe('in_progress');
+      expect(updatedEGN?.status).toBe('planned');
+    });
+
+    it('detects when a node has an in-progress child', () => {
+      const parent = ProjectService.createNode('p1', 'Parent', '2026-11-01');
+      let child1 = ProjectService.createNode('p1', 'Child 1', '2026-11-02', parent.id);
+      let child2 = ProjectService.createNode('p1', 'Child 2', '2026-11-03', parent.id);
+
+      expect(ProjectService.hasInProgressChild([parent, child1, child2], parent.id)).toBe(false);
+
+      child1 = ProjectService.updateNodeStatus(child1, 'completed');
+      expect(ProjectService.hasInProgressChild([parent, child1, child2], parent.id)).toBe(false);
+
+      child2 = ProjectService.updateNodeStatus(child2, 'in_progress');
+      expect(ProjectService.hasInProgressChild([parent, child1, child2], parent.id)).toBe(true);
+    });
+
+    it('prevents modifying parent node status away from in_progress when any child is in progress', () => {
+      let parent = ProjectService.createNode('p1', 'Parent', '2026-11-01');
+      parent = ProjectService.updateNodeStatus(parent, 'in_progress');
+      let child = ProjectService.createNode('p1', 'Child', '2026-11-02', parent.id);
+      child = ProjectService.updateNodeStatus(child, 'in_progress');
+
+      const nodes = [parent, child];
+
+      // Disallow planned, completed, abandoned
+      const checkPlanned = ProjectService.canModifyNodeStatus(nodes, parent.id, 'planned');
+      expect(checkPlanned.allowed).toBe(false);
+      expect(checkPlanned.reason).toBeDefined();
+
+      const checkCompleted = ProjectService.canModifyNodeStatus(nodes, parent.id, 'completed');
+      expect(checkCompleted.allowed).toBe(false);
+
+      const checkAbandoned = ProjectService.canModifyNodeStatus(nodes, parent.id, 'abandoned');
+      expect(checkAbandoned.allowed).toBe(false);
+
+      // In progress is allowed
+      const checkInProgress = ProjectService.canModifyNodeStatus(nodes, parent.id, 'in_progress');
+      expect(checkInProgress.allowed).toBe(true);
+
+      // Child itself has no children, so its status can be modified
+      const checkChild = ProjectService.canModifyNodeStatus(nodes, child.id, 'completed');
+      expect(checkChild.allowed).toBe(true);
+    });
+
+    it('syncs parent status hierarchy document-wide', () => {
+      const parent = ProjectService.createNode('p1', 'Parent', '2026-11-01');
+      let child = ProjectService.createNode('p1', 'Child', '2026-11-02', parent.id);
+      child = ProjectService.updateNodeStatus(child, 'in_progress');
+
+      const { updatedNodes, affectedParentIds } = ProjectService.syncParentStatusHierarchy([
+        parent,
+        child,
+      ]);
+
+      expect(affectedParentIds).toContain(parent.id);
+      const syncedParent = updatedNodes.find((n) => n.id === parent.id);
+      expect(syncedParent?.status).toBe('in_progress');
     });
   });
 });
