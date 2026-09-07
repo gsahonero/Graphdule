@@ -9,11 +9,12 @@ import {
   ProjectSummary,
   IdeaSeed,
   ActivityEvent,
+  WeeklyAttentionReviewRecord,
 } from '../../domain/models/types';
 import { ProjectService } from '../../domain/services/project-service';
 
 const DB_NAME = 'graphdule_db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 export class IndexedDBProvider implements IStorageProvider {
   private db: IDBPDatabase | null = null;
@@ -49,6 +50,10 @@ export class IndexedDBProvider implements IStorageProvider {
         }
         if (!db.objectStoreNames.contains('activity_log')) {
           db.createObjectStore('activity_log', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('attention_reviews')) {
+          const reviewStore = db.createObjectStore('attention_reviews', { keyPath: 'id' });
+          reviewStore.createIndex('by_week', 'weekStartDate');
         }
       },
     });
@@ -193,5 +198,25 @@ export class IndexedDBProvider implements IStorageProvider {
   public async clearActivityLog(): Promise<void> {
     const db = await this.getDB();
     await db.clear('activity_log');
+  }
+
+  public async readAttentionReviews(): Promise<WeeklyAttentionReviewRecord[]> {
+    const db = await this.getDB();
+    const reviews: WeeklyAttentionReviewRecord[] = await db.getAll('attention_reviews');
+    return reviews.sort((a, b) => b.weekStartDate.localeCompare(a.weekStartDate));
+  }
+
+  public async writeAttentionReviews(reviews: WeeklyAttentionReviewRecord[]): Promise<void> {
+    const db = await this.getDB();
+    const tx = db.transaction('attention_reviews', 'readwrite');
+    for (const r of reviews) {
+      await tx.store.put(r);
+    }
+    await tx.done;
+  }
+
+  public async deleteAttentionReview(reviewId: string): Promise<void> {
+    const db = await this.getDB();
+    await db.delete('attention_reviews', reviewId);
   }
 }

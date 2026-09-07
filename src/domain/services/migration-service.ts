@@ -4,6 +4,7 @@ import {
   UserPreferencesSchema,
   IdeaSeedSchema,
   ActivityEventSchema,
+  WeeklyAttentionReviewRecordSchema,
 } from '../models/schema';
 import {
   ProjectDocument,
@@ -11,6 +12,7 @@ import {
   UserPreferences,
   IdeaSeed,
   ActivityEvent,
+  WeeklyAttentionReviewRecord,
 } from '../models/types';
 
 export type ParsedImportPayload =
@@ -21,6 +23,7 @@ export type ParsedImportPayload =
       preferences?: UserPreferences;
       ideaSeeds?: IdeaSeed[];
       activityLog?: ActivityEvent[];
+      attentionReviews?: WeeklyAttentionReviewRecord[];
     }
   | { type: 'projects_array'; projects: ProjectDocument[] }
   | { type: 'project'; document: ProjectDocument };
@@ -167,6 +170,16 @@ export class MigrationService {
         }
       }
 
+      const validReviews: WeeklyAttentionReviewRecord[] = [];
+      if (Array.isArray(obj.attentionReviews)) {
+        for (const rev of obj.attentionReviews) {
+          const parsedRev = WeeklyAttentionReviewRecordSchema.safeParse(rev);
+          if (parsedRev.success) {
+            validReviews.push(parsedRev.data as unknown as WeeklyAttentionReviewRecord);
+          }
+        }
+      }
+
       return {
         success: true,
         payload: {
@@ -176,6 +189,7 @@ export class MigrationService {
           preferences: validPrefs,
           ideaSeeds: validSeeds.length > 0 ? validSeeds : undefined,
           activityLog: validEvents.length > 0 ? validEvents : undefined,
+          attentionReviews: validReviews.length > 0 ? validReviews : undefined,
         },
       };
     }

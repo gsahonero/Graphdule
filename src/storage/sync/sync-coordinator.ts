@@ -4,6 +4,7 @@ import {
   UserPreferences,
   IdeaSeed,
   ActivityEvent,
+  WeeklyAttentionReviewRecord,
   Node,
   Edge,
   ProjectNote,
@@ -369,6 +370,21 @@ export class SyncCoordinator {
         await GDriveClient.uploadJson('activity_log.json', localLog, folderId);
       }
     }
+
+    // 6. Sync Attention Reviews
+    if (localProvider.readAttentionReviews && localProvider.writeAttentionReviews) {
+      const localReviews = await localProvider.readAttentionReviews();
+      const cloudReviewsFile = await GDriveClient.findFileByName('attention_reviews.json', folderId);
+
+      if (cloudReviewsFile) {
+        const cloudReviews = (await GDriveClient.downloadJson<WeeklyAttentionReviewRecord[]>(cloudReviewsFile.id)) || [];
+        const mergedReviews = this.mergeAttentionReviews(localReviews, cloudReviews);
+        await localProvider.writeAttentionReviews(mergedReviews);
+        await GDriveClient.uploadJson('attention_reviews.json', mergedReviews, folderId);
+      } else if (localReviews.length > 0) {
+        await GDriveClient.uploadJson('attention_reviews.json', localReviews, folderId);
+      }
+    }
   }
 
   // --- Microsoft OneDrive Sync Implementation ---
@@ -505,6 +521,20 @@ export class SyncCoordinator {
         await OneDriveClient.uploadJson('activity_log.json', mergedLog);
       } else if (localLog.length > 0) {
         await OneDriveClient.uploadJson('activity_log.json', localLog);
+      }
+    }
+
+    // 6. Sync Attention Reviews
+    if (localProvider.readAttentionReviews && localProvider.writeAttentionReviews) {
+      const localReviews = await localProvider.readAttentionReviews();
+      const cloudReviews = await OneDriveClient.downloadJson<WeeklyAttentionReviewRecord[]>('attention_reviews.json');
+
+      if (cloudReviews) {
+        const mergedReviews = this.mergeAttentionReviews(localReviews, cloudReviews);
+        await localProvider.writeAttentionReviews(mergedReviews);
+        await OneDriveClient.uploadJson('attention_reviews.json', mergedReviews);
+      } else if (localReviews.length > 0) {
+        await OneDriveClient.uploadJson('attention_reviews.json', localReviews);
       }
     }
   }
@@ -696,6 +726,48 @@ export class SyncCoordinator {
     }
 
     return Array.from(eventMap.values()).sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  }
+
+  /**
+   * Merges attention reviews by ID, keeping the newer generated review if duplicate.
+   * Also respects tombstones when reviews have been deleted.
+   */
+  public static mergeAttentionReviews(
+    local: WeeklyAttentionReviewRecord[],
+    cloud: WeeklyAttentionReviewRecord[],
+    tombstones?: Record<string, string>
+  ): WeeklyAttentionReviewRecord[] {
+    const map = new Map<string, WeeklyAttentionReviewRecord>();
+
+    for (const r of local) {
+      if (tombstones && tombstones[r.id]) {
+        const delTime = new Date(tombstones[r.id]).getTime();
+        const rTime = new Date(r.createdAt || 0).getTime();
+        if (delTime >= rTime) continue;
+      }
+      map.set(r.id, r);
+    }
+
+    for (const cr of cloud) {
+      if (tombstones && tombstones[cr.id]) {
+        const delTime = new Date(tombstones[cr.id]).getTime();
+        const rTime = new Date(cr.createdAt || 0).getTime();
+        if (delTime >= rTime) continue;
+      }
+
+      const existing = map.get(cr.id);
+      if (!existing) {
+        map.set(cr.id, cr);
+      } else {
+        const localTime = new Date(existing.createdAt || 0).getTime();
+        const cloudTime = new Date(cr.createdAt || 0).getTime();
+        if (cloudTime >= localTime) {
+          map.set(cr.id, cr);
+        }
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) => b.weekStartDate.localeCompare(a.weekStartDate));
   }
 
   /**

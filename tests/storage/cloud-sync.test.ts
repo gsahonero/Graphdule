@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SyncCoordinator } from '../../src/storage/sync/sync-coordinator';
-import { ProjectDocument, StandaloneTask } from '../../src/domain/models/types';
+import { ProjectDocument, StandaloneTask, WeeklyAttentionReviewRecord } from '../../src/domain/models/types';
 import { GDriveAuth } from '../../src/storage/gdrive/gdrive-auth';
 import { GDriveClient } from '../../src/storage/gdrive/gdrive-client';
 import { OneDriveAuth } from '../../src/storage/onedrive/onedrive-auth';
@@ -625,6 +625,82 @@ describe('Cloud Sync & Multi-Device Coordination', () => {
       const merged = SyncCoordinator.mergeStandaloneTasks([], [task], tombstones);
       expect(merged).toHaveLength(1);
       expect(merged[0].id).toBe('task_resurrected');
+    });
+  });
+
+  describe('Attention Reviews Merge Resolution', () => {
+    it('merges distinct reviews across local and cloud without duplicates', () => {
+      const rev1: WeeklyAttentionReviewRecord = {
+        id: 'rev_1',
+        weekStartDate: '2026-08-24',
+        createdAt: '2026-08-31T00:00:00Z',
+        data: {
+          weekStartDate: '2026-08-24',
+          weekEndDate: '2026-08-30',
+          attentionUnitMinutes: 15,
+          trackedAU: 10,
+          trackedSeconds: 9000,
+          sessionCount: 5,
+          projectAllocations: [],
+          standaloneAllocations: { au: 0, percentage: 0, tasksWorkedCount: 0, tasksCompletedCount: 0 },
+          topTasksByAttention: [],
+          estimationCalibration: {
+            tasksWithEstimate: 2,
+            accurateCount: 2,
+            overestimatedCount: 0,
+            underestimatedCount: 0,
+            averageRatio: 1.0,
+          },
+          taskSummaries: [],
+          patternObservations: [],
+        } as any,
+      };
+
+      const rev2: WeeklyAttentionReviewRecord = {
+        id: 'rev_2',
+        weekStartDate: '2026-08-31',
+        createdAt: '2026-09-07T00:00:00Z',
+        data: {
+          weekStartDate: '2026-08-31',
+          weekEndDate: '2026-09-06',
+          attentionUnitMinutes: 15,
+          trackedAU: 12,
+          trackedSeconds: 10800,
+          sessionCount: 6,
+          projectAllocations: [],
+          standaloneAllocations: { au: 0, percentage: 0, tasksWorkedCount: 0, tasksCompletedCount: 0 },
+          topTasksByAttention: [],
+          estimationCalibration: {
+            tasksWithEstimate: 3,
+            accurateCount: 3,
+            overestimatedCount: 0,
+            underestimatedCount: 0,
+            averageRatio: 1.0,
+          },
+          taskSummaries: [],
+          patternObservations: [],
+        } as any,
+      };
+
+      const merged = SyncCoordinator.mergeAttentionReviews([rev1], [rev2], {});
+      expect(merged).toHaveLength(2);
+      expect(merged.map((r) => r.id)).toEqual(expect.arrayContaining(['rev_1', 'rev_2']));
+    });
+
+    it('honors tombstones when review was deleted', () => {
+      const rev: WeeklyAttentionReviewRecord = {
+        id: 'rev_del',
+        weekStartDate: '2026-08-24',
+        createdAt: '2026-08-31T00:00:00Z',
+        data: {} as any,
+      };
+
+      const tombstones = {
+        rev_del: '2026-09-01T00:00:00Z',
+      };
+
+      const merged = SyncCoordinator.mergeAttentionReviews([rev], [rev], tombstones);
+      expect(merged).toHaveLength(0);
     });
   });
 

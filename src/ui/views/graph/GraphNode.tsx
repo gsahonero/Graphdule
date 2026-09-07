@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Handle, Position, NodeProps, useViewport } from '@xyflow/react';
 import { Node, NodeStatus } from '../../../domain/models/types';
 import { useApp } from '../../context/AppContext';
@@ -17,6 +17,8 @@ import {
   Edit2,
   Trash2,
 } from 'lucide-react';
+import { WorkButton } from '../../components/WorkButton';
+import { AttentionService } from '../../../domain/services/attention-service';
 
 export interface GraphNodeData extends Record<string, unknown> {
   node: Node;
@@ -38,7 +40,7 @@ export interface GraphNodeData extends Record<string, unknown> {
 }
 
 export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
-  const { formatDateDisplay } = useApp();
+  const { formatDateDisplay, preferences, activityLog, updateTaskEstimate } = useApp();
   const {
     node,
     isEGN,
@@ -108,6 +110,20 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
   const [editText, setEditText] = useState(node.text);
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const [isEditingEstimate, setIsEditingEstimate] = useState(false);
+  const [estimateInput, setEstimateInput] = useState(node.estimatedAU ? String(node.estimatedAU) : '');
+
+  const trackedAU = useMemo(() => {
+    if (!preferences.attentionSystemEnabled) return 0;
+    const sessions = AttentionService.reconstructWorkSessions(
+      activityLog,
+      preferences.attentionUnitMinutes || 15
+    );
+    return sessions
+      .filter((s) => s.taskId === node.id)
+      .reduce((sum, s) => sum + s.au, 0);
+  }, [activityLog, preferences.attentionSystemEnabled, preferences.attentionUnitMinutes, node.id]);
 
   useEffect(() => {
     setEditText(node.text);
@@ -434,6 +450,33 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
               )}
             </div>
 
+            {/* Popover Attention tracking & estimate row */}
+            {preferences.attentionSystemEnabled && (
+              <div
+                className="flex items-center justify-between gap-1 px-1.5 py-1 rounded bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800 nodrag nowheel nopan"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <WorkButton
+                  taskId={node.id}
+                  taskText={node.text}
+                  projectId={node.projectId}
+                  trackedAU={trackedAU}
+                />
+                <div className="flex items-center space-x-1 text-[10px] font-mono">
+                  {node.estimatedAU ? (
+                    <span className="px-1 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50">
+                      Est: {node.estimatedAU} AU
+                    </span>
+                  ) : null}
+                  {trackedAU > 0 && (
+                    <span className="px-1 py-0.5 rounded font-semibold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/50">
+                      Act: {trackedAU} AU
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Popover Temporal due date & controls */}
             <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800/80 text-[11px] relative">
               {/* Due date picker with modern custom calendar popup */}
@@ -706,6 +749,77 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
           </div>
         )}
       </div>
+
+      {/* Attention tracking & estimate row */}
+      {preferences.attentionSystemEnabled && (
+        <div
+          className="flex items-center justify-between gap-1 px-1.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800 nodrag nowheel nopan"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <WorkButton
+            taskId={node.id}
+            taskText={node.text}
+            projectId={node.projectId}
+            trackedAU={trackedAU}
+          />
+          <div className="flex items-center space-x-1 text-[10px] font-mono">
+            {isEditingEstimate ? (
+              <div className="flex items-center space-x-1">
+                <input
+                  type="number"
+                  min="0.25"
+                  step="0.25"
+                  value={estimateInput}
+                  onChange={(e) => setEstimateInput(e.target.value)}
+                  placeholder="AU"
+                  className="w-11 bg-white dark:bg-slate-950 border border-amber-400 rounded px-1 py-0.5 text-[10px]"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      const parsed = parseFloat(estimateInput);
+                      updateTaskEstimate(node.id, isNaN(parsed) || parsed <= 0 ? undefined : parsed, true);
+                      setIsEditingEstimate(false);
+                    } else if (e.key === 'Escape') {
+                      setIsEditingEstimate(false);
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const parsed = parseFloat(estimateInput);
+                    updateTaskEstimate(node.id, isNaN(parsed) || parsed <= 0 ? undefined : parsed, true);
+                    setIsEditingEstimate(false);
+                  }}
+                  className="bg-amber-600 text-white rounded px-1 py-0.5 text-[9px] font-bold cursor-pointer"
+                >
+                  ✓
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setEstimateInput(node.estimatedAU ? String(node.estimatedAU) : '');
+                  setIsEditingEstimate(true);
+                }}
+                className="px-1.5 py-0.5 rounded font-medium bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50 hover:bg-amber-100 transition-colors cursor-pointer"
+                title="Click to edit estimated AU"
+              >
+                {node.estimatedAU ? `Est: ${node.estimatedAU} AU` : '+ Est AU'}
+              </button>
+            )}
+            {trackedAU > 0 && (
+              <span
+                className="px-1.5 py-0.5 rounded font-semibold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/50"
+                title={`Tracked: ${trackedAU} AU`}
+              >
+                Act: {trackedAU} AU
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Temporal due date & controls */}
       <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800/80 text-[11px] relative">

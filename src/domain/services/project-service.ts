@@ -86,7 +86,8 @@ export class ProjectService {
     text: string,
     dueDate: string = getTodayString(),
     parentNodeId: string | null = null,
-    position?: { x: number; y: number }
+    position?: { x: number; y: number },
+    estimatedAU?: number
   ): Node {
     const now = new Date().toISOString();
     return {
@@ -97,6 +98,7 @@ export class ProjectService {
       dueDate: dueDate || getTodayString(),
       status: 'planned',
       position,
+      estimatedAU,
       createdAt: now,
       updatedAt: now,
     };

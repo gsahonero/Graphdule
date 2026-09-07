@@ -14,6 +14,7 @@ import {
   Edge,
   ProjectDocument,
   RecurrenceRule,
+  WeeklyAttentionReviewRecord,
 } from '../../src/domain';
 
 describe('Graphdule Domain Invariants and Services', () => {
@@ -725,6 +726,66 @@ describe('Graphdule Domain Invariants and Services', () => {
         expect(result.payload.activityLog).toHaveLength(1);
         expect(result.payload.activityLog?.[0].type).toBe('task_completed');
         expect(result.payload.activityLog?.[0].entityId).toBe('task_1');
+      }
+    });
+
+    it('saves and restores attentionReviews, estimatedAU, and attentionSystemEnabled in workspace backup', () => {
+      const nodeWithAU = ProjectService.createNode('p1', 'AU Node', '2026-09-10', null, undefined, 3);
+      expect(nodeWithAU.estimatedAU).toBe(3);
+
+      const taskWithAU = MyDayService.createStandaloneTask('AU Task', '2026-09-10', undefined, 2.5);
+      expect(taskWithAU.estimatedAU).toBe(2.5);
+
+      const review: WeeklyAttentionReviewRecord = {
+        id: 'rev_test',
+        weekStartDate: '2026-09-01',
+        createdAt: '2026-09-07T00:00:00.000Z',
+        data: {
+          weekStartDate: '2026-09-01',
+          weekEndDate: '2026-09-07',
+          attentionUnitMinutes: 15,
+          trackedAU: 14.5,
+          trackedSeconds: 13050,
+          sessionCount: 8,
+          projectAllocations: [],
+          standaloneAllocations: { au: 0, percentage: 0, tasksWorkedCount: 0, tasksCompletedCount: 0 },
+          topTasksByAttention: [],
+          estimationCalibration: {
+            tasksWithEstimate: 5,
+            accurateCount: 2,
+            overestimatedCount: 1,
+            underestimatedCount: 2,
+            averageRatio: 1.21,
+          },
+          taskSummaries: [],
+          patternObservations: [],
+        } as any,
+      };
+
+      const backupObj = {
+        schemaVersion: 1,
+        exportedAt: '2026-09-07T12:00:00.000Z',
+        backupType: 'full_workspace',
+        projects: [],
+        standaloneTasks: [taskWithAU],
+        preferences: {
+          attentionSystemEnabled: true,
+          attentionUnitMinutes: 20,
+          weeklyPlannedAU: 25,
+        },
+        attentionReviews: [review],
+      };
+
+      const result = MigrationService.parseAnyJsonPayload(backupObj);
+      expect(result.success).toBe(true);
+      if (result.success && result.payload.type === 'workspace') {
+        expect(result.payload.preferences?.attentionSystemEnabled).toBe(true);
+        expect(result.payload.preferences?.attentionUnitMinutes).toBe(20);
+        expect(result.payload.preferences?.weeklyPlannedAU).toBe(25);
+        expect(result.payload.standaloneTasks?.[0].estimatedAU).toBe(2.5);
+        expect(result.payload.attentionReviews).toHaveLength(1);
+        expect(result.payload.attentionReviews?.[0].data.trackedAU).toBe(14.5);
+        expect(result.payload.attentionReviews?.[0].data.estimationCalibration.underestimatedCount).toBe(2);
       }
     });
 

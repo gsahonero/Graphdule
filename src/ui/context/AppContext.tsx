@@ -15,6 +15,8 @@ import {
   IdeaSeed,
   ActivityEvent,
   ActivityEventType,
+  ActiveWorkSession,
+  WeeklyAttentionReviewRecord,
 } from '../../domain/models/types';
 import { ProjectService } from '../../domain/services/project-service';
 import { TemporalService } from '../../domain/services/temporal-service';
@@ -24,6 +26,7 @@ import { UndoRedoManager, MAX_HISTORY_SIZE } from '../../domain/services/undo-re
 import { MyDayService } from '../../domain/services/my-day-service';
 import { RecurrenceService } from '../../domain/services/recurrence-service';
 import { ActivityLogService } from '../../domain/services/activity-log-service';
+import { AttentionService } from '../../domain/services/attention-service';
 import {
   defaultStorageProvider,
   IStorageProvider,
@@ -43,8 +46,8 @@ import { createDefaultSampleProject, DEFAULT_SAMPLE_PROJECT_ID } from '../../con
 
 interface AppContextType {
   storage: IStorageProvider;
-  currentView: 'projects' | 'project_detail' | 'my_day';
-  setCurrentView: (view: 'projects' | 'project_detail' | 'my_day') => void;
+  currentView: 'projects' | 'project_detail' | 'my_day' | 'attention_review';
+  setCurrentView: (view: 'projects' | 'project_detail' | 'my_day' | 'attention_review') => void;
   activeProjectTab: 'graph' | 'timeline' | 'history';
   setActiveProjectTab: (tab: 'graph' | 'timeline' | 'history') => void;
 
@@ -81,7 +84,7 @@ interface AppContextType {
   archiveProject: (projectId: string, reason?: ProjectStatus) => Promise<void>;
   unarchiveProject: (projectId: string) => Promise<void>;
   deleteProject: (projectId: string) => Promise<void>;
-  addNode: (text: string, dueDate?: string, parentNodeId?: string | null, position?: { x: number; y: number }) => Promise<Node | null>;
+  addNode: (text: string, dueDate?: string, parentNodeId?: string | null, position?: { x: number; y: number }, estimatedAU?: number) => Promise<Node | null>;
   updateNode: (node: Node) => Promise<void>;
   deleteNode: (nodeId: string) => Promise<void>;
   updateNodePositions: (positions: { id: string; position: { x: number; y: number } }[]) => Promise<void>;
@@ -108,7 +111,7 @@ interface AppContextType {
   redo: () => Promise<void>;
 
   // Standalone Tasks
-  addStandaloneTask: (text: string, dueDate?: string, recurrence?: RecurrenceRule) => Promise<void>;
+  addStandaloneTask: (text: string, dueDate?: string, recurrence?: RecurrenceRule, estimatedAU?: number) => Promise<void>;
   updateStandaloneTask: (task: StandaloneTask) => Promise<void>;
   updateStandaloneTaskStatus: (taskId: string, status: NodeStatus) => Promise<void>;
   deleteStandaloneTask: (taskId: string) => Promise<void>;
@@ -156,13 +159,31 @@ interface AppContextType {
   logActivityEvent: (type: ActivityEventType, entityId: string, options?: { entityText?: string; projectId?: string; projectName?: string; fromStatus?: string; toStatus?: string; oldDueDate?: string; newDueDate?: string; metadata?: Record<string, unknown> }) => Promise<void>;
   exportActivityLogPrompt: () => string;
   clearActivityLog: () => Promise<void>;
+
+  // Attention Measurement System & Work Clock
+  attentionSystemEnabled: boolean;
+  attentionUnitMinutes: number;
+  weeklyPlannedAU?: number;
+  activeWorkSession: ActiveWorkSession | null;
+  activeWorkElapsedSeconds: number;
+  startWork: (taskId: string, taskText: string, projectId?: string, projectName?: string) => Promise<void>;
+  pauseWork: () => Promise<void>;
+  resumeWork: () => Promise<void>;
+  stopWork: () => Promise<void>;
+  updateTaskEstimate: (taskId: string, estimatedAU: number | undefined, projectIdOrIsNode?: string | boolean) => Promise<void>;
+  toggleAttentionSystem: (enabled: boolean) => Promise<void>;
+  setAttentionUnitMinutes: (minutes: number) => Promise<void>;
+  setWeeklyPlannedAU: (au: number | undefined) => Promise<void>;
+  attentionReviews: WeeklyAttentionReviewRecord[];
+  triggerWeeklyReview: (weekStartDate: string, weekEndDate: string, userNotes?: string) => Promise<WeeklyAttentionReviewRecord>;
+  deleteAttentionReview: (reviewId: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [storage] = useState<IStorageProvider>(defaultStorageProvider);
-  const [currentView, setCurrentView] = useState<'projects' | 'project_detail' | 'my_day'>('projects');
+  const [currentView, setCurrentView] = useState<'projects' | 'project_detail' | 'my_day' | 'attention_review'>('projects');
   const [activeProjectTab, setActiveProjectTab] = useState<'graph' | 'timeline' | 'history'>('graph');
 
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
@@ -179,6 +200,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dateFormat: localDateFormat || 'DD/MM/YYYY',
       onboardingCompleted: false,
       preferredStorageProvider: 'browser',
+      attentionSystemEnabled: false,
+      attentionUnitMinutes: 15,
     };
   });
 
@@ -190,6 +213,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Idea Seeds and Activity Log states
   const [ideaSeeds, setIdeaSeeds] = useState<IdeaSeed[]>([]);
   const [activityLog, setActivityLog] = useState<ActivityEvent[]>([]);
+
+  // Attention Measurement & Active Work Session state
+  const [activeWorkSession, setActiveWorkSession] = useState<ActiveWorkSession | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const raw = localStorage.getItem('graphdule_active_work_session');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [activeWorkElapsedSeconds, setActiveWorkElapsedSeconds] = useState<number>(0);
+  const [attentionReviews, setAttentionReviews] = useState<WeeklyAttentionReviewRecord[]>([]);
+
+  // Live second-by-second ticker for running work clock
+  useEffect(() => {
+    if (!activeWorkSession) {
+      setActiveWorkElapsedSeconds(0);
+      return;
+    }
+
+    const computeElapsed = () => {
+      const baseAccum = activeWorkSession.accumulatedSecondsBeforeResume || 0;
+      if (activeWorkSession.isPaused) {
+        return Math.floor(baseAccum);
+      }
+      const ref = activeWorkSession.lastResumedAt || activeWorkSession.startedAt;
+      const running = Math.max(0, (Date.now() - new Date(ref).getTime()) / 1000);
+      return Math.floor(baseAccum + running);
+    };
+
+    setActiveWorkElapsedSeconds(computeElapsed());
+    const interval = setInterval(() => {
+      setActiveWorkElapsedSeconds(computeElapsed());
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [activeWorkSession]);
 
   // Cloud Sync state
   const [cloudSyncState, setCloudSyncState] = useState<SyncState>(() => SyncCoordinator.getState());
@@ -416,6 +477,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (storage.readActivityLog) {
       const events = await storage.readActivityLog();
       setActivityLog(events);
+    }
+    if (storage.readAttentionReviews) {
+      const reviews = await storage.readAttentionReviews();
+      setAttentionReviews(reviews);
+    }
+
+    if (prefs.activeWorkSession && !activeWorkSession) {
+      setActiveWorkSession(prefs.activeWorkSession);
+      try {
+        localStorage.setItem('graphdule_active_work_session', JSON.stringify(prefs.activeWorkSession));
+      } catch {
+        // ignore
+      }
     }
 
     // Check if activeProjectDoc was updated externally in storage (e.g. from cloud sync or merge)
@@ -913,6 +987,321 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActivityLog([]);
   }, [storage]);
 
+  // Attention Measurement & Work Clock Actions
+  const attentionSystemEnabled = !!preferences.attentionSystemEnabled;
+  const attentionUnitMinutes = preferences.attentionUnitMinutes || 15;
+  const weeklyPlannedAU = preferences.weeklyPlannedAU;
+
+  const toggleAttentionSystem = useCallback(
+    async (enabled: boolean) => {
+      await updatePreferences({ attentionSystemEnabled: enabled });
+      await logActivityEvent(enabled ? 'ATTENTION_SYSTEM_TOGGLED' : 'attention_system_toggled', 'system', {
+        entityText: `Attention measurement system ${enabled ? 'enabled' : 'disabled'}`,
+        metadata: { enabled },
+      });
+      debouncedCloudSync();
+    },
+    [updatePreferences, logActivityEvent, debouncedCloudSync]
+  );
+
+  const setAttentionUnitMinutes = useCallback(
+    async (minutes: number) => {
+      const valid = minutes > 0 ? minutes : 15;
+      await updatePreferences({ attentionUnitMinutes: valid });
+      debouncedCloudSync();
+    },
+    [updatePreferences, debouncedCloudSync]
+  );
+
+  const setWeeklyPlannedAU = useCallback(
+    async (au: number | undefined) => {
+      await updatePreferences({ weeklyPlannedAU: au });
+      await logActivityEvent('WEEKLY_GOAL_SET', 'system', {
+        entityText: `Weekly planned attention set to ${au !== undefined ? `${au} AU` : 'none'}`,
+        metadata: { plannedAU: au },
+      });
+      debouncedCloudSync();
+    },
+    [updatePreferences, logActivityEvent, debouncedCloudSync]
+  );
+
+  const stopWork = useCallback(async () => {
+    if (!activeWorkSession) return;
+    const sessionToStop = activeWorkSession;
+
+    const baseAccum = sessionToStop.accumulatedSecondsBeforeResume || 0;
+    let additional = 0;
+    if (!sessionToStop.isPaused) {
+      const ref = sessionToStop.lastResumedAt || sessionToStop.startedAt;
+      additional = Math.max(0, (Date.now() - new Date(ref).getTime()) / 1000);
+    }
+    const totalDurationSeconds = Math.round(baseAccum + additional);
+    const au = AttentionService.durationSecondsToAU(totalDurationSeconds, attentionUnitMinutes);
+    const stoppedAt = new Date().toISOString();
+
+    await logActivityEvent('WORK_STOPPED', sessionToStop.taskId, {
+      entityText: sessionToStop.taskText,
+      projectId: sessionToStop.projectId,
+      projectName: sessionToStop.projectName,
+      metadata: {
+        sessionId: sessionToStop.sessionId,
+        durationSeconds: totalDurationSeconds,
+        au,
+        startedAt: sessionToStop.startedAt,
+        stoppedAt,
+      },
+    });
+
+    setActiveWorkSession(null);
+    try {
+      localStorage.removeItem('graphdule_active_work_session');
+    } catch {
+      // ignore
+    }
+    await updatePreferences({ activeWorkSession: null });
+    debouncedCloudSync();
+  }, [activeWorkSession, attentionUnitMinutes, logActivityEvent, updatePreferences, debouncedCloudSync]);
+
+  const pauseWork = useCallback(async () => {
+    if (!activeWorkSession || activeWorkSession.isPaused) return;
+
+    const now = Date.now();
+    const ref = activeWorkSession.lastResumedAt || activeWorkSession.startedAt;
+    const segment = Math.max(0, (now - new Date(ref).getTime()) / 1000);
+    const totalAccum = (activeWorkSession.accumulatedSecondsBeforeResume || 0) + segment;
+
+    const updatedSession: ActiveWorkSession = {
+      ...activeWorkSession,
+      accumulatedSecondsBeforeResume: totalAccum,
+      isPaused: true,
+      lastResumedAt: undefined,
+    };
+
+    await logActivityEvent('WORK_PAUSED', activeWorkSession.taskId, {
+      entityText: activeWorkSession.taskText,
+      projectId: activeWorkSession.projectId,
+      projectName: activeWorkSession.projectName,
+      metadata: {
+        sessionId: activeWorkSession.sessionId,
+        durationSeconds: Math.round(totalAccum),
+      },
+    });
+
+    setActiveWorkSession(updatedSession);
+    try {
+      localStorage.setItem('graphdule_active_work_session', JSON.stringify(updatedSession));
+    } catch {
+      // ignore
+    }
+    await updatePreferences({ activeWorkSession: updatedSession });
+    debouncedCloudSync();
+  }, [activeWorkSession, logActivityEvent, updatePreferences, debouncedCloudSync]);
+
+  const resumeWork = useCallback(async () => {
+    if (!activeWorkSession || !activeWorkSession.isPaused) return;
+
+    const resumedAt = new Date().toISOString();
+    const updatedSession: ActiveWorkSession = {
+      ...activeWorkSession,
+      isPaused: false,
+      lastResumedAt: resumedAt,
+    };
+
+    await logActivityEvent('WORK_RESUMED', activeWorkSession.taskId, {
+      entityText: activeWorkSession.taskText,
+      projectId: activeWorkSession.projectId,
+      projectName: activeWorkSession.projectName,
+      metadata: {
+        sessionId: activeWorkSession.sessionId,
+      },
+    });
+
+    setActiveWorkSession(updatedSession);
+    try {
+      localStorage.setItem('graphdule_active_work_session', JSON.stringify(updatedSession));
+    } catch {
+      // ignore
+    }
+    await updatePreferences({ activeWorkSession: updatedSession });
+    debouncedCloudSync();
+  }, [activeWorkSession, logActivityEvent, updatePreferences, debouncedCloudSync]);
+
+  const startWork = useCallback(
+    async (taskId: string, taskText: string, projectId?: string, projectName?: string) => {
+      if (activeWorkSession && activeWorkSession.taskId === taskId) {
+        if (activeWorkSession.isPaused) {
+          await resumeWork();
+        }
+        return;
+      }
+
+      if (activeWorkSession) {
+        await stopWork();
+      }
+
+      const sessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const startedAt = new Date().toISOString();
+
+      await logActivityEvent('WORK_STARTED', taskId, {
+        entityText: taskText,
+        projectId,
+        projectName,
+        metadata: { sessionId },
+      });
+
+      const newSession: ActiveWorkSession = {
+        sessionId,
+        taskId,
+        taskText,
+        projectId,
+        projectName,
+        startedAt,
+        accumulatedSecondsBeforeResume: 0,
+        isPaused: false,
+      };
+
+      setActiveWorkSession(newSession);
+      try {
+        localStorage.setItem('graphdule_active_work_session', JSON.stringify(newSession));
+      } catch {
+        // ignore
+      }
+      await updatePreferences({ activeWorkSession: newSession });
+      debouncedCloudSync();
+    },
+    [activeWorkSession, resumeWork, stopWork, logActivityEvent, updatePreferences, debouncedCloudSync]
+  );
+
+  const updateTaskEstimate = useCallback(
+    async (taskId: string, estimatedAU: number | undefined, projectIdOrIsNode?: string | boolean) => {
+      const isExplicitNode = projectIdOrIsNode === true || (typeof projectIdOrIsNode === 'string' && projectIdOrIsNode !== 'standalone');
+      if (!isExplicitNode) {
+        const standaloneTarget = standaloneTasks.find((t) => t.id === taskId);
+        if (standaloneTarget) {
+          const oldEstimate = standaloneTarget.estimatedAU;
+          const updated = standaloneTasks.map((t) =>
+            t.id === taskId ? { ...t, estimatedAU, updatedAt: new Date().toISOString() } : t
+          );
+          await storage.writeStandaloneTasks(updated);
+          setStandaloneTasks(updated);
+          await logActivityEvent('ESTIMATE_CHANGED', taskId, {
+            entityText: standaloneTarget.text,
+            metadata: { oldEstimateAU: oldEstimate, newEstimateAU: estimatedAU },
+          });
+          debouncedCloudSync();
+          return;
+        }
+      }
+
+      if (activeProjectDoc) {
+        const node = activeProjectDoc.nodes.find((n) => n.id === taskId);
+        if (node) {
+          const oldEstimate = node.estimatedAU;
+          const updatedNodes = activeProjectDoc.nodes.map((n) =>
+            n.id === taskId ? { ...n, estimatedAU, updatedAt: new Date().toISOString() } : n
+          );
+          await saveProjectDoc({
+            ...activeProjectDoc,
+            nodes: updatedNodes,
+          });
+          await logActivityEvent('ESTIMATE_CHANGED', taskId, {
+            entityText: node.text,
+            projectId: activeProjectDoc.project.id,
+            projectName: activeProjectDoc.project.name,
+            metadata: { oldEstimateAU: oldEstimate, newEstimateAU: estimatedAU },
+          });
+          debouncedCloudSync();
+          return;
+        }
+      }
+
+      const explicitProjId = typeof projectIdOrIsNode === 'string' && projectIdOrIsNode !== 'standalone' ? projectIdOrIsNode : undefined;
+      const projs = await storage.listProjects();
+      const searchProjs = explicitProjId ? projs.filter((p) => p.id === explicitProjId) : projs;
+      for (const p of searchProjs) {
+        const doc = await storage.readProject(p.id);
+        if (doc) {
+          const node = doc.nodes.find((n) => n.id === taskId);
+          if (node) {
+            const oldEstimate = node.estimatedAU;
+            const updatedNodes = doc.nodes.map((n) =>
+              n.id === taskId ? { ...n, estimatedAU, updatedAt: new Date().toISOString() } : n
+            );
+            const updatedDoc: ProjectDocument = { ...doc, nodes: updatedNodes };
+            await storage.writeProject(updatedDoc);
+            await logActivityEvent('ESTIMATE_CHANGED', taskId, {
+              entityText: node.text,
+              projectId: doc.project.id,
+              projectName: doc.project.name,
+              metadata: { oldEstimateAU: oldEstimate, newEstimateAU: estimatedAU },
+            });
+            await refreshData();
+            debouncedCloudSync();
+            return;
+          }
+        }
+      }
+    },
+    [standaloneTasks, activeProjectDoc, storage, logActivityEvent, saveProjectDoc, refreshData, debouncedCloudSync]
+  );
+
+  const triggerWeeklyReview = useCallback(
+    async (weekStartDate: string, weekEndDate: string, userNotes?: string): Promise<WeeklyAttentionReviewRecord> => {
+      const reviewData = AttentionService.generateWeeklyAttentionReview({
+        events: activityLog,
+        tasks: [...allActiveNodes, ...standaloneTasks],
+        projects,
+        weekStartDate,
+        weekEndDate,
+        plannedAU: preferences.weeklyPlannedAU,
+        auMinutes: attentionUnitMinutes,
+      });
+
+      const record: WeeklyAttentionReviewRecord = {
+        id: `rev_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        weekStartDate,
+        weekEndDate,
+        generatedAt: new Date().toISOString(),
+        data: reviewData,
+        userNotes,
+      };
+
+      const updatedReviews = [record, ...attentionReviews.filter((r) => r.id !== record.id)];
+      if (storage.writeAttentionReviews) {
+        await storage.writeAttentionReviews(updatedReviews);
+      }
+      setAttentionReviews(updatedReviews);
+
+      await logActivityEvent('WEEKLY_REVIEW_TRIGGERED', record.id, {
+        entityText: `Weekly review triggered for ${weekStartDate} - ${weekEndDate}`,
+        metadata: {
+          reviewId: record.id,
+          weekStartDate,
+          weekEndDate,
+          trackedAU: reviewData.trackedAU,
+        },
+      });
+
+      debouncedCloudSync();
+      return record;
+    },
+    [activityLog, allActiveNodes, standaloneTasks, projects, preferences.weeklyPlannedAU, attentionUnitMinutes, attentionReviews, storage, logActivityEvent, debouncedCloudSync]
+  );
+
+  const deleteAttentionReview = useCallback(
+    async (reviewId: string) => {
+      const updated = attentionReviews.filter((r) => r.id !== reviewId);
+      if (storage.deleteAttentionReview) {
+        await storage.deleteAttentionReview(reviewId);
+      } else if (storage.writeAttentionReviews) {
+        await storage.writeAttentionReviews(updated);
+      }
+      setAttentionReviews(updated);
+      debouncedCloudSync();
+    },
+    [attentionReviews, storage, debouncedCloudSync]
+  );
+
   // Idea Parking Lot & Seeds
   const addIdeaSeed = useCallback(
     async (title: string, options?: { rawNotes?: string; seedThoughts?: string[]; tags?: string[] }) => {
@@ -1137,7 +1526,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       text: string,
       dueDate: string = getTodayString(),
       parentNodeId?: string | null,
-      position?: { x: number; y: number }
+      position?: { x: number; y: number },
+      estimatedAU?: number
     ): Promise<Node | null> => {
       if (!activeProjectDoc) return null;
       const effectiveDueDate = dueDate || getTodayString();
@@ -1146,7 +1536,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         text,
         effectiveDueDate,
         parentNodeId,
-        position
+        position,
+        estimatedAU
       );
       const updatedDoc: ProjectDocument = {
         ...activeProjectDoc,
@@ -1163,6 +1554,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         projectId: activeProjectDoc.project.id,
         projectName: activeProjectDoc.project.name,
       }).catch(() => {});
+      logActivityEvent('TASK_CREATED', newNode.id, {
+        entityText: newNode.text,
+        projectId: activeProjectDoc.project.id,
+        projectName: activeProjectDoc.project.name,
+        metadata: { estimatedAU },
+      }).catch(() => {});
+      if (estimatedAU !== undefined && estimatedAU > 0) {
+        logActivityEvent('ESTIMATE_CHANGED', newNode.id, {
+          entityText: newNode.text,
+          projectId: activeProjectDoc.project.id,
+          metadata: { newAU: estimatedAU },
+        }).catch(() => {});
+      }
 
       recordActiveNode(newNode, activeProjectDoc.project.id).catch(() => {});
 
@@ -1236,6 +1640,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             oldDueDate: prevNode.dueDate,
             newDueDate: updatedNode.dueDate,
           }).catch(() => {});
+          logActivityEvent('TASK_DEFERRED', updatedNode.id, {
+            entityText: updatedNode.text,
+            projectId: activeProjectDoc.project.id,
+            projectName: activeProjectDoc.project.name,
+            oldDueDate: prevNode.dueDate,
+            newDueDate: updatedNode.dueDate,
+          }).catch(() => {});
+          logActivityEvent('DEADLINE_CHANGED', updatedNode.id, {
+            entityText: updatedNode.text,
+            projectId: activeProjectDoc.project.id,
+            projectName: activeProjectDoc.project.name,
+            oldDueDate: prevNode.dueDate,
+            newDueDate: updatedNode.dueDate,
+          }).catch(() => {});
 
           GCalendarSync.syncTaskDateChange({
             taskId: updatedNode.id,
@@ -1262,6 +1680,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 projectName: activeProjectDoc.project.name,
                 metadata: { isAttentionProject: activeProjectDoc.project.isAttention },
               }).catch(() => {});
+              logActivityEvent('TASK_COMPLETED', updatedNode.id, {
+                entityText: updatedNode.text,
+                projectId: activeProjectDoc.project.id,
+                projectName: activeProjectDoc.project.name,
+                metadata: { isAttentionProject: activeProjectDoc.project.isAttention },
+              }).catch(() => {});
+              if (activeWorkSession?.taskId === updatedNode.id) {
+                stopWork().catch(() => {});
+              }
+            } else if (updatedNode.status === 'abandoned') {
+              logActivityEvent('TASK_ABANDONED', updatedNode.id, {
+                entityText: updatedNode.text,
+                projectId: activeProjectDoc.project.id,
+                projectName: activeProjectDoc.project.name,
+              }).catch(() => {});
+              if (activeWorkSession?.taskId === updatedNode.id) {
+                stopWork().catch(() => {});
+              }
             }
           }
 
@@ -1800,9 +2236,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const addStandaloneTask = useCallback(
-    async (text: string, dueDate?: string, recurrence?: RecurrenceRule) => {
+    async (text: string, dueDate?: string, recurrence?: RecurrenceRule, estimatedAU?: number) => {
       const targetDate = dueDate || getTodayString();
-      const newTask = MyDayService.createStandaloneTask(text, targetDate, recurrence);
+      const newTask = MyDayService.createStandaloneTask(text, targetDate, recurrence, estimatedAU);
       const updated = [...standaloneTasks, newTask];
       await storage.writeStandaloneTasks(updated);
       setStandaloneTasks(updated);
@@ -1810,6 +2246,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       logActivityEvent('task_created', newTask.id, {
         entityText: newTask.text,
       }).catch(() => {});
+      logActivityEvent('TASK_CREATED', newTask.id, {
+        entityText: newTask.text,
+        metadata: { estimatedAU },
+      }).catch(() => {});
+      if (estimatedAU !== undefined && estimatedAU > 0) {
+        logActivityEvent('ESTIMATE_CHANGED', newTask.id, {
+          entityText: newTask.text,
+          metadata: { newAU: estimatedAU },
+        }).catch(() => {});
+      }
 
       if (targetDate) {
         GCalendarSync.syncTaskStatusOrTextChange({
@@ -1866,6 +2312,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           logActivityEvent('task_completed', taskId, {
             entityText: targetTask.text,
           }).catch(() => {});
+          logActivityEvent('TASK_COMPLETED', taskId, {
+            entityText: targetTask.text,
+          }).catch(() => {});
+          if (activeWorkSession?.taskId === taskId) {
+            stopWork().catch(() => {});
+          }
+        } else if (status === 'abandoned') {
+          logActivityEvent('TASK_ABANDONED', taskId, {
+            entityText: targetTask.text,
+          }).catch(() => {});
+          if (activeWorkSession?.taskId === taskId) {
+            stopWork().catch(() => {});
+          }
         }
       }
 
@@ -1959,6 +2418,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const prefs = await storage.readPreferences();
     const seeds = storage.readIdeaSeeds ? await storage.readIdeaSeeds() : [];
     const log = storage.readActivityLog ? await storage.readActivityLog() : [];
+    const reviews = storage.readAttentionReviews ? await storage.readAttentionReviews() : [];
 
     JsonFileProvider.exportFullWorkspaceBackup({
       projects: allDocs,
@@ -1966,6 +2426,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       preferences: prefs,
       ideaSeeds: seeds,
       activityLog: log,
+      attentionReviews: reviews,
     });
   }, [storage]);
 
@@ -2025,6 +2486,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (newEvents.length > 0) {
             await storage.appendActivityEvents(newEvents);
             setActivityLog((prev) => [...prev, ...newEvents]);
+          }
+        }
+
+        if (payload.attentionReviews && payload.attentionReviews.length > 0 && storage.writeAttentionReviews) {
+          const currentReviews = storage.readAttentionReviews ? await storage.readAttentionReviews() : [];
+          const currentReviewIds = new Set(currentReviews.map((r) => r.id));
+          const newReviews = payload.attentionReviews.filter((r) => !currentReviewIds.has(r.id));
+          if (newReviews.length > 0) {
+            const combined = [...newReviews, ...currentReviews];
+            await storage.writeAttentionReviews(combined);
+            setAttentionReviews(combined);
           }
         }
 
@@ -2257,6 +2729,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         logActivityEvent,
         exportActivityLogPrompt,
         clearActivityLog,
+        attentionSystemEnabled,
+        attentionUnitMinutes,
+        weeklyPlannedAU,
+        activeWorkSession,
+        activeWorkElapsedSeconds,
+        startWork,
+        pauseWork,
+        resumeWork,
+        stopWork,
+        updateTaskEstimate,
+        toggleAttentionSystem,
+        setAttentionUnitMinutes,
+        setWeeklyPlannedAU,
+        attentionReviews,
+        triggerWeeklyReview,
+        deleteAttentionReview,
       }}
     >
       {children}

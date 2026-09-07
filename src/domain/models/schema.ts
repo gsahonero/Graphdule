@@ -66,6 +66,7 @@ export const NodeSchema = z.object({
     x: z.number(),
     y: z.number(),
   }).optional(),
+  estimatedAU: z.number().nonnegative().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 }).passthrough();
@@ -130,8 +131,21 @@ export const StandaloneTaskSchema = z.object({
   recurrence: RecurrenceRuleSchema.optional(),
   recurrenceInstance: z.number().int().positive().optional(),
   parentRecurringTaskId: z.string().optional(),
+  estimatedAU: z.number().nonnegative().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
+}).passthrough();
+
+export const ActiveWorkSessionSchema = z.object({
+  sessionId: z.string().min(1),
+  taskId: z.string().min(1),
+  taskText: z.string(),
+  projectId: z.string().optional(),
+  projectName: z.string().optional(),
+  startedAt: z.string(),
+  lastResumedAt: z.string().optional(),
+  accumulatedSecondsBeforeResume: z.number().nonnegative().optional(),
+  isPaused: z.boolean().optional(),
 }).passthrough();
 
 export const UserPreferencesSchema = z.object({
@@ -144,6 +158,10 @@ export const UserPreferencesSchema = z.object({
   lastActiveNodeId: z.string().optional(),
   lastActiveProjectId: z.string().optional(),
   lastActiveTimestamp: z.string().optional(),
+  attentionSystemEnabled: z.boolean().optional().default(false),
+  attentionUnitMinutes: z.number().int().positive().optional().default(15),
+  weeklyPlannedAU: z.number().nonnegative().optional(),
+  activeWorkSession: ActiveWorkSessionSchema.nullable().optional(),
 }).passthrough();
 
 export const IdeaSeedSchema = z.object({
@@ -165,6 +183,30 @@ export const ActivityEventTypeSchema = z.enum([
   'attention_demoted',
   'project_parked',
   'project_unparked',
+  'WORK_STARTED',
+  'work_started',
+  'WORK_STOPPED',
+  'work_stopped',
+  'WORK_PAUSED',
+  'work_paused',
+  'WORK_RESUMED',
+  'work_resumed',
+  'TASK_CREATED',
+  'TASK_COMPLETED',
+  'TASK_DEFERRED',
+  'task_deferred',
+  'TASK_ABANDONED',
+  'task_abandoned',
+  'ESTIMATE_CHANGED',
+  'estimate_changed',
+  'DEADLINE_CHANGED',
+  'deadline_changed',
+  'ATTENTION_SYSTEM_TOGGLED',
+  'attention_system_toggled',
+  'WEEKLY_GOAL_SET',
+  'weekly_goal_set',
+  'WEEKLY_REVIEW_TRIGGERED',
+  'weekly_review_triggered',
 ]);
 
 export const ActivityEventSchema = z.object({
@@ -180,5 +222,15 @@ export const ActivityEventSchema = z.object({
   oldDueDate: z.string().optional(),
   newDueDate: z.string().optional(),
   metadata: z.record(z.unknown()).optional(),
+}).passthrough();
+
+export const WeeklyAttentionReviewRecordSchema = z.object({
+  id: z.string().min(1),
+  weekStartDate: z.string(),
+  weekEndDate: z.string().optional(),
+  generatedAt: z.string().optional(),
+  createdAt: z.string().optional(),
+  data: z.record(z.unknown()),
+  userNotes: z.string().optional(),
 }).passthrough();
 

@@ -5,10 +5,12 @@ import { StorageWarningBanner } from './ui/components/StorageWarningBanner';
 import { ProjectsView } from './ui/views/projects/ProjectsView';
 import { ProjectDetailView } from './ui/views/project-detail/ProjectDetailView';
 import { MyDayView } from './ui/views/my-day/MyDayView';
+import { AttentionReviewView } from './ui/views/attention/AttentionReviewView';
 import { NotesDrawer } from './ui/components/NotesDrawer';
 import { CascadeModal } from './ui/components/CascadeModal';
 import { OnboardingModal } from './ui/components/OnboardingModal';
 import { CloudSyncModal } from './ui/components/CloudSyncModal';
+import { ActiveWorkBar } from './ui/components/ActiveWorkBar';
 
 const AppContent: React.FC = () => {
   const { currentView } = useApp();
@@ -22,9 +24,11 @@ const AppContent: React.FC = () => {
         {currentView === 'projects' && <ProjectsView />}
         {currentView === 'project_detail' && <ProjectDetailView />}
         {currentView === 'my_day' && <MyDayView />}
+        {currentView === 'attention_review' && <AttentionReviewView />}
       </main>
 
-      {/* Global Modals & Drawers */}
+      {/* Global Modals, Drawers & Persistent Active Session Bar */}
+      <ActiveWorkBar />
       <NotesDrawer />
       <CascadeModal />
       <OnboardingModal />

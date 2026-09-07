@@ -9,3 +9,4 @@ export * from './services/my-day-service';
 export * from './services/history-service';
 export * from './services/migration-service';
 export * from './services/activity-log-service';
+export * from './services/attention-service';

@@ -107,10 +107,23 @@ export class MyDayService {
     text: string,
     dueDate?: string,
     recurrence?: import('../models/types').RecurrenceRule,
-    parentRecurringTaskId?: string,
-    recurrenceInstance?: number
+    parentRecurringTaskIdOrAU?: string | number,
+    recurrenceInstance?: number,
+    estimatedAU?: number
   ): StandaloneTask {
     const now = new Date().toISOString();
+    let parentRecurringTaskId: string | undefined;
+    let finalEstimatedAU: number | undefined;
+
+    if (typeof parentRecurringTaskIdOrAU === 'number') {
+      finalEstimatedAU = parentRecurringTaskIdOrAU;
+    } else if (typeof parentRecurringTaskIdOrAU === 'string') {
+      parentRecurringTaskId = parentRecurringTaskIdOrAU;
+      finalEstimatedAU = estimatedAU;
+    } else {
+      finalEstimatedAU = estimatedAU;
+    }
+
     return {
       id: `task_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`,
       text,
@@ -119,6 +132,7 @@ export class MyDayService {
       ...(recurrence ? { recurrence } : {}),
       ...(parentRecurringTaskId ? { parentRecurringTaskId } : {}),
       ...(recurrenceInstance ? { recurrenceInstance } : {}),
+      ...(finalEstimatedAU !== undefined ? { estimatedAU: finalEstimatedAU } : {}),
       createdAt: now,
       updatedAt: now,
     };

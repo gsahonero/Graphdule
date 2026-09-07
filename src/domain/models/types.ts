@@ -59,6 +59,7 @@ export interface Node {
   readonly dueDate: string; // YYYY-MM-DD
   readonly status: NodeStatus;
   readonly position?: { readonly x: number; readonly y: number };
+  readonly estimatedAU?: number;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -133,6 +134,7 @@ export interface StandaloneTask {
   readonly recurrence?: RecurrenceRule;
   readonly recurrenceInstance?: number;
   readonly parentRecurringTaskId?: string;
+  readonly estimatedAU?: number;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -155,7 +157,31 @@ export type ActivityEventType =
   | 'attention_promoted'
   | 'attention_demoted'
   | 'project_parked'
-  | 'project_unparked';
+  | 'project_unparked'
+  | 'WORK_STARTED'
+  | 'work_started'
+  | 'WORK_STOPPED'
+  | 'work_stopped'
+  | 'WORK_PAUSED'
+  | 'work_paused'
+  | 'WORK_RESUMED'
+  | 'work_resumed'
+  | 'TASK_CREATED'
+  | 'TASK_COMPLETED'
+  | 'TASK_DEFERRED'
+  | 'task_deferred'
+  | 'TASK_ABANDONED'
+  | 'task_abandoned'
+  | 'ESTIMATE_CHANGED'
+  | 'estimate_changed'
+  | 'DEADLINE_CHANGED'
+  | 'deadline_changed'
+  | 'ATTENTION_SYSTEM_TOGGLED'
+  | 'attention_system_toggled'
+  | 'WEEKLY_GOAL_SET'
+  | 'weekly_goal_set'
+  | 'WEEKLY_REVIEW_TRIGGERED'
+  | 'weekly_review_triggered';
 
 export interface ActivityEvent {
   readonly id: string;
@@ -172,6 +198,109 @@ export interface ActivityEvent {
   readonly metadata?: Record<string, unknown>;
 }
 
+export interface ActiveWorkSession {
+  readonly sessionId: string;
+  readonly taskId: string;
+  readonly taskText: string;
+  readonly projectId?: string;
+  readonly projectName?: string;
+  readonly startedAt: string;
+  readonly lastResumedAt?: string;
+  readonly accumulatedSecondsBeforeResume?: number;
+  readonly isPaused?: boolean;
+}
+
+export interface WorkSession {
+  readonly id: string;
+  readonly taskId: string;
+  readonly projectId?: string;
+  readonly taskText?: string;
+  readonly startedAt: string;
+  readonly stoppedAt: string;
+  readonly durationSeconds: number;
+  readonly au: number;
+}
+
+export interface TaskAttentionSummary {
+  readonly taskId: string;
+  readonly taskText?: string;
+  readonly projectId?: string;
+  readonly projectName?: string;
+  readonly estimatedAU?: number;
+  readonly actualSeconds: number;
+  readonly actualAU: number;
+  readonly sessionCount: number;
+  readonly calendarDurationHours?: number;
+  readonly calendarSpanDays?: number;
+  readonly firstWorkedAt?: string;
+  readonly lastWorkedAt?: string;
+  readonly estimationRatio?: number | null;
+  readonly estimationStatus: 'accurate' | 'overestimated' | 'underestimated' | 'no_estimate';
+}
+
+export interface PatternObservation {
+  readonly id: string;
+  readonly title: string;
+  readonly description: string;
+  readonly ruleExplanation: string;
+  readonly evidence: readonly { readonly label: string; readonly value: string }[];
+  readonly tone: 'neutral' | 'info';
+}
+
+export interface WeeklyAttentionReviewData {
+  readonly weekStartDate: string;
+  readonly weekEndDate: string;
+  readonly generatedAt: string;
+  readonly attentionUnitMinutes: number;
+  readonly plannedAU?: number;
+  readonly trackedAU: number;
+  readonly trackedSeconds: number;
+  readonly sessionCount: number;
+  readonly projectAllocations: readonly {
+    readonly projectId: string;
+    readonly projectName: string;
+    readonly isAttention: boolean;
+    readonly au: number;
+    readonly percentage: number;
+    readonly tasksWorkedCount: number;
+    readonly tasksCompletedCount: number;
+  }[];
+  readonly standaloneAllocations: {
+    readonly au: number;
+    readonly percentage: number;
+    readonly tasksWorkedCount: number;
+    readonly tasksCompletedCount: number;
+  };
+  readonly topTasksByAttention: readonly {
+    readonly taskId: string;
+    readonly taskText: string;
+    readonly projectId?: string;
+    readonly projectName?: string;
+    readonly au: number;
+    readonly sessions: number;
+    readonly status: NodeStatus;
+  }[];
+  readonly estimationCalibration: {
+    readonly tasksWithEstimate: number;
+    readonly accurateCount: number;
+    readonly overestimatedCount: number;
+    readonly underestimatedCount: number;
+    readonly averageRatio: number | null;
+  };
+  readonly taskSummaries: readonly TaskAttentionSummary[];
+  readonly patternObservations: readonly PatternObservation[];
+}
+
+export interface WeeklyAttentionReviewRecord {
+  readonly id: string;
+  readonly weekStartDate: string;
+  readonly weekEndDate?: string;
+  readonly generatedAt?: string;
+  readonly createdAt?: string;
+  readonly data: WeeklyAttentionReviewData;
+  readonly userNotes?: string;
+}
+
 export interface UserPreferences {
   readonly myDayMode: 'today' | 'current_tasks';
   readonly theme: 'dark' | 'light' | 'system';
@@ -182,6 +311,10 @@ export interface UserPreferences {
   readonly lastActiveNodeId?: string;
   readonly lastActiveProjectId?: string;
   readonly lastActiveTimestamp?: string;
+  readonly attentionSystemEnabled?: boolean;
+  readonly attentionUnitMinutes?: number;
+  readonly weeklyPlannedAU?: number;
+  readonly activeWorkSession?: ActiveWorkSession | null;
 }
 
 export interface ProjectSummary {

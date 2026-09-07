@@ -12,6 +12,7 @@ import {
   Smartphone,
   MoreVertical,
   Coffee,
+  Clock,
 } from 'lucide-react';
 import { SyncStatusIndicator } from './SyncStatusIndicator';
 
@@ -26,6 +27,7 @@ export const Header: React.FC = () => {
     setIsOnboardingOpen,
     exportAllData,
     importProjectJson,
+    activeWorkSession,
   } = useApp();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -151,6 +153,22 @@ export const Header: React.FC = () => {
         >
           <Sun className="w-3.5 h-3.5 shrink-0" />
           <span>My Day</span>
+        </button>
+
+        <button
+          id="nav-attention-review"
+          onClick={() => setCurrentView('attention_review')}
+          className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
+            currentView === 'attention_review'
+              ? 'bg-white dark:bg-slate-800 text-amber-500 dark:text-amber-400 shadow-sm border border-slate-200 dark:border-transparent'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-900'
+          }`}
+        >
+          <Clock className="w-3.5 h-3.5 shrink-0" />
+          <span>Attention</span>
+          {activeWorkSession && (
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse ml-0.5" />
+          )}
         </button>
       </nav>
 

@@ -7,6 +7,7 @@ import {
   ProjectSummary,
   IdeaSeed,
   ActivityEvent,
+  WeeklyAttentionReviewRecord,
 } from '../../domain/models/types';
 
 export type CloudSyncStatus = 'idle' | 'syncing' | 'synced' | 'error' | 'offline';
@@ -54,4 +55,8 @@ export interface IStorageProvider {
   readActivityLog?(): Promise<ActivityEvent[]>;
   appendActivityEvents?(events: ActivityEvent[]): Promise<void>;
   clearActivityLog?(): Promise<void>;
+
+  readAttentionReviews?(): Promise<WeeklyAttentionReviewRecord[]>;
+  writeAttentionReviews?(reviews: WeeklyAttentionReviewRecord[]): Promise<void>;
+  deleteAttentionReview?(reviewId: string): Promise<void>;
 }

@@ -27,6 +27,8 @@ import {
 } from 'lucide-react';
 import { Node, NodeStatus, ProjectSummary, RecurrenceRule, StandaloneTask } from '../../../domain/models/types';
 import { getProjectColorTheme, ProjectIconDisplay } from '../../utils/project-style';
+import { WorkButton } from '../../components/WorkButton';
+import { AttentionService } from '../../../domain/services/attention-service';
 
 type LateTasksGroupMode = 'hierarchy' | 'attention' | 'time' | 'flat';
 type TodayProjectTasksGroupMode = 'hierarchy' | 'attention' | 'flat';
@@ -78,11 +80,14 @@ export const MyDayView: React.FC = () => {
     refreshData,
     setIsSyncModalOpen,
     gcalendarSyncConfig,
+    activityLog,
+    updateTaskEstimate,
   } = useApp();
 
   const [newStandaloneText, setNewStandaloneText] = useState('');
   const [newStandaloneDueDate, setNewStandaloneDueDate] = useState(getTodayString());
   const [newStandaloneRecurrence, setNewStandaloneRecurrence] = useState<RecurrenceRule | undefined>(undefined);
+  const [newStandaloneEstimatedAU, setNewStandaloneEstimatedAU] = useState<string>('');
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [showCompleted, setShowCompleted] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -92,6 +97,10 @@ export const MyDayView: React.FC = () => {
   const [activeRecurrenceTaskId, setActiveRecurrenceTaskId] = useState<string | null>(null);
   const [isNewRecurrenceOpen, setIsNewRecurrenceOpen] = useState(false);
 
+  // Attention editing & tracking state
+  const [editingEstimateTaskId, setEditingEstimateTaskId] = useState<string | null>(null);
+  const [editingEstimateValue, setEditingEstimateValue] = useState<string>('');
+
   // Collapsible & state for Late / Overdue Tasks section
   const [isLateTasksOpen, setIsLateTasksOpen] = useState(false);
   const [activeCalendarLateId, setActiveCalendarLateId] = useState<string | null>(null);
@@ -99,6 +108,114 @@ export const MyDayView: React.FC = () => {
 
   // Attention-only filter for project tasks
   const [attentionOnlyFilter, setAttentionOnlyFilter] = useState(false);
+
+  // Map taskId -> accumulated actual AU from telemetry sessions
+  const taskAttentionMap = useMemo(() => {
+    if (!preferences.attentionSystemEnabled) return new Map<string, number>();
+    const sessions = AttentionService.reconstructWorkSessions(
+      activityLog,
+      preferences.attentionUnitMinutes || 15
+    );
+    const map = new Map<string, number>();
+    for (const s of sessions) {
+      map.set(s.taskId, (map.get(s.taskId) || 0) + s.au);
+    }
+    return map;
+  }, [activityLog, preferences.attentionSystemEnabled, preferences.attentionUnitMinutes]);
+
+  const handleStartEditingEstimate = (taskId: string, currentAU?: number) => {
+    setEditingEstimateTaskId(taskId);
+    setEditingEstimateValue(currentAU ? String(currentAU) : '');
+  };
+
+  const handleSaveEstimate = async (taskId: string, isNode: boolean) => {
+    const parsed = parseFloat(editingEstimateValue);
+    const val = isNaN(parsed) || parsed <= 0 ? undefined : parsed;
+    await updateTaskEstimate(taskId, val, isNode);
+    setEditingEstimateTaskId(null);
+  };
+
+  const renderAUControls = (
+    task: { id: string; text: string; projectId?: string; estimatedAU?: number },
+    isNode: boolean
+  ) => {
+    if (!preferences.attentionSystemEnabled) return null;
+    const trackedAU = taskAttentionMap.get(task.id) || 0;
+    const isEditingThis = editingEstimateTaskId === task.id;
+
+    return (
+      <div className="flex items-center space-x-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+        <WorkButton
+          taskId={task.id}
+          taskText={task.text}
+          projectId={task.projectId}
+          trackedAU={trackedAU}
+        />
+        {isEditingThis ? (
+          <div className="flex items-center space-x-1 bg-amber-50 dark:bg-amber-950 border border-amber-300 dark:border-amber-700 px-1.5 py-0.5 rounded text-xs">
+            <input
+              type="number"
+              min="0.25"
+              step="0.25"
+              value={editingEstimateValue}
+              onChange={(e) => setEditingEstimateValue(e.target.value)}
+              placeholder="AU"
+              className="w-12 bg-white dark:bg-slate-900 border border-amber-400 rounded px-1 py-0.2 font-mono text-xs text-amber-900 dark:text-amber-200"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSaveEstimate(task.id, isNode);
+                if (e.key === 'Escape') setEditingEstimateTaskId(null);
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => handleSaveEstimate(task.id, isNode)}
+              className="text-[10px] bg-amber-600 hover:bg-amber-700 text-white px-1.5 py-0.5 rounded font-bold cursor-pointer"
+            >
+              ✓
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditingEstimateTaskId(null)}
+              className="text-[10px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 px-1 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center space-x-1 text-xs">
+            {task.estimatedAU ? (
+              <button
+                type="button"
+                onClick={() => handleStartEditingEstimate(task.id, task.estimatedAU)}
+                className="px-1.5 py-0.5 rounded font-mono font-medium text-[11px] bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 hover:bg-amber-100 dark:hover:bg-amber-900/60 transition-colors cursor-pointer"
+                title={`Estimated: ${task.estimatedAU} AU. Click to edit.`}
+              >
+                Est: {task.estimatedAU} AU
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => handleStartEditingEstimate(task.id)}
+                className="opacity-0 group-hover:opacity-100 px-1.5 py-0.5 rounded font-mono text-[10px] text-slate-400 dark:text-slate-500 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 border border-dashed border-slate-300 dark:border-slate-700 transition-all cursor-pointer"
+                title="Add estimated attention in AU"
+              >
+                + AU
+              </button>
+            )}
+            {trackedAU > 0 && (
+              <span
+                className="px-1.5 py-0.5 rounded font-mono font-semibold text-[11px] bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60"
+                title={`Tracked attention: ${trackedAU} AU (${AttentionService.formatAU(trackedAU, preferences.attentionUnitMinutes)})`}
+              >
+                Act: {trackedAU} AU
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // Map projectId -> project summary for quick label lookups
   const projectsMap = useMemo(() => {
@@ -632,8 +749,10 @@ export const MyDayView: React.FC = () => {
   const handleAddStandalone = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newStandaloneText.trim()) return;
-    await addStandaloneTask(newStandaloneText.trim(), newStandaloneDueDate, newStandaloneRecurrence);
+    const estAU = preferences.attentionSystemEnabled && newStandaloneEstimatedAU ? parseFloat(newStandaloneEstimatedAU) : undefined;
+    await addStandaloneTask(newStandaloneText.trim(), newStandaloneDueDate, newStandaloneRecurrence, isNaN(estAU as number) ? undefined : estAU);
     setNewStandaloneText('');
+    setNewStandaloneEstimatedAU('');
     setNewStandaloneRecurrence(undefined);
   };
 
@@ -750,6 +869,7 @@ export const MyDayView: React.FC = () => {
         </div>
 
         <div className="flex items-center space-x-2 shrink-0 ml-8 sm:ml-auto flex-wrap sm:flex-nowrap gap-y-1">
+          {renderAUControls(task, true)}
           {/* Project Badge if not hidden */}
           {!options?.hideProjectBadge && task.projectId && (
             <button
@@ -871,6 +991,7 @@ export const MyDayView: React.FC = () => {
         </div>
 
         <div className="flex items-center space-x-2 shrink-0 ml-8 sm:ml-auto flex-wrap sm:flex-nowrap gap-y-1">
+          {renderAUControls(task, false)}
           {!options?.hideStandaloneBadge && (
             <span className="hidden sm:inline-block text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
               Standalone
@@ -1036,6 +1157,7 @@ export const MyDayView: React.FC = () => {
         </div>
 
         <div className="flex items-center space-x-2 shrink-0 ml-8 sm:ml-auto flex-wrap sm:flex-nowrap gap-y-1">
+          {renderAUControls(task, true)}
           {/* Project Badge if not hidden */}
           {!options?.hideProjectBadge && task.projectId && (
             <button
@@ -1135,6 +1257,7 @@ export const MyDayView: React.FC = () => {
         </div>
 
         <div className="flex items-center space-x-2 shrink-0 ml-8 sm:ml-auto flex-wrap sm:flex-nowrap gap-y-1">
+          {renderAUControls(task, false)}
           {/* Recurrence Badge / Picker */}
           <RecurrencePicker
             value={task.recurrence}
@@ -2108,6 +2231,25 @@ export const MyDayView: React.FC = () => {
             />
             {/* Desktop right controls inside input */}
             <div className="hidden sm:flex absolute right-1.5 top-1/2 -translate-y-1/2 items-center space-x-1">
+              {/* Estimated AU Input (if attention system enabled) */}
+              {preferences.attentionSystemEnabled && (
+                <div
+                  className="flex items-center space-x-1 px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60"
+                  title="Estimated Attention in Attention Units (e.g., 2 AU = 30m)"
+                >
+                  <Zap className="w-3 h-3 text-amber-500 shrink-0" />
+                  <input
+                    type="number"
+                    min="0.25"
+                    step="0.25"
+                    placeholder="Est AU"
+                    value={newStandaloneEstimatedAU}
+                    onChange={(e) => setNewStandaloneEstimatedAU(e.target.value)}
+                    className="w-14 bg-transparent text-xs font-mono text-amber-900 dark:text-amber-200 focus:outline-none placeholder-amber-400 dark:placeholder-amber-600"
+                  />
+                </div>
+              )}
+
               {/* Recurrence Selector */}
               <RecurrencePicker
                 value={newStandaloneRecurrence}
@@ -2148,7 +2290,24 @@ export const MyDayView: React.FC = () => {
 
           {/* Mobile-only action row */}
           <div className="flex sm:hidden items-center justify-between gap-2">
-            <div className="flex items-center space-x-1.5">
+            <div className="flex items-center space-x-1.5 flex-wrap gap-y-1.5">
+              {preferences.attentionSystemEnabled && (
+                <div
+                  className="flex items-center space-x-1 px-2 py-1 rounded bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60"
+                  title="Estimated Attention in Attention Units"
+                >
+                  <Zap className="w-3 h-3 text-amber-500 shrink-0" />
+                  <input
+                    type="number"
+                    min="0.25"
+                    step="0.25"
+                    placeholder="AU"
+                    value={newStandaloneEstimatedAU}
+                    onChange={(e) => setNewStandaloneEstimatedAU(e.target.value)}
+                    className="w-12 bg-transparent text-xs font-mono text-amber-900 dark:text-amber-200 focus:outline-none placeholder-amber-400 dark:placeholder-amber-600"
+                  />
+                </div>
+              )}
               <RecurrencePicker
                 value={newStandaloneRecurrence}
                 baseDate={newStandaloneDueDate}
