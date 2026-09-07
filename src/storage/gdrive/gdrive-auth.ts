@@ -4,6 +4,7 @@ const GDRIVE_TOKEN_KEY = 'graphdule_gdrive_token';
 const GDRIVE_TOKEN_EXPIRY_KEY = 'graphdule_gdrive_token_expiry';
 const GDRIVE_USER_KEY = 'graphdule_gdrive_user';
 const GDRIVE_CLIENT_ID_KEY = 'graphdule_gdrive_client_id';
+const ACTIVE_CLOUD_PROVIDER_KEY = 'graphdule_active_cloud_provider';
 
 // Default public Google Drive client ID (can be overridden by user or .env)
 export const DEFAULT_GDRIVE_CLIENT_ID =
@@ -23,6 +24,9 @@ export class GDriveAuth {
       return null;
     }
   })();
+  private static tokenClient: any = null;
+  private static refreshTimer: any = null;
+  private static refreshInProgressPromise: Promise<{ success: boolean; error?: string; user?: CloudUserInfo }> | null = null;
 
   public static getCustomClientId(): string {
     return localStorage.getItem(GDRIVE_CLIENT_ID_KEY) || '';
@@ -34,6 +38,8 @@ export class GDriveAuth {
     } else {
       localStorage.removeItem(GDRIVE_CLIENT_ID_KEY);
     }
+    // Invalidate cached token client on client ID change
+    this.tokenClient = null;
   }
 
   public static getEffectiveClientId(): string {
@@ -52,6 +58,23 @@ export class GDriveAuth {
   public static getToken(): string | null {
     if (!this.isAuthenticated()) return null;
     return this.token;
+  }
+
+  /**
+   * Retrieves an active token, automatically refreshing it if expired or expiring within 60 seconds.
+   */
+  public static async getValidToken(): Promise<string | null> {
+    if (this.token && Date.now() < this.tokenExpiry - 60000) {
+      return this.token;
+    }
+
+    // Token is expired or expiring very soon - attempt silent refresh
+    const res = await this.refreshToken(false);
+    if (res.success && this.token) {
+      return this.token;
+    }
+
+    return this.isAuthenticated() ? this.token : null;
   }
 
   public static getUser(): CloudUserInfo | null {
@@ -93,6 +116,103 @@ export class GDriveAuth {
     });
   }
 
+  private static async getOrInitTokenClient(): Promise<any> {
+    if (typeof window === 'undefined') return null;
+    const loaded = await this.ensureGsiLoaded();
+    if (!loaded || !(window as any).google?.accounts?.oauth2) return null;
+
+    if (!this.tokenClient) {
+      const finalClientId = this.getEffectiveClientId();
+      this.tokenClient = (window as any).google.accounts.oauth2.initTokenClient({
+        client_id: finalClientId,
+        scope: SCOPES,
+        callback: () => {},
+      });
+    }
+    return this.tokenClient;
+  }
+
+  /**
+   * Refreshes the Google OAuth token.
+   * If interactive is false, uses prompt: '' to refresh silently without a user consent dialog.
+   */
+  public static async refreshToken(interactive = false): Promise<{ success: boolean; error?: string; user?: CloudUserInfo }> {
+    if (this.refreshInProgressPromise) {
+      return this.refreshInProgressPromise;
+    }
+
+    this.refreshInProgressPromise = new Promise(async (resolve) => {
+      try {
+        const client = await this.getOrInitTokenClient();
+        if (client) {
+          client.callback = async (response: any) => {
+            this.refreshInProgressPromise = null;
+            if (response.error) {
+              console.warn('[GDriveAuth] Token refresh error:', response.error_description || response.error);
+              resolve({ success: false, error: response.error_description || response.error });
+              return;
+            }
+
+            if (response.access_token) {
+              const expiresIn = parseInt(response.expires_in || '3600', 10);
+              this.setTokenData(response.access_token, expiresIn);
+
+              const userInfo = await this.fetchUserInfo(response.access_token);
+              if (userInfo && userInfo.email) {
+                this.user = userInfo;
+                localStorage.setItem(GDRIVE_USER_KEY, JSON.stringify(userInfo));
+              }
+
+              resolve({ success: true, user: this.user || undefined });
+            } else {
+              resolve({ success: false, error: 'No access token received from Google' });
+            }
+          };
+
+          client.requestAccessToken({ prompt: interactive ? 'consent' : '' });
+          return;
+        }
+
+        if (interactive) {
+          this.refreshInProgressPromise = null;
+          const res = await this.login();
+          resolve(res);
+          return;
+        }
+
+        this.refreshInProgressPromise = null;
+        resolve({ success: false, error: 'Google Identity Services not initialized' });
+      } catch (err: any) {
+        this.refreshInProgressPromise = null;
+        resolve({ success: false, error: err.message || 'Token refresh failed' });
+      }
+    });
+
+    return this.refreshInProgressPromise;
+  }
+
+  /**
+   * Schedules a background token refresh ~5 minutes before current token expires.
+   */
+  public static scheduleTokenRefresh(): void {
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+
+    if (!this.token || !this.tokenExpiry) return;
+
+    // Refresh 5 minutes before expiration, or in 10s if already nearing/past expiration
+    const timeUntilRefresh = Math.max(this.tokenExpiry - Date.now() - 5 * 60 * 1000, 10000);
+
+    this.refreshTimer = setTimeout(async () => {
+      const activeProvider = localStorage.getItem(ACTIVE_CLOUD_PROVIDER_KEY);
+      if (activeProvider === 'google_drive') {
+        await this.refreshToken(false);
+      }
+    }, timeUntilRefresh);
+  }
+
   /**
    * Triggers Google OAuth 2.0 Token Flow in browser.
    */
@@ -131,6 +251,7 @@ export class GDriveAuth {
               }
             },
           });
+          this.tokenClient = client;
 
           client.requestAccessToken({ prompt: 'consent' });
           return;
@@ -202,9 +323,14 @@ export class GDriveAuth {
   }
 
   public static logout(): void {
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
     this.token = null;
     this.tokenExpiry = 0;
     this.user = null;
+    this.tokenClient = null;
     localStorage.removeItem(GDRIVE_TOKEN_KEY);
     localStorage.removeItem(GDRIVE_TOKEN_EXPIRY_KEY);
     localStorage.removeItem(GDRIVE_USER_KEY);
@@ -215,6 +341,7 @@ export class GDriveAuth {
     this.tokenExpiry = Date.now() + expiresInSeconds * 1000;
     localStorage.setItem(GDRIVE_TOKEN_KEY, token);
     localStorage.setItem(GDRIVE_TOKEN_EXPIRY_KEY, this.tokenExpiry.toString());
+    this.scheduleTokenRefresh();
   }
 
   private static async fetchUserInfo(accessToken: string): Promise<CloudUserInfo> {
@@ -233,4 +360,9 @@ export class GDriveAuth {
       return {};
     }
   }
+}
+
+// Automatically schedule token refresh on startup if Google Drive is the active provider
+if (typeof window !== 'undefined' && localStorage.getItem(ACTIVE_CLOUD_PROVIDER_KEY) === 'google_drive') {
+  GDriveAuth.scheduleTokenRefresh();
 }

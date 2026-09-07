@@ -224,6 +224,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return unsubscribe;
   }, []);
 
+  const syncDebounceTimerRef = useRef<any>(null);
+  const triggerCloudSyncRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const debouncedCloudSync = useCallback(() => {
+    if (SyncCoordinator.getState().provider === 'none') return;
+    if (syncDebounceTimerRef.current) {
+      clearTimeout(syncDebounceTimerRef.current);
+    }
+    syncDebounceTimerRef.current = setTimeout(() => {
+      triggerCloudSyncRef.current().catch(() => {});
+    }, 3000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (syncDebounceTimerRef.current) {
+        clearTimeout(syncDebounceTimerRef.current);
+      }
+    };
+  }, []);
+
   // Compute all unique tags available across all projects for easy reuse & autocompletion
   const allAvailableTags = useMemo(() => {
     const set = new Set<string>();
@@ -266,8 +286,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       setPreferences(updated);
       await storage.writePreferences(updated);
+      debouncedCloudSync();
     },
-    [preferences, storage]
+    [preferences, storage, debouncedCloudSync]
   );
 
   const toggleDateFormat = useCallback(async () => {
@@ -289,6 +310,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             timestamp,
           })
         );
+        updatePreferences({
+          lastActiveNodeId: node.id,
+          lastActiveProjectId: pId,
+          lastActiveTimestamp: timestamp,
+        });
       } catch {
         // ignore localStorage errors
       }
@@ -315,8 +341,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
 
       // 3. Update project JSON on storage (synchronized via project_{id}.json)
-      if (pId) {
-        const doc = await storage.readProject(pId);
+      if (activeProjectDoc && pId === activeProjectDoc.project.id) {
+        const doc = await storage.readProject(activeProjectDoc.project.id);
         if (doc && doc.project.lastActiveNodeId !== node.id) {
           const updatedDoc: ProjectDocument = {
             ...doc,
@@ -330,7 +356,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }
     },
-    [activeProjectDoc?.project.id, storage, updatePreferences]
+    [activeProjectDoc, storage, updatePreferences]
   );
 
   const setSelectedNode = useCallback(
@@ -392,13 +418,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setActivityLog(events);
     }
 
+    // Check if activeProjectDoc was updated externally in storage (e.g. from cloud sync or merge)
+    if (activeProjectDoc) {
+      const freshActiveDoc = await storage.readProject(activeProjectDoc.project.id);
+      if (freshActiveDoc) {
+        const freshTime = new Date(freshActiveDoc.project.updatedAt || freshActiveDoc.exportedAt || 0).getTime();
+        const currTime = new Date(activeProjectDoc.project.updatedAt || activeProjectDoc.exportedAt || 0).getTime();
+        if (freshTime > currTime) {
+          setActiveProjectDoc(freshActiveDoc);
+        }
+      }
+    }
+
     // Read and combine nodes from ALL active (non-archived, non-parked) projects
     const activeProjectSummaries = projList.filter((p) => !p.isArchived && !p.isParked);
     const docs = await Promise.all(
       activeProjectSummaries.map(async (p) => {
-        if (activeProjectDoc && activeProjectDoc.project.id === p.id) {
-          return activeProjectDoc;
-        }
         return storage.readProject(p.id);
       })
     );
@@ -607,8 +642,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Refresh summaries
       const projList = await storage.listProjects();
       setProjects(projList);
+      debouncedCloudSync();
     },
-    [storage]
+    [storage, debouncedCloudSync]
   );
 
   const undo = useCallback(async () => {
@@ -817,14 +853,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (projectId === DEFAULT_SAMPLE_PROJECT_ID) {
         localStorage.setItem('graphdule_sample_deleted', 'true');
       }
+      SyncCoordinator.recordProjectDeletion(projectId);
       await storage.deleteProject(projectId);
       if (activeProjectDoc?.project.id === projectId) {
         setActiveProjectDoc(null);
         setCurrentView('projects');
       }
       await refreshData();
+      debouncedCloudSync();
     },
-    [storage, activeProjectDoc, refreshData]
+    [storage, activeProjectDoc, refreshData, debouncedCloudSync]
   );
 
   // Priority Attention Management
@@ -1783,8 +1821,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           projectName: 'Standalone Tasks',
         }).catch(() => {});
       }
+      debouncedCloudSync();
     },
-    [standaloneTasks, storage, logActivityEvent]
+    [standaloneTasks, storage, logActivityEvent, debouncedCloudSync]
   );
 
   const updateStandaloneTask = useCallback(
@@ -1804,8 +1843,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           projectName: 'Standalone Tasks',
         }).catch(() => {});
       }
+      debouncedCloudSync();
     },
-    [standaloneTasks, storage]
+    [standaloneTasks, storage, debouncedCloudSync]
   );
 
   const updateStandaloneTaskStatus = useCallback(
@@ -1885,18 +1925,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       await storage.writeStandaloneTasks(updated);
       setStandaloneTasks(updated);
+      debouncedCloudSync();
     },
-    [standaloneTasks, storage]
+    [standaloneTasks, storage, debouncedCloudSync]
   );
 
   const deleteStandaloneTask = useCallback(
     async (taskId: string) => {
+      SyncCoordinator.recordTaskDeletion(taskId);
       const updated = standaloneTasks.filter((t) => t.id !== taskId);
       await storage.writeStandaloneTasks(updated);
       setStandaloneTasks(updated);
       GCalendarSync.syncTaskDelete(taskId).catch(() => {});
+      debouncedCloudSync();
     },
-    [standaloneTasks, storage]
+    [standaloneTasks, storage, debouncedCloudSync]
   );
 
   const exportActiveProject = useCallback(() => {
@@ -2031,6 +2074,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [storage, refreshData]);
 
+  useEffect(() => {
+    triggerCloudSyncRef.current = triggerCloudSync;
+  }, [triggerCloudSync]);
+
   const connectGoogleDrive = useCallback(
     async (clientId?: string) => {
       const res = await GDriveAuth.login(clientId);
@@ -2092,22 +2139,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return result;
   }, []);
 
-  // Background auto-sync on focus and network online
+  // Background auto-sync on focus, network online, and recurring 60s interval while page is open
   useEffect(() => {
+    if (cloudSyncState.provider === 'none') return;
+
     const onFocus = () => {
-      if (cloudSyncState.provider !== 'none') {
-        triggerCloudSync();
-      }
+      triggerCloudSync();
     };
     const onOnline = () => {
-      if (cloudSyncState.provider !== 'none') {
-        triggerCloudSync();
-      }
+      triggerCloudSync();
     };
+
+    // Periodic 60s background sync while webpage is open
+    const intervalId = window.setInterval(() => {
+      triggerCloudSync();
+    }, 60000);
 
     window.addEventListener('focus', onFocus);
     window.addEventListener('online', onOnline);
     return () => {
+      window.clearInterval(intervalId);
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('online', onOnline);
     };

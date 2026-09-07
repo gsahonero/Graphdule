@@ -482,5 +482,166 @@ describe('Cloud Sync & Multi-Device Coordination', () => {
       expect(merged.lastActiveTimestamp).toBe('2026-09-04T18:00:00Z');
     });
   });
+
+  describe('Version Conflict Management & Semantic Project Merging', () => {
+    it('merges node and edge additions from both devices without discarding either side', async () => {
+      const localDoc: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: '2026-09-05T10:00:00Z',
+        project: {
+          id: 'proj_collab',
+          name: 'Collab Project',
+          endGoalNodeId: 'goal_node',
+          createdAt: '2026-09-01T10:00:00Z',
+          updatedAt: '2026-09-05T10:00:00Z',
+          tags: ['local-tag'],
+        },
+        nodes: [
+          { id: 'goal_node', text: 'Goal', status: 'planned', dueDate: '2026-09-30' } as any,
+          { id: 'node_local', text: 'Local Task', status: 'completed', dueDate: '2026-09-10' } as any,
+        ],
+        edges: [
+          { id: 'e1', projectId: 'proj_collab', fromNodeId: 'node_local', toNodeId: 'goal_node', createdAt: '2026-09-01T10:00:00Z' },
+        ],
+        notes: [],
+        history: [],
+      };
+
+      const cloudDoc: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: '2026-09-05T11:00:00Z',
+        project: {
+          id: 'proj_collab',
+          name: 'Collab Project',
+          endGoalNodeId: 'goal_node',
+          createdAt: '2026-09-01T10:00:00Z',
+          updatedAt: '2026-09-05T11:00:00Z',
+          tags: ['cloud-tag'],
+        },
+        nodes: [
+          { id: 'goal_node', text: 'Goal', status: 'planned', dueDate: '2026-09-30' } as any,
+          { id: 'node_cloud', text: 'Cloud Task', status: 'in_progress', dueDate: '2026-09-15' } as any,
+        ],
+        edges: [
+          { id: 'e2', projectId: 'proj_collab', fromNodeId: 'node_cloud', toNodeId: 'goal_node', createdAt: '2026-09-01T10:00:00Z' },
+        ],
+        notes: [],
+        history: [],
+      };
+
+      const merged = await SyncCoordinator.mergeProjectDocuments(localDoc, cloudDoc);
+
+      // Verify all nodes from both sides exist
+      const nodeIds = merged.nodes.map((n) => n.id).sort();
+      expect(nodeIds).toEqual(['goal_node', 'node_cloud', 'node_local']);
+
+      // Verify all valid edges are preserved
+      expect(merged.edges).toHaveLength(2);
+      expect(merged.edges.map((e) => e.id).sort()).toEqual(['e1', 'e2']);
+
+      // Verify tags are merged
+      expect(merged.project.tags).toContain('local-tag');
+      expect(merged.project.tags).toContain('cloud-tag');
+    });
+
+    it('creates an automatic backup snapshot before applying conflict merge', async () => {
+      const writtenSnapshots: any[] = [];
+      const mockStorage: any = {
+        writeSnapshot: async (snap: any) => {
+          writtenSnapshots.push(snap);
+        },
+      };
+
+      const docA: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: '2026-09-05T10:00:00Z',
+        project: { id: 'proj_test', name: 'Test', endGoalNodeId: 'g', createdAt: '', updatedAt: '2026-09-05T10:00:00Z' },
+        nodes: [{ id: 'g', text: 'Goal', status: 'planned' } as any],
+        edges: [],
+        notes: [],
+        history: [],
+      };
+
+      const docB: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: '2026-09-05T11:00:00Z',
+        project: { id: 'proj_test', name: 'Test', endGoalNodeId: 'g', createdAt: '', updatedAt: '2026-09-05T11:00:00Z' },
+        nodes: [{ id: 'g', text: 'Goal Updated', status: 'completed' } as any],
+        edges: [],
+        notes: [],
+        history: [],
+      };
+
+      await SyncCoordinator.mergeProjectDocuments(docA, docB, mockStorage);
+
+      expect(writtenSnapshots).toHaveLength(1);
+      expect(writtenSnapshots[0].projectId).toBe('proj_test');
+      expect(writtenSnapshots[0].message).toContain('Pre-sync backup');
+    });
+  });
+
+  describe('Deletion Tombstones & Resurrection Prevention', () => {
+    it('records project deletion and prevents resurrection during sync', () => {
+      SyncCoordinator.recordProjectDeletion('proj_deleted_123');
+      const tombstones = SyncCoordinator.getProjectTombstones();
+      expect(tombstones['proj_deleted_123']).toBeDefined();
+
+      SyncCoordinator.clearProjectTombstone('proj_deleted_123');
+      expect(SyncCoordinator.getProjectTombstones()['proj_deleted_123']).toBeUndefined();
+    });
+
+    it('filters out tombstoned standalone tasks when deletedAt is newer than task update', () => {
+      const task: StandaloneTask = {
+        id: 'task_del',
+        text: 'Should be deleted',
+        dueDate: '2026-09-05',
+        status: 'planned',
+        createdAt: '2026-09-01T10:00:00Z',
+        updatedAt: '2026-09-01T10:00:00Z',
+      };
+
+      const tombstones = {
+        task_del: '2026-09-02T10:00:00Z', // Deleted after updatedAt
+      };
+
+      const merged = SyncCoordinator.mergeStandaloneTasks([task], [task], tombstones);
+      expect(merged).toHaveLength(0);
+    });
+
+    it('preserves task if it was updated on another device after deletion timestamp', () => {
+      const task: StandaloneTask = {
+        id: 'task_resurrected',
+        text: 'Edited after deletion',
+        dueDate: '2026-09-05',
+        status: 'completed',
+        createdAt: '2026-09-01T10:00:00Z',
+        updatedAt: '2026-09-03T10:00:00Z', // Newer than deletedAt
+      };
+
+      const tombstones = {
+        task_resurrected: '2026-09-02T10:00:00Z',
+      };
+
+      const merged = SyncCoordinator.mergeStandaloneTasks([], [task], tombstones);
+      expect(merged).toHaveLength(1);
+      expect(merged[0].id).toBe('task_resurrected');
+    });
+  });
+
+  describe('Connection Persistence & Auto-Removal Prevention', () => {
+    it('preserves active provider in state and localStorage even if token is expired', async () => {
+      localStorage.setItem('graphdule_active_cloud_provider', 'google_drive');
+      // Mock GDriveAuth.isAuthenticated to return false (simulating 1-hour expiry)
+      vi.spyOn(GDriveAuth, 'isAuthenticated').mockReturnValue(false);
+
+      SyncCoordinator.refreshAuthStatus();
+      const state = SyncCoordinator.getState();
+
+      // Crucial: Active provider MUST NOT be wiped out or set to 'none' in localStorage!
+      expect(state.provider).toBe('google_drive');
+      expect(localStorage.getItem('graphdule_active_cloud_provider')).toBe('google_drive');
+    });
+  });
 });
+
 

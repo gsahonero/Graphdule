@@ -179,24 +179,39 @@ export function buildEventPayload(params: {
 export class GCalendarClient {
   private static readonly BASE_URL = 'https://www.googleapis.com/calendar/v3';
 
-  private static getHeaders(): HeadersInit {
-    const token = GDriveAuth.getToken();
+  private static async fetchWithAuth(url: string, init: RequestInit = {}): Promise<Response> {
+    let token = (await GDriveAuth.getValidToken()) || GDriveAuth.getToken();
     if (!token) {
       throw new Error('Not authenticated with Google. Please sign in to sync with Google Calendar.');
     }
-    return {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    };
+
+    const headers = new Headers(init.headers || {});
+    headers.set('Authorization', `Bearer ${token}`);
+    if (!headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json');
+    }
+
+    let res = await fetch(url, { ...init, headers });
+
+    if (res.status === 401) {
+      const refreshRes = await GDriveAuth.refreshToken(false);
+      if (refreshRes.success) {
+        token = (await GDriveAuth.getValidToken()) || GDriveAuth.getToken();
+        if (token) {
+          headers.set('Authorization', `Bearer ${token}`);
+          res = await fetch(url, { ...init, headers });
+        }
+      }
+    }
+
+    return res;
   }
 
   /**
    * Fetch all user calendars where the user has edit/write permissions.
    */
   public static async listCalendars(): Promise<GCalendarItem[]> {
-    const res = await fetch(`${this.BASE_URL}/users/me/calendarList?minAccessRole=writer`, {
-      headers: this.getHeaders(),
-    });
+    const res = await this.fetchWithAuth(`${this.BASE_URL}/users/me/calendarList?minAccessRole=writer`);
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -226,9 +241,8 @@ export class GCalendarClient {
    * Creates a dedicated 'Graphdule' calendar.
    */
   public static async createDedicatedCalendar(): Promise<GCalendarItem> {
-    const res = await fetch(`${this.BASE_URL}/calendars`, {
+    const res = await this.fetchWithAuth(`${this.BASE_URL}/calendars`, {
       method: 'POST',
-      headers: this.getHeaders(),
       body: JSON.stringify({
         summary: 'Graphdule',
         description: 'Goal-oriented project schedules and tasks synchronized from Graphdule.',
@@ -270,9 +284,7 @@ export class GCalendarClient {
     calendarId: string,
     eventId: string
   ): Promise<GCalendarEventResponse | null> {
-    const res = await fetch(`${this.BASE_URL}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, {
-      headers: this.getHeaders(),
-    });
+    const res = await this.fetchWithAuth(`${this.BASE_URL}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`);
 
     if (res.status === 404 || res.status === 410) {
       return null;
@@ -294,9 +306,8 @@ export class GCalendarClient {
    * If an event with the deterministic ID already exists (409 Conflict), seamlessly updates it.
    */
   public static async createEvent(calendarId: string, payload: GCalendarEventPayload): Promise<GCalendarEventResponse> {
-    const res = await fetch(`${this.BASE_URL}/calendars/${encodeURIComponent(calendarId)}/events`, {
+    const res = await this.fetchWithAuth(`${this.BASE_URL}/calendars/${encodeURIComponent(calendarId)}/events`, {
       method: 'POST',
-      headers: this.getHeaders(),
       body: JSON.stringify(payload),
     });
 
@@ -321,9 +332,8 @@ export class GCalendarClient {
     eventId: string,
     payload: Partial<GCalendarEventPayload>
   ): Promise<GCalendarEventResponse> {
-    const res = await fetch(`${this.BASE_URL}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, {
+    const res = await this.fetchWithAuth(`${this.BASE_URL}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, {
       method: 'PATCH',
-      headers: this.getHeaders(),
       body: JSON.stringify(payload),
     });
 
@@ -339,9 +349,8 @@ export class GCalendarClient {
    * Delete an event from the calendar.
    */
   public static async deleteEvent(calendarId: string, eventId: string): Promise<boolean> {
-    const res = await fetch(`${this.BASE_URL}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, {
+    const res = await this.fetchWithAuth(`${this.BASE_URL}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, {
       method: 'DELETE',
-      headers: this.getHeaders(),
     });
 
     if (res.status === 404 || res.status === 410) {
@@ -372,9 +381,7 @@ export class GCalendarClient {
         ? ''
         : `privateExtendedProperty=${encodeURIComponent('graphduleApp')}=${encodeURIComponent('graphdule')}&`;
       const url: string = `${this.BASE_URL}/calendars/${encodeURIComponent(calendarId)}/events?${filterParam}maxResults=2500&singleEvents=true${pageParam}`;
-      const res: Response = await fetch(url, {
-        headers: this.getHeaders(),
-      });
+      const res: Response = await this.fetchWithAuth(url);
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -409,9 +416,7 @@ export class GCalendarClient {
     taskId: string
   ): Promise<GCalendarEventResponse | null> {
     const url = `${this.BASE_URL}/calendars/${encodeURIComponent(calendarId)}/events?privateExtendedProperty=${encodeURIComponent('graphduleTaskId')}=${encodeURIComponent(taskId)}&maxResults=1&singleEvents=true`;
-    const res = await fetch(url, {
-      headers: this.getHeaders(),
-    });
+    const res = await this.fetchWithAuth(url);
 
     if (!res.ok) {
       return null;

@@ -9,14 +9,30 @@ export interface GDriveFileItem {
 export class GDriveClient {
   private static cachedFolderId: string | null = null;
 
-  private static getHeaders(): HeadersInit {
-    const token = GDriveAuth.getToken();
+  private static async fetchWithAuth(url: string, init: RequestInit = {}): Promise<Response> {
+    let token = (await GDriveAuth.getValidToken()) || GDriveAuth.getToken();
     if (!token) {
       throw new Error('Google Drive is not authenticated. Please connect your Google account.');
     }
-    return {
-      Authorization: `Bearer ${token}`,
-    };
+
+    const headers = new Headers(init.headers || {});
+    headers.set('Authorization', `Bearer ${token}`);
+
+    let res = await fetch(url, { ...init, headers });
+
+    // If 401 Unauthorized, attempt one silent token refresh and retry
+    if (res.status === 401) {
+      const refreshRes = await GDriveAuth.refreshToken(false);
+      if (refreshRes.success) {
+        token = (await GDriveAuth.getValidToken()) || GDriveAuth.getToken();
+        if (token) {
+          headers.set('Authorization', `Bearer ${token}`);
+          res = await fetch(url, { ...init, headers });
+        }
+      }
+    }
+
+    return res;
   }
 
   /**
@@ -30,7 +46,7 @@ export class GDriveClient {
     );
     const url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name)`;
 
-    const res = await fetch(url, { headers: this.getHeaders() });
+    const res = await this.fetchWithAuth(url);
     if (!res.ok) {
       throw new Error(`Failed to search Google Drive folders: ${res.statusText}`);
     }
@@ -42,10 +58,9 @@ export class GDriveClient {
     }
 
     // Create the folder
-    const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+    const createRes = await this.fetchWithAuth('https://www.googleapis.com/drive/v3/files', {
       method: 'POST',
       headers: {
-        ...this.getHeaders(),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -71,7 +86,7 @@ export class GDriveClient {
     const query = encodeURIComponent(`'${targetFolderId}' in parents and trashed = false`);
     const url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,modifiedTime)&pageSize=1000`;
 
-    const res = await fetch(url, { headers: this.getHeaders() });
+    const res = await this.fetchWithAuth(url);
     if (!res.ok) {
       throw new Error(`Failed to list files in Google Drive: ${res.statusText}`);
     }
@@ -88,7 +103,7 @@ export class GDriveClient {
     const query = encodeURIComponent(`'${targetFolderId}' in parents and name = '${filename}' and trashed = false`);
     const url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,modifiedTime)`;
 
-    const res = await fetch(url, { headers: this.getHeaders() });
+    const res = await this.fetchWithAuth(url);
     if (!res.ok) return null;
 
     const data = await res.json();
@@ -103,7 +118,7 @@ export class GDriveClient {
    */
   public static async downloadJson<T>(fileId: string): Promise<T | null> {
     const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
-    const res = await fetch(url, { headers: this.getHeaders() });
+    const res = await this.fetchWithAuth(url);
     if (!res.ok) return null;
     return await res.json();
   }
@@ -120,10 +135,9 @@ export class GDriveClient {
     if (existing) {
       // Update existing file content
       const updateUrl = `https://www.googleapis.com/upload/drive/v3/files/${existing.id}?uploadType=media`;
-      const updateRes = await fetch(updateUrl, {
+      const updateRes = await this.fetchWithAuth(updateUrl, {
         method: 'PATCH',
         headers: {
-          ...this.getHeaders(),
           'Content-Type': 'application/json',
         },
         body: jsonString,
@@ -156,10 +170,9 @@ export class GDriveClient {
       closeDelimiter;
 
     const createUrl = `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart`;
-    const createRes = await fetch(createUrl, {
+    const createRes = await this.fetchWithAuth(createUrl, {
       method: 'POST',
       headers: {
-        ...this.getHeaders(),
         'Content-Type': `multipart/related; boundary=${boundary}`,
       },
       body: multipartRequestBody,
@@ -178,9 +191,8 @@ export class GDriveClient {
    */
   public static async deleteFile(fileId: string): Promise<void> {
     const url = `https://www.googleapis.com/drive/v3/files/${fileId}`;
-    await fetch(url, {
+    await this.fetchWithAuth(url, {
       method: 'DELETE',
-      headers: this.getHeaders(),
     });
   }
 }

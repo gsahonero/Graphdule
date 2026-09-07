@@ -4,6 +4,9 @@ import {
   UserPreferences,
   IdeaSeed,
   ActivityEvent,
+  Node,
+  Edge,
+  ProjectNote,
 } from '../../domain/models/types';
 import { IStorageProvider, CloudSyncStatus, CloudUserInfo } from '../base/storage-provider';
 import { GDriveAuth } from '../gdrive/gdrive-auth';
@@ -11,9 +14,12 @@ import { GDriveClient } from '../gdrive/gdrive-client';
 import { OneDriveAuth } from '../onedrive/onedrive-auth';
 import { OneDriveClient } from '../onedrive/onedrive-client';
 import { DEFAULT_SAMPLE_PROJECT_ID } from '../../config/sample-project';
+import { HistoryService } from '../../domain/services/history-service';
 
 const LAST_SYNC_KEY = 'graphdule_last_sync_time';
 const ACTIVE_CLOUD_PROVIDER_KEY = 'graphdule_active_cloud_provider';
+const TOMBSTONES_PROJECTS_KEY = 'graphdule_tombstones_projects';
+const TOMBSTONES_TASKS_KEY = 'graphdule_tombstones_tasks';
 
 export type ActiveCloudProvider = 'none' | 'google_drive' | 'onedrive';
 
@@ -60,16 +66,86 @@ export class SyncCoordinator {
   public static refreshAuthStatus(): void {
     const savedProvider = (localStorage.getItem(ACTIVE_CLOUD_PROVIDER_KEY) as ActiveCloudProvider) || 'none';
 
-    if (savedProvider === 'google_drive' && GDriveAuth.isAuthenticated()) {
+    if (savedProvider === 'google_drive') {
       this.state.provider = 'google_drive';
       this.state.user = GDriveAuth.getUser();
-    } else if (savedProvider === 'onedrive' && OneDriveAuth.isAuthenticated()) {
+      // If token expired, trigger silent refresh in background without clearing provider
+      if (!GDriveAuth.isAuthenticated()) {
+        GDriveAuth.getValidToken().catch(() => {});
+      }
+    } else if (savedProvider === 'onedrive') {
       this.state.provider = 'onedrive';
       this.state.user = OneDriveAuth.getUser();
-    } else if (savedProvider !== 'none') {
+    } else {
       this.state.provider = 'none';
       this.state.user = null;
-      localStorage.setItem(ACTIVE_CLOUD_PROVIDER_KEY, 'none');
+    }
+  }
+
+  // --- Deletion Tombstone Tracking ---
+  public static recordProjectDeletion(projectId: string): void {
+    try {
+      const raw = localStorage.getItem(TOMBSTONES_PROJECTS_KEY);
+      const map: Record<string, string> = raw ? JSON.parse(raw) : {};
+      map[projectId] = new Date().toISOString();
+      localStorage.setItem(TOMBSTONES_PROJECTS_KEY, JSON.stringify(map));
+    } catch {
+      // ignore
+    }
+  }
+
+  public static getProjectTombstones(): Record<string, string> {
+    try {
+      const raw = localStorage.getItem(TOMBSTONES_PROJECTS_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  public static clearProjectTombstone(projectId: string): void {
+    try {
+      const raw = localStorage.getItem(TOMBSTONES_PROJECTS_KEY);
+      if (raw) {
+        const map: Record<string, string> = JSON.parse(raw);
+        delete map[projectId];
+        localStorage.setItem(TOMBSTONES_PROJECTS_KEY, JSON.stringify(map));
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  public static recordTaskDeletion(taskId: string): void {
+    try {
+      const raw = localStorage.getItem(TOMBSTONES_TASKS_KEY);
+      const map: Record<string, string> = raw ? JSON.parse(raw) : {};
+      map[taskId] = new Date().toISOString();
+      localStorage.setItem(TOMBSTONES_TASKS_KEY, JSON.stringify(map));
+    } catch {
+      // ignore
+    }
+  }
+
+  public static getTaskTombstones(): Record<string, string> {
+    try {
+      const raw = localStorage.getItem(TOMBSTONES_TASKS_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  public static clearTaskTombstone(taskId: string): void {
+    try {
+      const raw = localStorage.getItem(TOMBSTONES_TASKS_KEY);
+      if (raw) {
+        const map: Record<string, string> = JSON.parse(raw);
+        delete map[taskId];
+        localStorage.setItem(TOMBSTONES_TASKS_KEY, JSON.stringify(map));
+      }
+    } catch {
+      // ignore
     }
   }
 
@@ -162,6 +238,8 @@ export class SyncCoordinator {
       if (doc) localProjectDocs.set(doc.project.id, doc);
     }
 
+    const projectTombstones = this.getProjectTombstones();
+
     // Identify project files in cloud (named project_{id}.json), excluding the default sample project
     const cloudProjectFiles = cloudFiles.filter(
       (f) =>
@@ -179,21 +257,32 @@ export class SyncCoordinator {
       const cloudDoc = await GDriveClient.downloadJson<ProjectDocument>(cf.id);
       if (!cloudDoc || !cloudDoc.project || cloudDoc.project.id === DEFAULT_SAMPLE_PROJECT_ID) continue;
 
+      const deletedAt = projectTombstones[projectId];
+      const cloudTime = new Date(cloudDoc.project.updatedAt || cloudDoc.exportedAt || cf.modifiedTime || 0).getTime();
+
+      // If project was deleted locally and cloud copy has not been updated since deletion
+      if (deletedAt && new Date(deletedAt).getTime() >= cloudTime) {
+        await GDriveClient.deleteFile(cf.id);
+        continue;
+      } else if (deletedAt && cloudTime > new Date(deletedAt).getTime()) {
+        // Cloud project was updated after local deletion: resurrect and clear tombstone
+        this.clearProjectTombstone(projectId);
+      }
+
       const localDoc = localProjectDocs.get(projectId);
       if (!localDoc) {
         // Exists in cloud but not locally -> download to local IndexedDB
         await localProvider.writeProject(cloudDoc);
       } else {
-        // Exists in both -> compare timestamps
         const localTime = new Date(localDoc.project.updatedAt || localDoc.exportedAt || 0).getTime();
-        const cloudTime = new Date(cloudDoc.project.updatedAt || cloudDoc.exportedAt || 0).getTime();
 
-        if (cloudTime > localTime) {
-          // Cloud is newer
-          await localProvider.writeProject(cloudDoc);
-        } else if (localTime > cloudTime) {
-          // Local is newer -> upload to cloud
-          await GDriveClient.uploadJson(cf.name, localDoc, folderId);
+        if (localTime === cloudTime) {
+          // Both in sync
+        } else {
+          // Merge documents semantically without losing nodes/edges/notes
+          const mergedDoc = await this.mergeProjectDocuments(localDoc, cloudDoc, localProvider);
+          await localProvider.writeProject(mergedDoc);
+          await GDriveClient.uploadJson(cf.name, mergedDoc, folderId);
         }
       }
     }
@@ -212,21 +301,26 @@ export class SyncCoordinator {
     for (const [id, localDoc] of localProjectDocs.entries()) {
       if (id === DEFAULT_SAMPLE_PROJECT_ID) continue;
       if (!cloudProjectIds.has(id)) {
-        await GDriveClient.uploadJson(`project_${id}.json`, localDoc, folderId);
+        if (!projectTombstones[id]) {
+          await GDriveClient.uploadJson(`project_${id}.json`, localDoc, folderId);
+        }
       }
     }
 
     // 2. Sync Standalone Tasks
     const localTasks = await localProvider.readStandaloneTasks();
+    const taskTombstones = this.getTaskTombstones();
     const cloudTasksFile = await GDriveClient.findFileByName('standalone_tasks.json', folderId);
 
     if (cloudTasksFile) {
       const cloudTasks = (await GDriveClient.downloadJson<StandaloneTask[]>(cloudTasksFile.id)) || [];
-      const mergedTasks = this.mergeStandaloneTasks(localTasks, cloudTasks);
+      const mergedTasks = this.mergeStandaloneTasks(localTasks, cloudTasks, taskTombstones);
       await localProvider.writeStandaloneTasks(mergedTasks);
       await GDriveClient.uploadJson('standalone_tasks.json', mergedTasks, folderId);
     } else {
-      await GDriveClient.uploadJson('standalone_tasks.json', localTasks, folderId);
+      const mergedTasks = this.mergeStandaloneTasks(localTasks, [], taskTombstones);
+      await localProvider.writeStandaloneTasks(mergedTasks);
+      await GDriveClient.uploadJson('standalone_tasks.json', mergedTasks, folderId);
     }
 
     // 3. Sync Preferences
@@ -290,6 +384,8 @@ export class SyncCoordinator {
       if (doc) localProjectDocs.set(doc.project.id, doc);
     }
 
+    const projectTombstones = this.getProjectTombstones();
+
     // Identify project files in cloud (named project_{id}.json), excluding the default sample project
     const cloudProjectFiles = cloudFiles.filter(
       (f) =>
@@ -307,17 +403,28 @@ export class SyncCoordinator {
       const cloudDoc = await OneDriveClient.downloadJson<ProjectDocument>(cf.name);
       if (!cloudDoc || !cloudDoc.project || cloudDoc.project.id === DEFAULT_SAMPLE_PROJECT_ID) continue;
 
+      const deletedAt = projectTombstones[projectId];
+      const cloudTime = new Date(cloudDoc.project.updatedAt || cloudDoc.exportedAt || cf.lastModifiedDateTime || 0).getTime();
+
+      if (deletedAt && new Date(deletedAt).getTime() >= cloudTime) {
+        await OneDriveClient.deleteFile(cf.name).catch(() => {});
+        continue;
+      } else if (deletedAt && cloudTime > new Date(deletedAt).getTime()) {
+        this.clearProjectTombstone(projectId);
+      }
+
       const localDoc = localProjectDocs.get(projectId);
       if (!localDoc) {
         await localProvider.writeProject(cloudDoc);
       } else {
         const localTime = new Date(localDoc.project.updatedAt || localDoc.exportedAt || 0).getTime();
-        const cloudTime = new Date(cloudDoc.project.updatedAt || cloudDoc.exportedAt || 0).getTime();
 
-        if (cloudTime > localTime) {
-          await localProvider.writeProject(cloudDoc);
-        } else if (localTime > cloudTime) {
-          await OneDriveClient.uploadJson(cf.name, localDoc);
+        if (localTime === cloudTime) {
+          // in sync
+        } else {
+          const mergedDoc = await this.mergeProjectDocuments(localDoc, cloudDoc, localProvider);
+          await localProvider.writeProject(mergedDoc);
+          await OneDriveClient.uploadJson(cf.name, mergedDoc);
         }
       }
     }
@@ -336,20 +443,25 @@ export class SyncCoordinator {
     for (const [id, localDoc] of localProjectDocs.entries()) {
       if (id === DEFAULT_SAMPLE_PROJECT_ID) continue;
       if (!cloudProjectIds.has(id)) {
-        await OneDriveClient.uploadJson(`project_${id}.json`, localDoc);
+        if (!projectTombstones[id]) {
+          await OneDriveClient.uploadJson(`project_${id}.json`, localDoc);
+        }
       }
     }
 
     // 2. Sync Standalone Tasks
     const localTasks = await localProvider.readStandaloneTasks();
+    const taskTombstones = this.getTaskTombstones();
     const cloudTasks = await OneDriveClient.downloadJson<StandaloneTask[]>('standalone_tasks.json');
 
     if (cloudTasks) {
-      const mergedTasks = this.mergeStandaloneTasks(localTasks, cloudTasks);
+      const mergedTasks = this.mergeStandaloneTasks(localTasks, cloudTasks, taskTombstones);
       await localProvider.writeStandaloneTasks(mergedTasks);
       await OneDriveClient.uploadJson('standalone_tasks.json', mergedTasks);
     } else {
-      await OneDriveClient.uploadJson('standalone_tasks.json', localTasks);
+      const mergedTasks = this.mergeStandaloneTasks(localTasks, [], taskTombstones);
+      await localProvider.writeStandaloneTasks(mergedTasks);
+      await OneDriveClient.uploadJson('standalone_tasks.json', mergedTasks);
     }
 
     // 3. Sync Preferences
@@ -398,16 +510,134 @@ export class SyncCoordinator {
   }
 
   /**
-   * Intelligently merges local and cloud standalone tasks by ID and updatedAt timestamp.
+   * Semantically merges local and cloud project documents.
+   * Granularly reconciles nodes, edges, notes, and tags by ID without losing work.
+   * Automatically persists an immutable pre-sync backup snapshot before applying the merge.
    */
-  public static mergeStandaloneTasks(local: StandaloneTask[], cloud: StandaloneTask[]): StandaloneTask[] {
+  public static async mergeProjectDocuments(
+    localDoc: ProjectDocument,
+    cloudDoc: ProjectDocument,
+    localProvider?: IStorageProvider
+  ): Promise<ProjectDocument> {
+    const localTime = new Date(localDoc.project.updatedAt || localDoc.exportedAt || 0).getTime();
+    const cloudTime = new Date(cloudDoc.project.updatedAt || cloudDoc.exportedAt || 0).getTime();
+
+    // 1. Take a pre-merge local snapshot for complete audit trail and zero data loss
+    if (localProvider && localProvider.writeSnapshot) {
+      try {
+        const { snapshot } = HistoryService.createSnapshot(
+          localDoc,
+          `Pre-sync backup before cloud merge (${new Date().toLocaleTimeString()})`
+        );
+        await localProvider.writeSnapshot(snapshot);
+      } catch (err) {
+        console.warn('[SyncCoordinator] Could not create pre-sync snapshot:', err);
+      }
+    }
+
+    // 2. Merge Nodes granularly by node ID
+    const nodeMap = new Map<string, Node>();
+    for (const node of localDoc.nodes) {
+      nodeMap.set(node.id, { ...node });
+    }
+
+    for (const cloudNode of cloudDoc.nodes) {
+      const existing = nodeMap.get(cloudNode.id);
+      if (!existing) {
+        nodeMap.set(cloudNode.id, { ...cloudNode });
+      } else {
+        const localNodeTime = new Date((existing as any).updatedAt || localTime).getTime();
+        const cloudNodeTime = new Date((cloudNode as any).updatedAt || cloudTime).getTime();
+
+        if (cloudNodeTime >= localNodeTime) {
+          nodeMap.set(cloudNode.id, { ...existing, ...cloudNode });
+        } else {
+          nodeMap.set(cloudNode.id, { ...cloudNode, ...existing });
+        }
+      }
+    }
+    const mergedNodes = Array.from(nodeMap.values());
+    const validNodeIds = new Set(mergedNodes.map((n) => n.id));
+
+    // 3. Merge Edges - keep all valid edges between existing nodes
+    const edgeMap = new Map<string, Edge>();
+    for (const edge of [...localDoc.edges, ...cloudDoc.edges]) {
+      const fromId = edge.fromNodeId || (edge as any).source;
+      const toId = edge.toNodeId || (edge as any).target;
+      if (validNodeIds.has(fromId) && validNodeIds.has(toId)) {
+        edgeMap.set(edge.id, { ...edge });
+      }
+    }
+    const mergedEdges = Array.from(edgeMap.values());
+
+    // 4. Merge Notes
+    const noteMap = new Map<string, ProjectNote>();
+    for (const note of [...(localDoc.notes || []), ...(cloudDoc.notes || [])]) {
+      const existing = noteMap.get(note.id);
+      if (!existing) {
+        noteMap.set(note.id, { ...note });
+      } else {
+        const localNoteTime = new Date(existing.updatedAt || localTime).getTime();
+        const cloudNoteTime = new Date(note.updatedAt || cloudTime).getTime();
+        if (cloudNoteTime >= localNoteTime) {
+          noteMap.set(note.id, { ...existing, ...note });
+        }
+      }
+    }
+    const mergedNotes = Array.from(noteMap.values());
+
+    // 5. Merge Metadata & Tags
+    const allTags = Array.from(
+      new Set([...(localDoc.project.tags || []), ...(cloudDoc.project.tags || [])])
+    );
+
+    const baseProject = cloudTime >= localTime ? cloudDoc.project : localDoc.project;
+    const nowIso = new Date().toISOString();
+
+    const mergedDoc: ProjectDocument = {
+      schemaVersion: Math.max(localDoc.schemaVersion, cloudDoc.schemaVersion),
+      exportedAt: nowIso,
+      project: {
+        ...baseProject,
+        tags: allTags,
+        updatedAt: nowIso,
+      },
+      nodes: mergedNodes,
+      edges: mergedEdges,
+      notes: mergedNotes,
+      history: [...(localDoc.history || [])],
+    };
+
+    return mergedDoc;
+  }
+
+  /**
+   * Intelligently merges local and cloud standalone tasks by ID and updatedAt timestamp.
+   * Filters out any tasks tombstoned prior to their last update.
+   */
+  public static mergeStandaloneTasks(
+    local: StandaloneTask[],
+    cloud: StandaloneTask[],
+    tombstones?: Record<string, string>
+  ): StandaloneTask[] {
     const taskMap = new Map<string, StandaloneTask>();
 
     for (const t of local) {
+      if (tombstones && tombstones[t.id]) {
+        const delTime = new Date(tombstones[t.id]).getTime();
+        const taskTime = new Date(t.updatedAt || t.createdAt || 0).getTime();
+        if (delTime >= taskTime) continue;
+      }
       taskMap.set(t.id, t);
     }
 
     for (const ct of cloud) {
+      if (tombstones && tombstones[ct.id]) {
+        const delTime = new Date(tombstones[ct.id]).getTime();
+        const taskTime = new Date(ct.updatedAt || ct.createdAt || 0).getTime();
+        if (delTime >= taskTime) continue;
+      }
+
       const existing = taskMap.get(ct.id);
       if (!existing) {
         taskMap.set(ct.id, ct);
