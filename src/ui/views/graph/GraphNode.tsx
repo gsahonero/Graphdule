@@ -18,6 +18,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { WorkButton } from '../../components/WorkButton';
+import { AttentionUnitInput } from '../../components/AttentionUnitInput';
 import { AttentionService } from '../../../domain/services/attention-service';
 
 export interface GraphNodeData extends Record<string, unknown> {
@@ -110,9 +111,6 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
   const [editText, setEditText] = useState(node.text);
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  const [isEditingEstimate, setIsEditingEstimate] = useState(false);
-  const [estimateInput, setEstimateInput] = useState(node.estimatedAU ? String(node.estimatedAU) : '');
 
   const trackedAU = useMemo(() => {
     if (!preferences.attentionSystemEnabled) return 0;
@@ -462,14 +460,16 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
                   projectId={node.projectId}
                   trackedAU={trackedAU}
                 />
-                <div className="flex items-center space-x-1 text-[10px] font-mono">
-                  {node.estimatedAU ? (
-                    <span className="px-1 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50">
-                      Est: {node.estimatedAU} AU
-                    </span>
-                  ) : null}
+                <div className="flex items-center space-x-1">
+                  <AttentionUnitInput
+                    value={node.estimatedAU}
+                    onChange={(newAU) => updateTaskEstimate(node.id, newAU, true)}
+                    isParentDerived={subtaskCount > 0}
+                    auMinutes={preferences.attentionUnitMinutes}
+                    compact={true}
+                  />
                   {trackedAU > 0 && (
-                    <span className="px-1 py-0.5 rounded font-semibold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/50">
+                    <span className="px-1 py-0.5 rounded font-semibold text-[10px] font-mono bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/50">
                       Act: {trackedAU} AU
                     </span>
                   )}
@@ -762,56 +762,17 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
             projectId={node.projectId}
             trackedAU={trackedAU}
           />
-          <div className="flex items-center space-x-1 text-[10px] font-mono">
-            {isEditingEstimate ? (
-              <div className="flex items-center space-x-1">
-                <input
-                  type="number"
-                  min="0.25"
-                  step="0.25"
-                  value={estimateInput}
-                  onChange={(e) => setEstimateInput(e.target.value)}
-                  placeholder="AU"
-                  className="w-11 bg-white dark:bg-slate-950 border border-amber-400 rounded px-1 py-0.5 text-[10px]"
-                  autoFocus
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      const parsed = parseFloat(estimateInput);
-                      updateTaskEstimate(node.id, isNaN(parsed) || parsed <= 0 ? undefined : parsed, true);
-                      setIsEditingEstimate(false);
-                    } else if (e.key === 'Escape') {
-                      setIsEditingEstimate(false);
-                    }
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const parsed = parseFloat(estimateInput);
-                    updateTaskEstimate(node.id, isNaN(parsed) || parsed <= 0 ? undefined : parsed, true);
-                    setIsEditingEstimate(false);
-                  }}
-                  className="bg-amber-600 text-white rounded px-1 py-0.5 text-[9px] font-bold cursor-pointer"
-                >
-                  ✓
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  setEstimateInput(node.estimatedAU ? String(node.estimatedAU) : '');
-                  setIsEditingEstimate(true);
-                }}
-                className="px-1.5 py-0.5 rounded font-medium bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/50 hover:bg-amber-100 transition-colors cursor-pointer"
-                title="Click to edit estimated AU"
-              >
-                {node.estimatedAU ? `Est: ${node.estimatedAU} AU` : '+ Est AU'}
-              </button>
-            )}
+          <div className="flex items-center space-x-1">
+            <AttentionUnitInput
+              value={node.estimatedAU}
+              onChange={(newAU) => updateTaskEstimate(node.id, newAU, true)}
+              isParentDerived={subtaskCount > 0}
+              auMinutes={preferences.attentionUnitMinutes}
+              compact={true}
+            />
             {trackedAU > 0 && (
               <span
-                className="px-1.5 py-0.5 rounded font-semibold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/50"
+                className="px-1.5 py-0.5 rounded font-semibold text-[10px] font-mono bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/50"
                 title={`Tracked: ${trackedAU} AU`}
               >
                 Act: {trackedAU} AU

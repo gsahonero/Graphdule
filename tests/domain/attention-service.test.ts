@@ -355,4 +355,164 @@ describe('AttentionService - Attention Measurement System', () => {
       expect(postponementObs?.tone).toBe('neutral');
     });
   });
+
+  describe('formatMinutes and Parent Node AU Invariant (syncParentEstimatedAU)', () => {
+    it('formats minutes into human-readable strings', () => {
+      expect(AttentionService.formatMinutes(0)).toBe('0m');
+      expect(AttentionService.formatMinutes(-10)).toBe('0m');
+      expect(AttentionService.formatMinutes(15)).toBe('15m');
+      expect(AttentionService.formatMinutes(45)).toBe('45m');
+      expect(AttentionService.formatMinutes(60)).toBe('1h');
+      expect(AttentionService.formatMinutes(90)).toBe('1h 30m');
+      expect(AttentionService.formatMinutes(150)).toBe('2h 30m');
+    });
+
+    it('enforces parent AU equals sum of direct children AU', () => {
+      const parentNode: Node = {
+        id: 'parent-1',
+        projectId: 'proj-1',
+        text: 'Parent Task',
+        status: 'planned',
+        dueDate: '2026-09-10',
+        parentNodeId: null,
+        position: { x: 0, y: 0 },
+        createdAt: '2026-09-01T00:00:00.000Z',
+        updatedAt: '2026-09-01T00:00:00.000Z',
+        estimatedAU: 999, // stale or invalid estimate
+      };
+
+      const child1: Node = {
+        id: 'child-1',
+        projectId: 'proj-1',
+        text: 'Subtask 1',
+        status: 'planned',
+        dueDate: '2026-09-08',
+        parentNodeId: 'parent-1',
+        position: { x: 50, y: 50 },
+        createdAt: '2026-09-01T00:00:00.000Z',
+        updatedAt: '2026-09-01T00:00:00.000Z',
+        estimatedAU: 2.0,
+      };
+
+      const child2: Node = {
+        id: 'child-2',
+        projectId: 'proj-1',
+        text: 'Subtask 2',
+        status: 'planned',
+        dueDate: '2026-09-09',
+        parentNodeId: 'parent-1',
+        position: { x: 50, y: 100 },
+        createdAt: '2026-09-01T00:00:00.000Z',
+        updatedAt: '2026-09-01T00:00:00.000Z',
+        estimatedAU: 1.5,
+      };
+
+      const synced = AttentionService.syncParentEstimatedAU([parentNode, child1, child2]);
+      const syncedParent = synced.find((n) => n.id === 'parent-1');
+      expect(syncedParent?.estimatedAU).toBe(3.5); // 2.0 + 1.5
+    });
+
+    it('handles recursive multi-level hierarchy (grandparent -> parent -> child)', () => {
+      const grandParent: Node = {
+        id: 'grandparent',
+        projectId: 'proj-1',
+        text: 'Epic Feature',
+        status: 'planned',
+        dueDate: '2026-09-15',
+        parentNodeId: null,
+        position: { x: 0, y: 0 },
+        createdAt: '2026-09-01T00:00:00.000Z',
+        updatedAt: '2026-09-01T00:00:00.000Z',
+      };
+
+      const parent1: Node = {
+        id: 'p1',
+        projectId: 'proj-1',
+        text: 'Backend',
+        status: 'planned',
+        dueDate: '2026-09-12',
+        parentNodeId: 'grandparent',
+        position: { x: 0, y: 50 },
+        createdAt: '2026-09-01T00:00:00.000Z',
+        updatedAt: '2026-09-01T00:00:00.000Z',
+      };
+
+      const sub1: Node = {
+        id: 's1',
+        projectId: 'proj-1',
+        text: 'Database schema',
+        status: 'planned',
+        dueDate: '2026-09-10',
+        parentNodeId: 'p1',
+        position: { x: 0, y: 100 },
+        createdAt: '2026-09-01T00:00:00.000Z',
+        updatedAt: '2026-09-01T00:00:00.000Z',
+        estimatedAU: 2.0,
+      };
+
+      const sub2: Node = {
+        id: 's2',
+        projectId: 'proj-1',
+        text: 'API endpoints',
+        status: 'planned',
+        dueDate: '2026-09-11',
+        parentNodeId: 'p1',
+        position: { x: 0, y: 150 },
+        createdAt: '2026-09-01T00:00:00.000Z',
+        updatedAt: '2026-09-01T00:00:00.000Z',
+        estimatedAU: 3.0,
+      };
+
+      const parent2: Node = {
+        id: 'p2',
+        projectId: 'proj-1',
+        text: 'Frontend',
+        status: 'planned',
+        dueDate: '2026-09-14',
+        parentNodeId: 'grandparent',
+        position: { x: 50, y: 50 },
+        createdAt: '2026-09-01T00:00:00.000Z',
+        updatedAt: '2026-09-01T00:00:00.000Z',
+        estimatedAU: 4.0, // direct leaf parent with no subtasks
+      };
+
+      const synced = AttentionService.syncParentEstimatedAU([grandParent, parent1, sub1, sub2, parent2]);
+      const syncedP1 = synced.find((n) => n.id === 'p1');
+      const syncedGrandparent = synced.find((n) => n.id === 'grandparent');
+
+      expect(syncedP1?.estimatedAU).toBe(5.0); // 2.0 + 3.0
+      expect(syncedGrandparent?.estimatedAU).toBe(9.0); // 5.0 (p1) + 4.0 (p2)
+    });
+
+    it('sets parent AU to undefined if all children have undefined AU', () => {
+      const parentNode: Node = {
+        id: 'parent-undef',
+        projectId: 'proj-1',
+        text: 'Parent Task',
+        status: 'planned',
+        dueDate: '2026-09-10',
+        parentNodeId: null,
+        position: { x: 0, y: 0 },
+        createdAt: '2026-09-01T00:00:00.000Z',
+        updatedAt: '2026-09-01T00:00:00.000Z',
+        estimatedAU: 5.0, // should become undefined because no child has an AU
+      };
+
+      const child1: Node = {
+        id: 'c1',
+        projectId: 'proj-1',
+        text: 'Subtask without estimate',
+        status: 'planned',
+        dueDate: '2026-09-09',
+        parentNodeId: 'parent-undef',
+        position: { x: 0, y: 50 },
+        createdAt: '2026-09-01T00:00:00.000Z',
+        updatedAt: '2026-09-01T00:00:00.000Z',
+      };
+
+      const synced = AttentionService.syncParentEstimatedAU([parentNode, child1]);
+      const syncedParent = synced.find((n) => n.id === 'parent-undef');
+      expect(syncedParent?.estimatedAU).toBeUndefined();
+    });
+  });
 });

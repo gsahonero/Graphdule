@@ -315,6 +315,7 @@ export interface UserPreferences {
   readonly attentionUnitMinutes?: number;
   readonly weeklyPlannedAU?: number;
   readonly activeWorkSession?: ActiveWorkSession | null;
+  readonly idleSyncIntervalMinutes?: number;
 }
 
 export interface ProjectSummary {

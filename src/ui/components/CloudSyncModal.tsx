@@ -24,6 +24,7 @@ import {
   Layers,
   AlertTriangle,
   Trash2,
+  Clock,
 } from 'lucide-react';
 
 export const CloudSyncModal: React.FC = () => {
@@ -42,6 +43,8 @@ export const CloudSyncModal: React.FC = () => {
     availableGCalendars,
     fetchAvailableGCalendars,
     formatDateDisplay,
+    preferences,
+    updatePreferences,
   } = useApp();
 
   const [customGdriveClientId, setCustomGdriveClientId] = useState(GDriveAuth.getCustomClientId());
@@ -691,6 +694,51 @@ export const CloudSyncModal: React.FC = () => {
                   </button>
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Sync Automation & Schedule (Modification + Idle Interval) */}
+          <div className="p-4 rounded-2xl bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 text-xs text-slate-700 dark:text-slate-300 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2 font-bold text-slate-900 dark:text-slate-100">
+                <Clock className="w-4 h-4 text-amber-500" />
+                <span>Sync Automation & Idle Schedule</span>
+              </div>
+              <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 font-semibold">
+                Default: 15 min idle
+              </span>
+            </div>
+
+            <p className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-400">
+              Graphdule is <strong>local-first</strong>: all changes are stored locally on your device immediately. When connected to cloud storage, sync runs <strong>automatically on modification</strong> (debounced) and <strong>periodically when idle</strong>. Both local storage and cloud storage remain strictly in sync.
+            </p>
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+              <div>
+                <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 block">
+                  Idle Background Sync Interval
+                </span>
+                <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                  How often to sync when Graphdule is idle in the background
+                </span>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <select
+                  value={preferences.idleSyncIntervalMinutes ?? 15}
+                  onChange={(e) => {
+                    const minutes = parseInt(e.target.value, 10);
+                    updatePreferences({ idleSyncIntervalMinutes: minutes });
+                  }}
+                  className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-amber-500 cursor-pointer"
+                >
+                  <option value={5}>Every 5 minutes</option>
+                  <option value={10}>Every 10 minutes</option>
+                  <option value={15}>Every 15 minutes (Default)</option>
+                  <option value={30}>Every 30 minutes</option>
+                  <option value={60}>Every 60 minutes</option>
+                </select>
+              </div>
             </div>
           </div>
 

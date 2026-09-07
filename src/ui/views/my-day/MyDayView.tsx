@@ -28,6 +28,7 @@ import {
 import { Node, NodeStatus, ProjectSummary, RecurrenceRule, StandaloneTask } from '../../../domain/models/types';
 import { getProjectColorTheme, ProjectIconDisplay } from '../../utils/project-style';
 import { WorkButton } from '../../components/WorkButton';
+import { AttentionUnitInput } from '../../components/AttentionUnitInput';
 import { AttentionService } from '../../../domain/services/attention-service';
 
 type LateTasksGroupMode = 'hierarchy' | 'attention' | 'time' | 'flat';
@@ -97,10 +98,6 @@ export const MyDayView: React.FC = () => {
   const [activeRecurrenceTaskId, setActiveRecurrenceTaskId] = useState<string | null>(null);
   const [isNewRecurrenceOpen, setIsNewRecurrenceOpen] = useState(false);
 
-  // Attention editing & tracking state
-  const [editingEstimateTaskId, setEditingEstimateTaskId] = useState<string | null>(null);
-  const [editingEstimateValue, setEditingEstimateValue] = useState<string>('');
-
   // Collapsible & state for Late / Overdue Tasks section
   const [isLateTasksOpen, setIsLateTasksOpen] = useState(false);
   const [activeCalendarLateId, setActiveCalendarLateId] = useState<string | null>(null);
@@ -123,25 +120,13 @@ export const MyDayView: React.FC = () => {
     return map;
   }, [activityLog, preferences.attentionSystemEnabled, preferences.attentionUnitMinutes]);
 
-  const handleStartEditingEstimate = (taskId: string, currentAU?: number) => {
-    setEditingEstimateTaskId(taskId);
-    setEditingEstimateValue(currentAU ? String(currentAU) : '');
-  };
-
-  const handleSaveEstimate = async (taskId: string, isNode: boolean) => {
-    const parsed = parseFloat(editingEstimateValue);
-    const val = isNaN(parsed) || parsed <= 0 ? undefined : parsed;
-    await updateTaskEstimate(taskId, val, isNode);
-    setEditingEstimateTaskId(null);
-  };
-
   const renderAUControls = (
     task: { id: string; text: string; projectId?: string; estimatedAU?: number },
     isNode: boolean
   ) => {
     if (!preferences.attentionSystemEnabled) return null;
     const trackedAU = taskAttentionMap.get(task.id) || 0;
-    const isEditingThis = editingEstimateTaskId === task.id;
+    const isParent = isNode && allActiveNodes.some((n) => n.parentNodeId === task.id);
 
     return (
       <div className="flex items-center space-x-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
@@ -151,67 +136,20 @@ export const MyDayView: React.FC = () => {
           projectId={task.projectId}
           trackedAU={trackedAU}
         />
-        {isEditingThis ? (
-          <div className="flex items-center space-x-1 bg-amber-50 dark:bg-amber-950 border border-amber-300 dark:border-amber-700 px-1.5 py-0.5 rounded text-xs">
-            <input
-              type="number"
-              min="0.25"
-              step="0.25"
-              value={editingEstimateValue}
-              onChange={(e) => setEditingEstimateValue(e.target.value)}
-              placeholder="AU"
-              className="w-12 bg-white dark:bg-slate-900 border border-amber-400 rounded px-1 py-0.2 font-mono text-xs text-amber-900 dark:text-amber-200"
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleSaveEstimate(task.id, isNode);
-                if (e.key === 'Escape') setEditingEstimateTaskId(null);
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => handleSaveEstimate(task.id, isNode)}
-              className="text-[10px] bg-amber-600 hover:bg-amber-700 text-white px-1.5 py-0.5 rounded font-bold cursor-pointer"
-            >
-              ✓
-            </button>
-            <button
-              type="button"
-              onClick={() => setEditingEstimateTaskId(null)}
-              className="text-[10px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 px-1 cursor-pointer"
-            >
-              ✕
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center space-x-1 text-xs">
-            {task.estimatedAU ? (
-              <button
-                type="button"
-                onClick={() => handleStartEditingEstimate(task.id, task.estimatedAU)}
-                className="px-1.5 py-0.5 rounded font-mono font-medium text-[11px] bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 hover:bg-amber-100 dark:hover:bg-amber-900/60 transition-colors cursor-pointer"
-                title={`Estimated: ${task.estimatedAU} AU. Click to edit.`}
-              >
-                Est: {task.estimatedAU} AU
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => handleStartEditingEstimate(task.id)}
-                className="opacity-0 group-hover:opacity-100 px-1.5 py-0.5 rounded font-mono text-[10px] text-slate-400 dark:text-slate-500 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 border border-dashed border-slate-300 dark:border-slate-700 transition-all cursor-pointer"
-                title="Add estimated attention in AU"
-              >
-                + AU
-              </button>
-            )}
-            {trackedAU > 0 && (
-              <span
-                className="px-1.5 py-0.5 rounded font-mono font-semibold text-[11px] bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60"
-                title={`Tracked attention: ${trackedAU} AU (${AttentionService.formatAU(trackedAU, preferences.attentionUnitMinutes)})`}
-              >
-                Act: {trackedAU} AU
-              </span>
-            )}
-          </div>
+        <AttentionUnitInput
+          value={task.estimatedAU}
+          onChange={(newAU) => updateTaskEstimate(task.id, newAU, isNode)}
+          isParentDerived={isParent}
+          auMinutes={preferences.attentionUnitMinutes}
+          compact={true}
+        />
+        {trackedAU > 0 && (
+          <span
+            className="px-1.5 py-0.5 rounded font-mono font-semibold text-[11px] bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60"
+            title={`Tracked attention: ${trackedAU} AU (${AttentionService.formatAU(trackedAU, preferences.attentionUnitMinutes)})`}
+          >
+            Act: {trackedAU} AU
+          </span>
         )}
       </div>
     );
@@ -2233,21 +2171,13 @@ export const MyDayView: React.FC = () => {
             <div className="hidden sm:flex absolute right-1.5 top-1/2 -translate-y-1/2 items-center space-x-1">
               {/* Estimated AU Input (if attention system enabled) */}
               {preferences.attentionSystemEnabled && (
-                <div
-                  className="flex items-center space-x-1 px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60"
-                  title="Estimated Attention in Attention Units (e.g., 2 AU = 30m)"
-                >
-                  <Zap className="w-3 h-3 text-amber-500 shrink-0" />
-                  <input
-                    type="number"
-                    min="0.25"
-                    step="0.25"
-                    placeholder="Est AU"
-                    value={newStandaloneEstimatedAU}
-                    onChange={(e) => setNewStandaloneEstimatedAU(e.target.value)}
-                    className="w-14 bg-transparent text-xs font-mono text-amber-900 dark:text-amber-200 focus:outline-none placeholder-amber-400 dark:placeholder-amber-600"
-                  />
-                </div>
+                <AttentionUnitInput
+                  value={newStandaloneEstimatedAU ? parseFloat(newStandaloneEstimatedAU) : undefined}
+                  onChange={(val) => setNewStandaloneEstimatedAU(val !== undefined ? String(val) : '')}
+                  auMinutes={preferences.attentionUnitMinutes}
+                  compact={true}
+                  placeholder="+ AU"
+                />
               )}
 
               {/* Recurrence Selector */}
@@ -2292,21 +2222,13 @@ export const MyDayView: React.FC = () => {
           <div className="flex sm:hidden items-center justify-between gap-2">
             <div className="flex items-center space-x-1.5 flex-wrap gap-y-1.5">
               {preferences.attentionSystemEnabled && (
-                <div
-                  className="flex items-center space-x-1 px-2 py-1 rounded bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60"
-                  title="Estimated Attention in Attention Units"
-                >
-                  <Zap className="w-3 h-3 text-amber-500 shrink-0" />
-                  <input
-                    type="number"
-                    min="0.25"
-                    step="0.25"
-                    placeholder="AU"
-                    value={newStandaloneEstimatedAU}
-                    onChange={(e) => setNewStandaloneEstimatedAU(e.target.value)}
-                    className="w-12 bg-transparent text-xs font-mono text-amber-900 dark:text-amber-200 focus:outline-none placeholder-amber-400 dark:placeholder-amber-600"
-                  />
-                </div>
+                <AttentionUnitInput
+                  value={newStandaloneEstimatedAU ? parseFloat(newStandaloneEstimatedAU) : undefined}
+                  onChange={(val) => setNewStandaloneEstimatedAU(val !== undefined ? String(val) : '')}
+                  auMinutes={preferences.attentionUnitMinutes}
+                  compact={true}
+                  placeholder="+ AU"
+                />
               )}
               <RecurrencePicker
                 value={newStandaloneRecurrence}

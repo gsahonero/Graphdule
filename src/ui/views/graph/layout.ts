@@ -84,7 +84,7 @@ export function getLayoutedElements(
     };
   });
 
-  // Normalize coordinates so nodes are never placed in negative coordinate space
+  // Normalize coordinates for Dagre layouts so nodes are never placed in negative coordinate space
   let minX = Infinity;
   let minY = Infinity;
   rawPositions.forEach((pos) => {
@@ -96,9 +96,24 @@ export function getLayoutedElements(
   const offsetY = minY < 60 ? 60 - minY : 0;
 
   const rfNodes: RFNode[] = nodes.map((node, index) => {
-    const pos = rawPositions[index];
-    const finalX = pos.x + offsetX;
-    const finalY = pos.y + offsetY;
+    let finalX: number;
+    let finalY: number;
+
+    if (
+      !forceLayout &&
+      node.position &&
+      isValidCoordinate(node.position.x) &&
+      isValidCoordinate(node.position.y)
+    ) {
+      // User-defined position: preserve exactly where dropped/placed
+      finalX = node.position.x;
+      finalY = node.position.y;
+    } else {
+      // Dagre auto-layout or fallback position with margin offset
+      const pos = rawPositions[index];
+      finalX = pos.x + offsetX;
+      finalY = pos.y + offsetY;
+    }
 
     return {
       id: node.id,

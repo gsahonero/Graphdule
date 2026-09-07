@@ -58,7 +58,7 @@ export function createDefaultSampleProject(): ProjectDocument {
         text: 'Prepare Phantom Samples',
         dueDate: addDays(getTodayString(), 10),
         status: 'completed',
-        position: { x: -200, y: 150 },
+        position: { x: 100, y: 150 },
         createdAt: now,
         updatedAt: now,
       },

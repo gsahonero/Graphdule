@@ -1,6 +1,6 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
-import { Play, Square, Pause } from 'lucide-react';
+import { Play, Square, Pause, Check } from 'lucide-react';
 
 interface WorkButtonProps {
   taskId: string;
@@ -27,6 +27,7 @@ export const WorkButton: React.FC<WorkButtonProps> = ({
     pauseWork,
     resumeWork,
     stopWork,
+    completeAndStopWork,
   } = useApp();
 
   if (!attentionSystemEnabled) {
@@ -96,9 +97,20 @@ export const WorkButton: React.FC<WorkButtonProps> = ({
         </button>
 
         <button
+          onClick={(e) => {
+            e.stopPropagation();
+            completeAndStopWork();
+          }}
+          className="p-1 hover:text-emerald-300 rounded transition-colors text-emerald-400"
+          title="Complete task & stop work clock"
+        >
+          <Check className="w-3 h-3" />
+        </button>
+
+        <button
           onClick={handleToggle}
           className="p-1 hover:text-rose-300 rounded transition-colors text-rose-400"
-          title="Stop work clock"
+          title="Stop work clock without completing"
         >
           <Square className="w-3 h-3 fill-current" />
         </button>

@@ -1,7 +1,7 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
 import { AttentionService } from '../../domain/services/attention-service';
-import { Play, Pause, Square, ExternalLink } from 'lucide-react';
+import { Play, Pause, Square, ExternalLink, Check } from 'lucide-react';
 
 export const ActiveWorkBar: React.FC = () => {
   const {
@@ -10,6 +10,7 @@ export const ActiveWorkBar: React.FC = () => {
     pauseWork,
     resumeWork,
     stopWork,
+    completeAndStopWork,
     attentionUnitMinutes,
     openProject,
     setCurrentView,
@@ -119,9 +120,19 @@ export const ActiveWorkBar: React.FC = () => {
         )}
 
         <button
+          onClick={() => completeAndStopWork()}
+          className="p-1.5 bg-emerald-600/90 hover:bg-emerald-500 text-white rounded-lg transition-colors flex items-center gap-1 text-xs font-medium px-2.5"
+          title="Mark task completed and stop work session"
+        >
+          <Check className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">Complete & Stop</span>
+          <span className="sm:hidden">Done</span>
+        </button>
+
+        <button
           onClick={() => stopWork()}
           className="p-1.5 bg-rose-600/90 hover:bg-rose-500 text-white rounded-lg transition-colors flex items-center gap-1 text-xs font-medium px-2.5"
-          title="Stop & log attention work session"
+          title="Stop & log attention work session without completing"
         >
           <Square className="w-3.5 h-3.5 fill-current" />
           <span>Stop</span>

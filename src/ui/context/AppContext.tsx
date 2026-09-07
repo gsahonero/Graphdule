@@ -93,8 +93,8 @@ interface AppContextType {
   applyPendingCascade: () => Promise<void>;
   addEdge: (fromNodeId: string, toNodeId: string) => Promise<{ success: boolean; error?: string }>;
   deleteEdge: (edgeId: string) => Promise<void>;
-  spliceNodeIntoEdge: (nodeId: string, edgeId: string) => Promise<{ success: boolean; error?: string }>;
-  decomposeNode: (parentNodeId: string, subtasks: { text: string; dueDate?: string }[]) => Promise<void>;
+  spliceNodeIntoEdge: (nodeId: string, edgeId: string, newPosition?: { x: number; y: number }) => Promise<{ success: boolean; error?: string }>;
+  decomposeNode: (parentNodeId: string, subtasks: { text: string; dueDate?: string; estimatedAU?: number }[]) => Promise<void>;
   addNote: (nodeId: string, text: string) => Promise<void>;
   deleteNote: (noteId: string) => Promise<void>;
   syncAtomicInheritance: () => Promise<void>;
@@ -170,6 +170,7 @@ interface AppContextType {
   pauseWork: () => Promise<void>;
   resumeWork: () => Promise<void>;
   stopWork: () => Promise<void>;
+  completeAndStopWork: () => Promise<void>;
   updateTaskEstimate: (taskId: string, estimatedAU: number | undefined, projectIdOrIsNode?: string | boolean) => Promise<void>;
   toggleAttentionSystem: (enabled: boolean) => Promise<void>;
   setAttentionUnitMinutes: (minutes: number) => Promise<void>;
@@ -1196,13 +1197,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (activeProjectDoc) {
         const node = activeProjectDoc.nodes.find((n) => n.id === taskId);
         if (node) {
+          const hasChildren = activeProjectDoc.nodes.some((n) => n.parentNodeId === taskId);
+          if (hasChildren) {
+            console.warn(`[AppContext] Cannot directly overwrite estimated AU on parent node ${taskId}. Parent AU is derived from children.`);
+            return;
+          }
           const oldEstimate = node.estimatedAU;
           const updatedNodes = activeProjectDoc.nodes.map((n) =>
             n.id === taskId ? { ...n, estimatedAU, updatedAt: new Date().toISOString() } : n
           );
+          const syncedNodes = AttentionService.syncParentEstimatedAU(updatedNodes);
           await saveProjectDoc({
             ...activeProjectDoc,
-            nodes: updatedNodes,
+            nodes: syncedNodes,
           });
           await logActivityEvent('ESTIMATE_CHANGED', taskId, {
             entityText: node.text,
@@ -1223,11 +1230,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (doc) {
           const node = doc.nodes.find((n) => n.id === taskId);
           if (node) {
+            const hasChildren = doc.nodes.some((n) => n.parentNodeId === taskId);
+            if (hasChildren) {
+              console.warn(`[AppContext] Cannot directly overwrite estimated AU on parent node ${taskId}. Parent AU is derived from children.`);
+              return;
+            }
             const oldEstimate = node.estimatedAU;
             const updatedNodes = doc.nodes.map((n) =>
               n.id === taskId ? { ...n, estimatedAU, updatedAt: new Date().toISOString() } : n
             );
-            const updatedDoc: ProjectDocument = { ...doc, nodes: updatedNodes };
+            const syncedNodes = AttentionService.syncParentEstimatedAU(updatedNodes);
+            const updatedDoc: ProjectDocument = { ...doc, nodes: syncedNodes };
             await storage.writeProject(updatedDoc);
             await logActivityEvent('ESTIMATE_CHANGED', taskId, {
               entityText: node.text,
@@ -1755,7 +1768,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return;
       }
 
-      await saveProjectDoc(res.document);
+      const syncedNodes = AttentionService.syncParentEstimatedAU(res.document.nodes);
+      await saveProjectDoc({
+        ...res.document,
+        nodes: syncedNodes,
+      });
       GCalendarSync.syncTaskDelete(nodeId).catch(() => {});
 
       if (selectedNode?.id === nodeId) {
@@ -2053,7 +2070,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const spliceNodeIntoEdge = useCallback(
-    async (nodeId: string, edgeId: string): Promise<{ success: boolean; error?: string }> => {
+    async (
+      nodeId: string,
+      edgeId: string,
+      newPosition?: { x: number; y: number }
+    ): Promise<{ success: boolean; error?: string }> => {
       if (!activeProjectDoc) return { success: false, error: 'No active project' };
 
       const edge = activeProjectDoc.edges.find((e) => e.id === edgeId);
@@ -2088,9 +2109,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (isAfter(newDueDate, toNode.dueDate)) {
         newDueDate = toNode.dueDate;
       }
-      if (newDueDate !== node.dueDate) {
+      if (newDueDate !== node.dueDate || newPosition) {
         updatedNode = {
           ...node,
+          ...(newPosition ? { position: newPosition } : {}),
           dueDate: newDueDate,
           updatedAt: new Date().toISOString(),
         };
@@ -2148,15 +2170,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const decomposeNode = useCallback(
-    async (parentNodeId: string, subtasks: { text: string; dueDate?: string }[]) => {
+    async (parentNodeId: string, subtasks: { text: string; dueDate?: string; estimatedAU?: number }[]) => {
       if (!activeProjectDoc) return;
       const parentNode = activeProjectDoc.nodes.find((n) => n.id === parentNodeId);
       if (!parentNode) return;
 
       const newSubnodes = ProjectService.decomposeNode(parentNode, subtasks);
+      const combinedNodes = [...activeProjectDoc.nodes, ...newSubnodes];
+      const syncedNodes = AttentionService.syncParentEstimatedAU(combinedNodes);
       await saveProjectDoc({
         ...activeProjectDoc,
-        nodes: [...activeProjectDoc.nodes, ...newSubnodes],
+        nodes: syncedNodes,
       });
     },
     [activeProjectDoc, saveProjectDoc]
@@ -2195,12 +2219,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const syncAtomicInheritance = useCallback(async () => {
     if (!activeProjectDoc) return;
-    const syncedNodes = TemporalService.syncParentDueDates(activeProjectDoc.nodes);
-    const hasChanges = syncedNodes.some((sn, idx) => sn.dueDate !== activeProjectDoc.nodes[idx]?.dueDate);
+    const syncedDueDates = TemporalService.syncParentDueDates(activeProjectDoc.nodes);
+    const fullySyncedNodes = AttentionService.syncParentEstimatedAU(syncedDueDates);
+    const hasChanges = fullySyncedNodes.some(
+      (sn, idx) =>
+        sn.dueDate !== activeProjectDoc.nodes[idx]?.dueDate ||
+        sn.estimatedAU !== activeProjectDoc.nodes[idx]?.estimatedAU
+    );
     if (hasChanges) {
       await saveProjectDoc({
         ...activeProjectDoc,
-        nodes: syncedNodes,
+        nodes: fullySyncedNodes,
       });
     }
   }, [activeProjectDoc, saveProjectDoc]);
@@ -2400,6 +2429,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     },
     [standaloneTasks, storage, debouncedCloudSync]
   );
+
+  const completeAndStopWork = useCallback(async () => {
+    if (!activeWorkSession) return;
+    const { taskId, projectId } = activeWorkSession;
+    await stopWork();
+    if (projectId === 'standalone' || standaloneTasks.some((t) => t.id === taskId)) {
+      await updateStandaloneTaskStatus(taskId, 'completed');
+    } else {
+      await updateNodeStatus(taskId, 'completed');
+    }
+  }, [activeWorkSession, stopWork, standaloneTasks, updateStandaloneTaskStatus, updateNodeStatus]);
 
   const exportActiveProject = useCallback(() => {
     if (activeProjectDoc) {
@@ -2622,10 +2662,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       triggerCloudSync();
     };
 
-    // Periodic 60s background sync while webpage is open
+    // Periodic idle background sync while webpage is open (default 15m, configurable)
+    const idleSyncMinutes = preferences.idleSyncIntervalMinutes ?? 15;
+    const intervalMs = Math.max(1, idleSyncMinutes) * 60 * 1000;
     const intervalId = window.setInterval(() => {
       triggerCloudSync();
-    }, 60000);
+    }, intervalMs);
 
     window.addEventListener('focus', onFocus);
     window.addEventListener('online', onOnline);
@@ -2634,7 +2676,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('online', onOnline);
     };
-  }, [cloudSyncState.provider, triggerCloudSync]);
+  }, [cloudSyncState.provider, triggerCloudSync, preferences.idleSyncIntervalMinutes]);
 
   return (
     <AppContext.Provider
@@ -2738,6 +2780,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         pauseWork,
         resumeWork,
         stopWork,
+        completeAndStopWork,
         updateTaskEstimate,
         toggleAttentionSystem,
         setAttentionUnitMinutes,

@@ -46,6 +46,65 @@ export class AttentionService {
   }
 
   /**
+   * Formats raw minutes into clean representations like '15m', '45m', '1h', '1h 30m'.
+   */
+  public static formatMinutes(totalMinutes: number): string {
+    const rounded = Math.round(totalMinutes * 10) / 10;
+    if (rounded <= 0) return '0m';
+    if (rounded < 60) {
+      return `${rounded}m`;
+    }
+    const hours = Math.floor(rounded / 60);
+    const rem = Math.round(rounded % 60);
+    return rem > 0 ? `${hours}h ${rem}m` : `${hours}h`;
+  }
+
+  /**
+   * Enforces the invariant: A parent node AU can only be equal to the sum of the children AU.
+   * Recursively computes bottom-up from leaves to roots across arbitrary tree depths.
+   * If any direct child has an estimatedAU defined, parent.estimatedAU = sum(children.estimatedAU || 0).
+   * If all children have undefined estimatedAU, parent.estimatedAU = undefined.
+   */
+  public static syncParentEstimatedAU(nodes: readonly Node[]): Node[] {
+    let currentNodes = [...nodes];
+    let changed = true;
+    let iterations = 0;
+
+    while (changed && iterations < 20) {
+      changed = false;
+      iterations++;
+
+      currentNodes = currentNodes.map((node) => {
+        const directChildren = currentNodes.filter((n) => n.parentNodeId === node.id);
+        if (directChildren.length === 0) return node;
+
+        const hasAnyChildWithEstimate = directChildren.some((c) => c.estimatedAU !== undefined);
+        let newEstimatedAU: number | undefined;
+
+        if (hasAnyChildWithEstimate) {
+          const sum = directChildren.reduce((acc, c) => acc + (c.estimatedAU || 0), 0);
+          newEstimatedAU = Math.round(sum * 100) / 100;
+        } else {
+          newEstimatedAU = undefined;
+        }
+
+        if (newEstimatedAU !== node.estimatedAU) {
+          changed = true;
+          return {
+            ...node,
+            estimatedAU: newEstimatedAU,
+            updatedAt: new Date().toISOString(),
+          };
+        }
+
+        return node;
+      });
+    }
+
+    return currentNodes;
+  }
+
+  /**
    * Reconstructs completed work sessions deterministically from raw telemetry events.
    * Source of truth is the immutable activity events log.
    */

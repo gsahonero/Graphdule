@@ -161,7 +161,7 @@ export class ProjectService {
    */
   public static decomposeNode(
     parentNode: Node,
-    subtasks: { text: string; dueDate?: string }[]
+    subtasks: { text: string; dueDate?: string; estimatedAU?: number }[]
   ): Node[] {
     const now = new Date().toISOString();
     return subtasks.map((sub, idx) => {
@@ -174,8 +174,9 @@ export class ProjectService {
         dueDate,
         status: 'planned',
         position: parentNode.position
-          ? { x: parentNode.position.x - 200, y: parentNode.position.y + (idx + 1) * 80 }
-          : undefined,
+          ? { x: Math.max(50, parentNode.position.x - 200), y: Math.max(60, parentNode.position.y + (idx + 1) * 80) }
+          : { x: 100, y: 100 + idx * 160 },
+        estimatedAU: sub.estimatedAU,
         createdAt: now,
         updatedAt: now,
       };

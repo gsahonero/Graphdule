@@ -162,6 +162,7 @@ export const UserPreferencesSchema = z.object({
   attentionUnitMinutes: z.number().int().positive().optional().default(15),
   weeklyPlannedAU: z.number().nonnegative().optional(),
   activeWorkSession: ActiveWorkSessionSchema.nullable().optional(),
+  idleSyncIntervalMinutes: z.number().int().positive().optional().default(15),
 }).passthrough();
 
 export const IdeaSeedSchema = z.object({

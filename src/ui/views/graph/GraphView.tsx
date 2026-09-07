@@ -159,6 +159,7 @@ const GraphCanvas: React.FC = () => {
   const lastFocusedNodeIdRef = useRef<string | null>(null);
   const userManualDirRef = useRef<boolean>(false);
   const isInitialFocusDoneRef = useRef<boolean>(false);
+  const snappedPosRef = useRef<{ x: number | null; y: number | null } | null>(null);
 
   // PowerPoint-style Smart Alignment Guides
   const [guideLines, setGuideLines] = useState<{
@@ -454,7 +455,8 @@ const GraphCanvas: React.FC = () => {
 
       let bestEdge: RFEdge | null = null;
       let minDistance = Infinity;
-      const threshold = Math.max(50, Math.round(nodeH * 0.75));
+      // Tight threshold: center of node must be placed directly over the edge line
+      const threshold = Math.min(30, Math.max(18, Math.round(nodeH * 0.2)));
 
       for (const edge of rfEdges) {
         if (edge.source === activeNode.id || edge.target === activeNode.id) continue;
@@ -483,7 +485,7 @@ const GraphCanvas: React.FC = () => {
         if (lenSq === 0) continue;
 
         const t = ((activeCx - sx) * dx + (activeCy - sy) * dy) / lenSq;
-        if (t < 0.08 || t > 0.92) continue;
+        if (t < 0.15 || t > 0.85) continue;
 
         const projX = sx + t * dx;
         const projY = sy + t * dy;
@@ -511,22 +513,29 @@ const GraphCanvas: React.FC = () => {
         return;
       }
 
-      // Check if dragging in between an existing connection
+      // Check if dragging directly over an existing connection
       const candidateEdge = findEdgeUnderNode(activeNode);
       setTargetEdgeForDropId(candidateEdge ? candidateEdge.id : null);
 
-      let activeX = activeNode.position.x;
-      let activeY = activeNode.position.y;
+      const isCompact = viewDensity === 'compact';
+      const nodeW = Math.round((isCompact ? COMPACT_NODE_SIZE : NODE_WIDTH) * nodeScale);
+      const nodeH = Math.round((isCompact ? COMPACT_NODE_SIZE : NODE_HEIGHT) * nodeScale);
+
+      const activeX = activeNode.position.x;
+      const activeY = activeNode.position.y;
+      const activeCenterX = activeX + nodeW / 2;
+      const activeCenterY = activeY + nodeH / 2;
+      const activeRight = activeX + nodeW;
+      const activeBottom = activeY + nodeH;
 
       let matchedH: GuideLine | null = null;
       let matchedV: GuideLine | null = null;
+      let snappedX = activeX;
+      let snappedY = activeY;
+      let minDistanceX = SNAP_THRESHOLD;
+      let minDistanceY = SNAP_THRESHOLD;
 
       const otherNodes = rfNodes.filter((n) => n.id !== activeNode.id);
-
-      const activeCenterX = activeX + NODE_WIDTH / 2;
-      const activeCenterY = activeY + NODE_HEIGHT / 2;
-      const activeRight = activeX + NODE_WIDTH;
-      const activeBottom = activeY + NODE_HEIGHT;
 
       for (const other of otherNodes) {
         if (
@@ -537,48 +546,107 @@ const GraphCanvas: React.FC = () => {
           continue;
         }
 
+        const otherW = other.measured?.width ?? nodeW;
+        const otherH = other.measured?.height ?? nodeH;
         const otherX = other.position.x;
         const otherY = other.position.y;
-        const otherCenterX = otherX + NODE_WIDTH / 2;
-        const otherCenterY = otherY + NODE_HEIGHT / 2;
-        const otherRight = otherX + NODE_WIDTH;
-        const otherBottom = otherY + NODE_HEIGHT;
+        const otherCenterX = otherX + otherW / 2;
+        const otherCenterY = otherY + otherH / 2;
+        const otherRight = otherX + otherW;
+        const otherBottom = otherY + otherH;
 
-        // --- X Axis Alignment Checks (Vertical Lines) ---
-        if (Math.abs(activeX - otherX) < SNAP_THRESHOLD) {
-          activeX = otherX;
+        // --- X Axis Alignment Checks (Vertical Guide Lines) ---
+        // Left to Left
+        let dx = Math.abs(activeX - otherX);
+        if (dx < minDistanceX) {
+          minDistanceX = dx;
+          snappedX = otherX;
           matchedV = { coord: otherX };
-        } else if (Math.abs(activeCenterX - otherCenterX) < SNAP_THRESHOLD) {
-          activeX = otherCenterX - NODE_WIDTH / 2;
+        }
+        // Center to Center
+        dx = Math.abs(activeCenterX - otherCenterX);
+        if (dx < minDistanceX) {
+          minDistanceX = dx;
+          snappedX = otherCenterX - nodeW / 2;
           matchedV = { coord: otherCenterX };
-        } else if (Math.abs(activeRight - otherRight) < SNAP_THRESHOLD) {
-          activeX = otherRight - NODE_WIDTH;
+        }
+        // Right to Right
+        dx = Math.abs(activeRight - otherRight);
+        if (dx < minDistanceX) {
+          minDistanceX = dx;
+          snappedX = otherRight - nodeW;
           matchedV = { coord: otherRight };
         }
+        // Left to Right
+        dx = Math.abs(activeX - otherRight);
+        if (dx < minDistanceX) {
+          minDistanceX = dx;
+          snappedX = otherRight;
+          matchedV = { coord: otherRight };
+        }
+        // Right to Left
+        dx = Math.abs(activeRight - otherX);
+        if (dx < minDistanceX) {
+          minDistanceX = dx;
+          snappedX = otherX - nodeW;
+          matchedV = { coord: otherX };
+        }
 
-        // --- Y Axis Alignment Checks (Horizontal Lines) ---
-        if (Math.abs(activeY - otherY) < SNAP_THRESHOLD) {
-          activeY = otherY;
+        // --- Y Axis Alignment Checks (Horizontal Guide Lines) ---
+        // Top to Top
+        let dy = Math.abs(activeY - otherY);
+        if (dy < minDistanceY) {
+          minDistanceY = dy;
+          snappedY = otherY;
           matchedH = { coord: otherY };
-        } else if (Math.abs(activeCenterY - otherCenterY) < SNAP_THRESHOLD) {
-          activeY = otherCenterY - NODE_HEIGHT / 2;
+        }
+        // Center to Center
+        dy = Math.abs(activeCenterY - otherCenterY);
+        if (dy < minDistanceY) {
+          minDistanceY = dy;
+          snappedY = otherCenterY - nodeH / 2;
           matchedH = { coord: otherCenterY };
-        } else if (Math.abs(activeBottom - otherBottom) < SNAP_THRESHOLD) {
-          activeY = otherBottom - NODE_HEIGHT;
+        }
+        // Bottom to Bottom
+        dy = Math.abs(activeBottom - otherBottom);
+        if (dy < minDistanceY) {
+          minDistanceY = dy;
+          snappedY = otherBottom - nodeH;
           matchedH = { coord: otherBottom };
+        }
+        // Top to Bottom
+        dy = Math.abs(activeY - otherBottom);
+        if (dy < minDistanceY) {
+          minDistanceY = dy;
+          snappedY = otherBottom;
+          matchedH = { coord: otherBottom };
+        }
+        // Bottom to Top
+        dy = Math.abs(activeBottom - otherY);
+        if (dy < minDistanceY) {
+          minDistanceY = dy;
+          snappedY = otherY - nodeH;
+          matchedH = { coord: otherY };
         }
       }
 
       setGuideLines({ horizontal: matchedH, vertical: matchedV });
+      snappedPosRef.current = {
+        x: matchedV ? snappedX : null,
+        y: matchedH ? snappedY : null,
+      };
 
-      // Magnetically snap the node position in state if aligned
+      // Magnetically snap the node position in local state if aligned
       if (matchedV || matchedH) {
         setRfNodes((nds) =>
           nds.map((n) => {
             if (n.id === activeNode.id) {
               return {
                 ...n,
-                position: { x: activeX, y: activeY },
+                position: {
+                  x: matchedV ? snappedX : activeX,
+                  y: matchedH ? snappedY : activeY,
+                },
               };
             }
             return n;
@@ -586,12 +654,12 @@ const GraphCanvas: React.FC = () => {
         );
       }
     },
-    [rfNodes, findEdgeUnderNode]
+    [rfNodes, findEdgeUnderNode, viewDensity, nodeScale]
   );
 
-  // Drag Stop: Magnetically snap, persist final coordinates, and splice into edge if dropped between nodes
+  // Drag Stop: Persist final coordinates (with magnetic snap if aligned), and splice into edge if intentionally dropped on one
   const onNodeDragStop = useCallback(
-    (_event: unknown, activeNode: RFNode) => {
+    async (_event: unknown, activeNode: RFNode) => {
       setGuideLines({ horizontal: null, vertical: null });
       if (
         !activeNode?.position ||
@@ -599,58 +667,21 @@ const GraphCanvas: React.FC = () => {
         !isValidCoordinate(activeNode.position.y)
       ) {
         setTargetEdgeForDropId(null);
+        snappedPosRef.current = null;
         return;
       }
 
       const candidateEdge = targetEdgeForDropId
         ? rfEdges.find((e) => e.id === targetEdgeForDropId)
-        : findEdgeUnderNode(activeNode);
+        : null;
 
       setTargetEdgeForDropId(null);
 
-      // If dropped onto an existing connection, splice node in between!
-      if (candidateEdge) {
-        spliceNodeIntoEdge(activeNode.id, candidateEdge.id).catch((err) =>
-          console.warn('[GraphView] Failed to splice node into edge:', err)
-        );
-      }
+      const snapped = snappedPosRef.current;
+      snappedPosRef.current = null;
 
-      let finalX = activeNode.position.x;
-      let finalY = activeNode.position.y;
-
-      const otherNodes = rfNodes.filter((n) => n.id !== activeNode.id);
-      const activeCenterX = finalX + NODE_WIDTH / 2;
-      const activeCenterY = finalY + NODE_HEIGHT / 2;
-      const activeRight = finalX + NODE_WIDTH;
-      const activeBottom = finalY + NODE_HEIGHT;
-
-      for (const other of otherNodes) {
-        if (!other.position || !isValidCoordinate(other.position.x) || !isValidCoordinate(other.position.y)) continue;
-        const otherX = other.position.x;
-        const otherY = other.position.y;
-        const otherCenterX = otherX + NODE_WIDTH / 2;
-        const otherCenterY = otherY + NODE_HEIGHT / 2;
-        const otherRight = otherX + NODE_WIDTH;
-        const otherBottom = otherY + NODE_HEIGHT;
-
-        // X Snap
-        if (Math.abs(finalX - otherX) < SNAP_THRESHOLD) {
-          finalX = otherX;
-        } else if (Math.abs(activeCenterX - otherCenterX) < SNAP_THRESHOLD) {
-          finalX = otherCenterX - NODE_WIDTH / 2;
-        } else if (Math.abs(activeRight - otherRight) < SNAP_THRESHOLD) {
-          finalX = otherRight - NODE_WIDTH;
-        }
-
-        // Y Snap
-        if (Math.abs(finalY - otherY) < SNAP_THRESHOLD) {
-          finalY = otherY;
-        } else if (Math.abs(activeCenterY - otherCenterY) < SNAP_THRESHOLD) {
-          finalY = otherCenterY - NODE_HEIGHT / 2;
-        } else if (Math.abs(activeBottom - otherBottom) < SNAP_THRESHOLD) {
-          finalY = otherBottom - NODE_HEIGHT;
-        }
-      }
+      let finalX = snapped?.x !== null && snapped?.x !== undefined ? snapped.x : activeNode.position.x;
+      let finalY = snapped?.y !== null && snapped?.y !== undefined ? snapped.y : activeNode.position.y;
 
       finalX = Math.round(finalX);
       finalY = Math.round(finalY);
@@ -659,18 +690,23 @@ const GraphCanvas: React.FC = () => {
         nds.map((n) => (n.id === activeNode.id ? { ...n, position: { x: finalX, y: finalY } } : n))
       );
 
-      const targetNode = nodes.find((n) => n.id === activeNode.id);
-      if (targetNode) {
-        updateNode({
-          ...targetNode,
-          position: {
-            x: finalX,
-            y: finalY,
-          },
-        });
+      // If dropped onto an existing connection, splice node in between with updated position atomically!
+      if (candidateEdge) {
+        await spliceNodeIntoEdge(activeNode.id, candidateEdge.id, { x: finalX, y: finalY });
+      } else {
+        const targetNode = nodes.find((n) => n.id === activeNode.id);
+        if (targetNode) {
+          await updateNode({
+            ...targetNode,
+            position: {
+              x: finalX,
+              y: finalY,
+            },
+          });
+        }
       }
     },
-    [rfNodes, nodes, updateNode, targetEdgeForDropId, rfEdges, findEdgeUnderNode, spliceNodeIntoEdge]
+    [targetEdgeForDropId, rfEdges, nodes, spliceNodeIntoEdge, updateNode]
   );
 
   // Auto Layout Handler - tight minimal distance layout
@@ -878,10 +914,20 @@ const GraphCanvas: React.FC = () => {
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
 
-    const subtasks = subtaskLines.map((text, i) => ({
-      text,
-      dueDate: addDays(decomposingNode.dueDate, -Math.max(1, (subtaskLines.length - i) * 2)),
-    }));
+    const subtasks = subtaskLines.map((line, i) => {
+      const auMatch = line.match(/(?:\[|\()(\d+(?:\.\d+)?)\s*AU(?:\]|\))/i);
+      let text = line;
+      let estimatedAU: number | undefined;
+      if (auMatch) {
+        estimatedAU = parseFloat(auMatch[1]);
+        text = line.replace(auMatch[0], '').trim();
+      }
+      return {
+        text,
+        estimatedAU,
+        dueDate: addDays(decomposingNode.dueDate, -Math.max(1, (subtaskLines.length - i) * 2)),
+      };
+    });
 
     await decomposeNode(decomposingNode.id, subtasks);
     setDecomposingNode(null);
@@ -1380,13 +1426,18 @@ const GraphCanvas: React.FC = () => {
             </div>
             <p className="text-xs text-slate-600 dark:text-slate-300">
               Break down <strong className="text-slate-800 dark:text-slate-100">"{decomposingNode.text}"</strong> into subtasks. Enter one subtask per line.
+              {preferences.attentionSystemEnabled && (
+                <span className="block mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+                  Tip: Include estimated AU like <code>(2 AU)</code> or <code>[1.5 AU]</code>. The parent task AU will automatically equal the sum of all subtasks.
+                </span>
+              )}
             </p>
 
             <form onSubmit={handleDecomposeSubmit} className="space-y-4">
               <textarea
                 required
                 rows={5}
-                placeholder="Write introduction&#10;Write methods&#10;Write results&#10;Prepare figures"
+                placeholder={preferences.attentionSystemEnabled ? "Write introduction (2 AU)&#10;Write methods (1.5 AU)&#10;Write results (3 AU)&#10;Prepare figures (1 AU)" : "Write introduction&#10;Write methods&#10;Write results&#10;Prepare figures"}
                 value={subtasksInput}
                 onChange={(e) => setSubtasksInput(e.target.value)}
                 className="w-full text-xs bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-3 text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono shadow-inner"
