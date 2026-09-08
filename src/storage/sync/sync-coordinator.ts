@@ -36,7 +36,8 @@ export type SyncStateListener = (state: SyncState) => void;
 
 export class SyncCoordinator {
   private static listeners: Set<SyncStateListener> = new Set();
-  private static isSyncInProgress = false;
+  private static activeSyncPromise: Promise<{ success: boolean; error?: string }> | null = null;
+  private static lastAuthCheckTime = 0;
 
   private static state: SyncState = {
     provider: (localStorage.getItem(ACTIVE_CLOUD_PROVIDER_KEY) as ActiveCloudProvider) || 'none',
@@ -45,6 +46,10 @@ export class SyncCoordinator {
     lastSyncedAt: localStorage.getItem(LAST_SYNC_KEY),
     error: null,
   };
+
+  private static areEqualJson(a: any, b: any): boolean {
+    return JSON.stringify(a) === JSON.stringify(b);
+  }
 
   public static getState(): SyncState {
     this.refreshAuthStatus();
@@ -70,8 +75,9 @@ export class SyncCoordinator {
     if (savedProvider === 'google_drive') {
       this.state.provider = 'google_drive';
       this.state.user = GDriveAuth.getUser();
-      // If token expired, trigger silent refresh in background without clearing provider
-      if (!GDriveAuth.isAuthenticated()) {
+      // If token expired, trigger silent refresh in background without clearing provider (throttled)
+      if (!GDriveAuth.isAuthenticated() && Date.now() - this.lastAuthCheckTime > 30000) {
+        this.lastAuthCheckTime = Date.now();
         GDriveAuth.getValidToken().catch(() => {});
       }
     } else if (savedProvider === 'onedrive') {
@@ -190,11 +196,18 @@ export class SyncCoordinator {
       return { success: false, error: 'Offline' };
     }
 
-    if (this.isSyncInProgress) {
-      return { success: true };
+    if (this.activeSyncPromise) {
+      return this.activeSyncPromise;
     }
 
-    this.isSyncInProgress = true;
+    this.activeSyncPromise = this.performSync(localProvider).finally(() => {
+      this.activeSyncPromise = null;
+    });
+
+    return this.activeSyncPromise;
+  }
+
+  private static async performSync(localProvider: IStorageProvider): Promise<{ success: boolean; error?: string }> {
     this.state.status = 'syncing';
     this.state.error = null;
     this.notifyListeners();
@@ -220,8 +233,6 @@ export class SyncCoordinator {
       this.state.error = err.message || 'Synchronization failed.';
       this.notifyListeners();
       return { success: false, error: this.state.error || undefined };
-    } finally {
-      this.isSyncInProgress = false;
     }
   }
 
@@ -282,8 +293,12 @@ export class SyncCoordinator {
         } else {
           // Merge documents semantically without losing nodes/edges/notes
           const mergedDoc = await this.mergeProjectDocuments(localDoc, cloudDoc, localProvider);
-          await localProvider.writeProject(mergedDoc);
-          await GDriveClient.uploadJson(cf.name, mergedDoc, folderId);
+          if (!this.areEqualJson(localDoc, mergedDoc)) {
+            await localProvider.writeProject(mergedDoc);
+          }
+          if (!this.areEqualJson(cloudDoc, mergedDoc)) {
+            await GDriveClient.uploadJson(cf.name, mergedDoc, folderId);
+          }
         }
       }
     }
@@ -316,12 +331,20 @@ export class SyncCoordinator {
     if (cloudTasksFile) {
       const cloudTasks = (await GDriveClient.downloadJson<StandaloneTask[]>(cloudTasksFile.id)) || [];
       const mergedTasks = this.mergeStandaloneTasks(localTasks, cloudTasks, taskTombstones);
-      await localProvider.writeStandaloneTasks(mergedTasks);
-      await GDriveClient.uploadJson('standalone_tasks.json', mergedTasks, folderId);
+      if (!this.areEqualJson(localTasks, mergedTasks)) {
+        await localProvider.writeStandaloneTasks(mergedTasks);
+      }
+      if (!this.areEqualJson(cloudTasks, mergedTasks)) {
+        await GDriveClient.uploadJson('standalone_tasks.json', mergedTasks, folderId);
+      }
     } else {
       const mergedTasks = this.mergeStandaloneTasks(localTasks, [], taskTombstones);
-      await localProvider.writeStandaloneTasks(mergedTasks);
-      await GDriveClient.uploadJson('standalone_tasks.json', mergedTasks, folderId);
+      if (!this.areEqualJson(localTasks, mergedTasks)) {
+        await localProvider.writeStandaloneTasks(mergedTasks);
+      }
+      if (mergedTasks.length > 0) {
+        await GDriveClient.uploadJson('standalone_tasks.json', mergedTasks, folderId);
+      }
     }
 
     // 3. Sync Preferences
@@ -331,8 +354,12 @@ export class SyncCoordinator {
     if (cloudPrefsFile) {
       const cloudPrefs = (await GDriveClient.downloadJson<UserPreferences>(cloudPrefsFile.id)) || localPrefs;
       const mergedPrefs = this.mergePreferences(localPrefs, cloudPrefs);
-      await localProvider.writePreferences(mergedPrefs);
-      await GDriveClient.uploadJson('preferences.json', mergedPrefs, folderId);
+      if (!this.areEqualJson(localPrefs, mergedPrefs)) {
+        await localProvider.writePreferences(mergedPrefs);
+      }
+      if (!this.areEqualJson(cloudPrefs, mergedPrefs)) {
+        await GDriveClient.uploadJson('preferences.json', mergedPrefs, folderId);
+      }
     } else {
       await GDriveClient.uploadJson('preferences.json', localPrefs, folderId);
     }
@@ -345,8 +372,12 @@ export class SyncCoordinator {
       if (cloudSeedsFile) {
         const cloudSeeds = (await GDriveClient.downloadJson<IdeaSeed[]>(cloudSeedsFile.id)) || [];
         const mergedSeeds = this.mergeIdeaSeeds(localSeeds, cloudSeeds);
-        await localProvider.writeIdeaSeeds(mergedSeeds);
-        await GDriveClient.uploadJson('idea_seeds.json', mergedSeeds, folderId);
+        if (!this.areEqualJson(localSeeds, mergedSeeds)) {
+          await localProvider.writeIdeaSeeds(mergedSeeds);
+        }
+        if (!this.areEqualJson(cloudSeeds, mergedSeeds)) {
+          await GDriveClient.uploadJson('idea_seeds.json', mergedSeeds, folderId);
+        }
       } else if (localSeeds.length > 0) {
         await GDriveClient.uploadJson('idea_seeds.json', localSeeds, folderId);
       }
@@ -365,7 +396,9 @@ export class SyncCoordinator {
         if (newToLocal.length > 0) {
           await localProvider.appendActivityEvents(newToLocal);
         }
-        await GDriveClient.uploadJson('activity_log.json', mergedLog, folderId);
+        if (!this.areEqualJson(cloudLog, mergedLog)) {
+          await GDriveClient.uploadJson('activity_log.json', mergedLog, folderId);
+        }
       } else if (localLog.length > 0) {
         await GDriveClient.uploadJson('activity_log.json', localLog, folderId);
       }
@@ -379,8 +412,12 @@ export class SyncCoordinator {
       if (cloudReviewsFile) {
         const cloudReviews = (await GDriveClient.downloadJson<WeeklyAttentionReviewRecord[]>(cloudReviewsFile.id)) || [];
         const mergedReviews = this.mergeAttentionReviews(localReviews, cloudReviews);
-        await localProvider.writeAttentionReviews(mergedReviews);
-        await GDriveClient.uploadJson('attention_reviews.json', mergedReviews, folderId);
+        if (!this.areEqualJson(localReviews, mergedReviews)) {
+          await localProvider.writeAttentionReviews(mergedReviews);
+        }
+        if (!this.areEqualJson(cloudReviews, mergedReviews)) {
+          await GDriveClient.uploadJson('attention_reviews.json', mergedReviews, folderId);
+        }
       } else if (localReviews.length > 0) {
         await GDriveClient.uploadJson('attention_reviews.json', localReviews, folderId);
       }
@@ -439,8 +476,12 @@ export class SyncCoordinator {
           // in sync
         } else {
           const mergedDoc = await this.mergeProjectDocuments(localDoc, cloudDoc, localProvider);
-          await localProvider.writeProject(mergedDoc);
-          await OneDriveClient.uploadJson(cf.name, mergedDoc);
+          if (!this.areEqualJson(localDoc, mergedDoc)) {
+            await localProvider.writeProject(mergedDoc);
+          }
+          if (!this.areEqualJson(cloudDoc, mergedDoc)) {
+            await OneDriveClient.uploadJson(cf.name, mergedDoc);
+          }
         }
       }
     }
@@ -472,12 +513,20 @@ export class SyncCoordinator {
 
     if (cloudTasks) {
       const mergedTasks = this.mergeStandaloneTasks(localTasks, cloudTasks, taskTombstones);
-      await localProvider.writeStandaloneTasks(mergedTasks);
-      await OneDriveClient.uploadJson('standalone_tasks.json', mergedTasks);
+      if (!this.areEqualJson(localTasks, mergedTasks)) {
+        await localProvider.writeStandaloneTasks(mergedTasks);
+      }
+      if (!this.areEqualJson(cloudTasks, mergedTasks)) {
+        await OneDriveClient.uploadJson('standalone_tasks.json', mergedTasks);
+      }
     } else {
       const mergedTasks = this.mergeStandaloneTasks(localTasks, [], taskTombstones);
-      await localProvider.writeStandaloneTasks(mergedTasks);
-      await OneDriveClient.uploadJson('standalone_tasks.json', mergedTasks);
+      if (!this.areEqualJson(localTasks, mergedTasks)) {
+        await localProvider.writeStandaloneTasks(mergedTasks);
+      }
+      if (mergedTasks.length > 0) {
+        await OneDriveClient.uploadJson('standalone_tasks.json', mergedTasks);
+      }
     }
 
     // 3. Sync Preferences
@@ -486,8 +535,12 @@ export class SyncCoordinator {
 
     if (cloudPrefs) {
       const mergedPrefs = this.mergePreferences(localPrefs, cloudPrefs);
-      await localProvider.writePreferences(mergedPrefs);
-      await OneDriveClient.uploadJson('preferences.json', mergedPrefs);
+      if (!this.areEqualJson(localPrefs, mergedPrefs)) {
+        await localProvider.writePreferences(mergedPrefs);
+      }
+      if (!this.areEqualJson(cloudPrefs, mergedPrefs)) {
+        await OneDriveClient.uploadJson('preferences.json', mergedPrefs);
+      }
     } else {
       await OneDriveClient.uploadJson('preferences.json', localPrefs);
     }
@@ -499,8 +552,12 @@ export class SyncCoordinator {
 
       if (cloudSeeds) {
         const mergedSeeds = this.mergeIdeaSeeds(localSeeds, cloudSeeds);
-        await localProvider.writeIdeaSeeds(mergedSeeds);
-        await OneDriveClient.uploadJson('idea_seeds.json', mergedSeeds);
+        if (!this.areEqualJson(localSeeds, mergedSeeds)) {
+          await localProvider.writeIdeaSeeds(mergedSeeds);
+        }
+        if (!this.areEqualJson(cloudSeeds, mergedSeeds)) {
+          await OneDriveClient.uploadJson('idea_seeds.json', mergedSeeds);
+        }
       } else if (localSeeds.length > 0) {
         await OneDriveClient.uploadJson('idea_seeds.json', localSeeds);
       }
@@ -518,7 +575,9 @@ export class SyncCoordinator {
         if (newToLocal.length > 0) {
           await localProvider.appendActivityEvents(newToLocal);
         }
-        await OneDriveClient.uploadJson('activity_log.json', mergedLog);
+        if (!this.areEqualJson(cloudLog, mergedLog)) {
+          await OneDriveClient.uploadJson('activity_log.json', mergedLog);
+        }
       } else if (localLog.length > 0) {
         await OneDriveClient.uploadJson('activity_log.json', localLog);
       }
@@ -531,8 +590,12 @@ export class SyncCoordinator {
 
       if (cloudReviews) {
         const mergedReviews = this.mergeAttentionReviews(localReviews, cloudReviews);
-        await localProvider.writeAttentionReviews(mergedReviews);
-        await OneDriveClient.uploadJson('attention_reviews.json', mergedReviews);
+        if (!this.areEqualJson(localReviews, mergedReviews)) {
+          await localProvider.writeAttentionReviews(mergedReviews);
+        }
+        if (!this.areEqualJson(cloudReviews, mergedReviews)) {
+          await OneDriveClient.uploadJson('attention_reviews.json', mergedReviews);
+        }
       } else if (localReviews.length > 0) {
         await OneDriveClient.uploadJson('attention_reviews.json', localReviews);
       }
@@ -621,16 +684,49 @@ export class SyncCoordinator {
       new Set([...(localDoc.project.tags || []), ...(cloudDoc.project.tags || [])])
     );
 
+    // Avoid updating timestamps if the merged result is functionally identical to either side
+    const nodesEqualLocal = this.areEqualJson(localDoc.nodes, mergedNodes);
+    const edgesEqualLocal = this.areEqualJson(localDoc.edges, mergedEdges);
+    const notesEqualLocal = this.areEqualJson(localDoc.notes || [], mergedNotes);
+    const tagsEqualLocal = this.areEqualJson(localDoc.project.tags || [], allTags);
+    const matchesLocal = nodesEqualLocal && edgesEqualLocal && notesEqualLocal && tagsEqualLocal;
+
+    const nodesEqualCloud = this.areEqualJson(cloudDoc.nodes, mergedNodes);
+    const edgesEqualCloud = this.areEqualJson(cloudDoc.edges, mergedEdges);
+    const notesEqualCloud = this.areEqualJson(cloudDoc.notes || [], mergedNotes);
+    const tagsEqualCloud = this.areEqualJson(cloudDoc.project.tags || [], allTags);
+    const matchesCloud = nodesEqualCloud && edgesEqualCloud && notesEqualCloud && tagsEqualCloud;
+
+    let finalUpdatedAt: string;
+    let finalExportedAt: string;
+
+    if (matchesLocal && matchesCloud) {
+      finalUpdatedAt =
+        localTime >= cloudTime
+          ? localDoc.project.updatedAt || localDoc.exportedAt
+          : cloudDoc.project.updatedAt || cloudDoc.exportedAt;
+      finalExportedAt = localTime >= cloudTime ? localDoc.exportedAt : cloudDoc.exportedAt;
+    } else if (matchesLocal && localTime >= cloudTime) {
+      finalUpdatedAt = localDoc.project.updatedAt || localDoc.exportedAt;
+      finalExportedAt = localDoc.exportedAt;
+    } else if (matchesCloud && cloudTime >= localTime) {
+      finalUpdatedAt = cloudDoc.project.updatedAt || cloudDoc.exportedAt;
+      finalExportedAt = cloudDoc.exportedAt;
+    } else {
+      const nowIso = new Date().toISOString();
+      finalUpdatedAt = nowIso;
+      finalExportedAt = nowIso;
+    }
+
     const baseProject = cloudTime >= localTime ? cloudDoc.project : localDoc.project;
-    const nowIso = new Date().toISOString();
 
     const mergedDoc: ProjectDocument = {
       schemaVersion: Math.max(localDoc.schemaVersion, cloudDoc.schemaVersion),
-      exportedAt: nowIso,
+      exportedAt: finalExportedAt,
       project: {
         ...baseProject,
         tags: allTags,
-        updatedAt: nowIso,
+        updatedAt: finalUpdatedAt,
       },
       nodes: mergedNodes,
       edges: mergedEdges,

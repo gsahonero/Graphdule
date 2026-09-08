@@ -718,6 +718,148 @@ describe('Cloud Sync & Multi-Device Coordination', () => {
       expect(localStorage.getItem('graphdule_active_cloud_provider')).toBe('google_drive');
     });
   });
+
+  describe('Sync Loop Prevention & Redundant Upload Optimization', () => {
+    it('does not re-upload standalone tasks or preferences if local and cloud copies match', async () => {
+      const mockDoc: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: '2026-09-01T10:00:00Z',
+        project: {
+          id: 'proj_test',
+          name: 'Test Project',
+          endGoalNodeId: 'node_goal',
+          createdAt: '2026-09-01T10:00:00Z',
+          updatedAt: '2026-09-01T10:00:00Z',
+        },
+        nodes: [],
+        edges: [],
+        notes: [],
+        history: [],
+      };
+
+      const identicalTasks: StandaloneTask[] = [
+        { id: 'task_1', text: 'Existing Task', dueDate: '2026-09-05', status: 'planned', createdAt: '2026-09-01T10:00:00Z' },
+      ];
+
+      const identicalPrefs = {
+        myDayMode: 'today' as const,
+        theme: 'dark' as const,
+        dateFormat: 'DD/MM/YYYY' as const,
+        onboardingCompleted: true,
+        preferredStorageProvider: 'browser',
+      };
+
+      const mockProvider: IStorageProvider = {
+        info: { id: 'browser', name: 'IndexedDB', isConnected: true, isLocalOnly: true, statusMessage: 'Ready' },
+        init: async () => {},
+        listProjects: async () => [ProjectService.getProjectSummary(mockDoc.project, mockDoc.nodes)],
+        readProject: async () => mockDoc,
+        writeProject: async () => {},
+        deleteProject: async () => {},
+        readStandaloneTasks: async () => identicalTasks,
+        writeStandaloneTasks: async () => {},
+        readPreferences: async () => identicalPrefs,
+        writePreferences: async () => {},
+        listSnapshots: async () => [],
+        readSnapshot: async () => null,
+        writeSnapshot: async () => {},
+      };
+
+      vi.spyOn(GDriveAuth, 'isAuthenticated').mockReturnValue(true);
+      vi.spyOn(GDriveAuth, 'getToken').mockReturnValue('mock_token');
+      vi.spyOn(GDriveClient, 'getOrCreateAppFolder').mockResolvedValue('folder_123');
+      vi.spyOn(GDriveClient, 'listFiles').mockResolvedValue([
+        { id: 'cloud_proj_file', name: 'project_proj_test.json', modifiedTime: '2026-09-01T10:00:00Z' },
+      ]);
+      vi.spyOn(GDriveClient, 'downloadJson').mockImplementation(async (id: string) => {
+        if (id === 'cloud_proj_file') return mockDoc;
+        if (id === 'cloud_tasks_file') return identicalTasks;
+        if (id === 'cloud_prefs_file') return identicalPrefs;
+        return null;
+      });
+      vi.spyOn(GDriveClient, 'findFileByName').mockImplementation(async (name: string) => {
+        if (name === 'standalone_tasks.json') return { id: 'cloud_tasks_file', name };
+        if (name === 'preferences.json') return { id: 'cloud_prefs_file', name };
+        return null;
+      });
+
+      const uploadSpy = vi.spyOn(GDriveClient, 'uploadJson').mockResolvedValue('new_id');
+
+      await SyncCoordinator.setCloudProvider('google_drive');
+      const res = await SyncCoordinator.sync(mockProvider);
+
+      expect(res.success).toBe(true);
+      // Crucial: No uploads should be performed for matching project, tasks, or preferences!
+      expect(uploadSpy).not.toHaveBeenCalled();
+    });
+
+    it('shares in-flight promise for concurrent sync invocations', async () => {
+      const mockProvider: IStorageProvider = {
+        info: { id: 'browser', name: 'IndexedDB', isConnected: true, isLocalOnly: true, statusMessage: 'Ready' },
+        init: async () => {},
+        listProjects: async () => [],
+        readProject: async () => null,
+        writeProject: async () => {},
+        deleteProject: async () => {},
+        readStandaloneTasks: async () => [],
+        writeStandaloneTasks: async () => {},
+        readPreferences: async () => ({
+          myDayMode: 'today',
+          theme: 'dark',
+          dateFormat: 'DD/MM/YYYY',
+          onboardingCompleted: true,
+          preferredStorageProvider: 'browser',
+        }),
+        writePreferences: async () => {},
+        listSnapshots: async () => [],
+        readSnapshot: async () => null,
+        writeSnapshot: async () => {},
+      };
+
+      vi.spyOn(GDriveAuth, 'isAuthenticated').mockReturnValue(true);
+      vi.spyOn(GDriveAuth, 'getToken').mockReturnValue('mock_token');
+      vi.spyOn(GDriveClient, 'getOrCreateAppFolder').mockResolvedValue('folder_123');
+      vi.spyOn(GDriveClient, 'listFiles').mockResolvedValue([]);
+      vi.spyOn(GDriveClient, 'findFileByName').mockResolvedValue(null);
+      vi.spyOn(GDriveClient, 'uploadJson').mockResolvedValue('uploaded');
+
+      await SyncCoordinator.setCloudProvider('google_drive');
+
+      // Trigger two concurrent syncs
+      const sync1Promise = SyncCoordinator.sync(mockProvider);
+      const sync2Promise = SyncCoordinator.sync(mockProvider);
+
+      // Both should resolve successfully
+      const [res1, res2] = await Promise.all([sync1Promise, sync2Promise]);
+      expect(res1.success).toBe(true);
+      expect(res2.success).toBe(true);
+    });
+
+    it('preserves existing timestamp in mergeProjectDocuments when documents are identical', async () => {
+      const docA: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: '2026-09-01T10:00:00Z',
+        project: {
+          id: 'proj_1',
+          name: 'Project 1',
+          endGoalNodeId: 'node_1',
+          createdAt: '2026-09-01T10:00:00Z',
+          updatedAt: '2026-09-01T10:00:00Z',
+        },
+        nodes: [{ id: 'node_1', text: 'Goal', projectId: 'proj_1', status: 'planned', createdAt: '2026-09-01T10:00:00Z' }],
+        edges: [],
+        notes: [],
+        history: [],
+      };
+
+      const docB: ProjectDocument = { ...docA };
+
+      const merged = await SyncCoordinator.mergeProjectDocuments(docA, docB);
+      // Must not generate a brand new nowIso timestamp when there is zero difference
+      expect(merged.project.updatedAt).toBe('2026-09-01T10:00:00Z');
+      expect(merged.exportedAt).toBe('2026-09-01T10:00:00Z');
+    });
+  });
 });
 
 

@@ -135,7 +135,7 @@ interface AppContextType {
   fetchAvailableGCalendars: () => Promise<GCalendarItem[]>;
 
   // Preferences & Import/Export
-  updatePreferences: (partial: Partial<UserPreferences>) => Promise<void>;
+  updatePreferences: (partial: Partial<UserPreferences>, syncToCloud?: boolean) => Promise<void>;
   exportActiveProject: () => void;
   exportAllData: () => Promise<void>;
   importProjectJson: (jsonString: string) => Promise<{ success: boolean; error?: string }>;
@@ -332,7 +332,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const updatePreferences = useCallback(
-    async (partial: Partial<UserPreferences>) => {
+    async (partial: Partial<UserPreferences>, syncToCloud = true) => {
       const updated = { ...preferences, ...partial };
       if (partial.theme) {
         localStorage.setItem('graphdule_theme', partial.theme);
@@ -349,7 +349,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       setPreferences(updated);
       await storage.writePreferences(updated);
-      debouncedCloudSync();
+      if (syncToCloud) {
+        debouncedCloudSync();
+      }
     },
     [preferences, storage, debouncedCloudSync]
   );
@@ -362,7 +364,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const recordActiveNode = useCallback(
     async (node: Node, projectId?: string) => {
-      const pId = projectId || node.projectId || activeProjectDoc?.project.id;
+      const pId = projectId || node.projectId || activeProjectDocRef.current?.project.id;
       const timestamp = new Date().toISOString();
       try {
         localStorage.setItem(
@@ -373,21 +375,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             timestamp,
           })
         );
-        updatePreferences({
-          lastActiveNodeId: node.id,
-          lastActiveProjectId: pId,
-          lastActiveTimestamp: timestamp,
-        });
       } catch {
         // ignore localStorage errors
       }
 
-      // 1. Update preferences (synchronized via preferences.json)
-      await updatePreferences({
-        lastActiveNodeId: node.id,
-        lastActiveProjectId: pId,
-        lastActiveTimestamp: timestamp,
-      });
+      // 1. Update preferences locally without triggering cloud sync
+      await updatePreferences(
+        {
+          lastActiveNodeId: node.id,
+          lastActiveProjectId: pId,
+          lastActiveTimestamp: timestamp,
+        },
+        false
+      );
 
       // 2. Update in-memory activeProjectDoc state functionally
       setActiveProjectDoc((prev) => {
@@ -399,13 +399,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             ...prev.project,
             lastActiveNodeId: node.id,
           },
-          exportedAt: timestamp,
         };
       });
 
-      // 3. Update project JSON on storage (synchronized via project_{id}.json)
-      if (activeProjectDoc && pId === activeProjectDoc.project.id) {
-        const doc = await storage.readProject(activeProjectDoc.project.id);
+      // 3. Update project JSON on storage (without advancing updatedAt, keeping lastActiveNodeId in project document)
+      const currentDoc = activeProjectDocRef.current;
+      if (currentDoc && pId === currentDoc.project.id) {
+        const doc = await storage.readProject(currentDoc.project.id);
         if (doc && doc.project.lastActiveNodeId !== node.id) {
           const updatedDoc: ProjectDocument = {
             ...doc,
@@ -413,13 +413,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               ...doc.project,
               lastActiveNodeId: node.id,
             },
-            exportedAt: timestamp,
           };
           await storage.writeProject(updatedDoc);
         }
       }
     },
-    [activeProjectDoc, storage, updatePreferences]
+    [storage, updatePreferences]
   );
 
   const setSelectedNode = useCallback(
@@ -495,11 +494,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     // Check if activeProjectDoc was updated externally in storage (e.g. from cloud sync or merge)
-    if (activeProjectDoc) {
-      const freshActiveDoc = await storage.readProject(activeProjectDoc.project.id);
+    const currentActiveDoc = activeProjectDocRef.current;
+    if (currentActiveDoc) {
+      const freshActiveDoc = await storage.readProject(currentActiveDoc.project.id);
       if (freshActiveDoc) {
         const freshTime = new Date(freshActiveDoc.project.updatedAt || freshActiveDoc.exportedAt || 0).getTime();
-        const currTime = new Date(activeProjectDoc.project.updatedAt || activeProjectDoc.exportedAt || 0).getTime();
+        const currTime = new Date(currentActiveDoc.project.updatedAt || currentActiveDoc.exportedAt || 0).getTime();
         if (freshTime > currTime) {
           setActiveProjectDoc(freshActiveDoc);
         }
@@ -521,14 +521,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
     setAllActiveNodes(combinedNodes);
 
-    if (activeProjectDoc && !projList.some((p) => p.id === activeProjectDoc.project.id)) {
+    if (currentActiveDoc && !projList.some((p) => p.id === currentActiveDoc.project.id)) {
       setActiveProjectDoc(null);
     }
 
     if (!prefs.onboardingCompleted && projList.length === 0) {
       setIsOnboardingOpen(true);
     }
-  }, [storage, activeProjectDoc]);
+  }, [storage]);
 
   useEffect(() => {
     refreshData();
@@ -1001,18 +1001,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         entityText: `Attention measurement system ${enabled ? 'enabled' : 'disabled'}`,
         metadata: { enabled },
       });
-      debouncedCloudSync();
     },
-    [updatePreferences, logActivityEvent, debouncedCloudSync]
+    [updatePreferences, logActivityEvent]
   );
 
   const setAttentionUnitMinutes = useCallback(
     async (minutes: number) => {
       const valid = minutes > 0 ? minutes : 15;
       await updatePreferences({ attentionUnitMinutes: valid });
-      debouncedCloudSync();
     },
-    [updatePreferences, debouncedCloudSync]
+    [updatePreferences]
   );
 
   const setWeeklyPlannedAU = useCallback(
@@ -1022,9 +1020,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         entityText: `Weekly planned attention set to ${au !== undefined ? `${au} AU` : 'none'}`,
         metadata: { plannedAU: au },
       });
-      debouncedCloudSync();
     },
-    [updatePreferences, logActivityEvent, debouncedCloudSync]
+    [updatePreferences, logActivityEvent]
   );
 
   const stopWork = useCallback(async () => {
@@ -1061,8 +1058,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // ignore
     }
     await updatePreferences({ activeWorkSession: null });
-    debouncedCloudSync();
-  }, [activeWorkSession, attentionUnitMinutes, logActivityEvent, updatePreferences, debouncedCloudSync]);
+  }, [activeWorkSession, attentionUnitMinutes, logActivityEvent, updatePreferences]);
 
   const pauseWork = useCallback(async () => {
     if (!activeWorkSession || activeWorkSession.isPaused) return;
@@ -1096,8 +1092,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // ignore
     }
     await updatePreferences({ activeWorkSession: updatedSession });
-    debouncedCloudSync();
-  }, [activeWorkSession, logActivityEvent, updatePreferences, debouncedCloudSync]);
+  }, [activeWorkSession, logActivityEvent, updatePreferences]);
 
   const resumeWork = useCallback(async () => {
     if (!activeWorkSession || !activeWorkSession.isPaused) return;
@@ -1125,8 +1120,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // ignore
     }
     await updatePreferences({ activeWorkSession: updatedSession });
-    debouncedCloudSync();
-  }, [activeWorkSession, logActivityEvent, updatePreferences, debouncedCloudSync]);
+  }, [activeWorkSession, logActivityEvent, updatePreferences]);
 
   const startWork = useCallback(
     async (taskId: string, taskText: string, projectId?: string, projectName?: string) => {
@@ -1169,9 +1163,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // ignore
       }
       await updatePreferences({ activeWorkSession: newSession });
-      debouncedCloudSync();
     },
-    [activeWorkSession, resumeWork, stopWork, logActivityEvent, updatePreferences, debouncedCloudSync]
+    [activeWorkSession, resumeWork, stopWork, logActivityEvent, updatePreferences]
   );
 
   const updateTaskEstimate = useCallback(
@@ -1218,7 +1211,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             projectName: activeProjectDoc.project.name,
             metadata: { oldEstimateAU: oldEstimate, newEstimateAU: estimatedAU },
           });
-          debouncedCloudSync();
           return;
         }
       }
@@ -2692,22 +2684,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return result;
   }, []);
 
-  // Background auto-sync on focus, network online, and recurring 60s interval while page is open
+  // Background auto-sync on focus (with 5-minute cooldown), network online, and recurring interval while page is open
   useEffect(() => {
     if (cloudSyncState.provider === 'none') return;
 
     const onFocus = () => {
-      triggerCloudSync();
+      // Cooldown for focus auto-sync: only sync on focus if at least 5 minutes have passed since last sync
+      const lastSyncStr = SyncCoordinator.getState().lastSyncedAt;
+      const lastSyncTime = lastSyncStr ? new Date(lastSyncStr).getTime() : 0;
+      const fiveMinutesMs = 5 * 60 * 1000;
+      if (Date.now() - lastSyncTime >= fiveMinutesMs) {
+        triggerCloudSyncRef.current().catch(() => {});
+      }
     };
     const onOnline = () => {
-      triggerCloudSync();
+      triggerCloudSyncRef.current().catch(() => {});
     };
 
     // Periodic idle background sync while webpage is open (default 15m, configurable)
     const idleSyncMinutes = preferences.idleSyncIntervalMinutes ?? 15;
     const intervalMs = Math.max(1, idleSyncMinutes) * 60 * 1000;
     const intervalId = window.setInterval(() => {
-      triggerCloudSync();
+      triggerCloudSyncRef.current().catch(() => {});
     }, intervalMs);
 
     window.addEventListener('focus', onFocus);
@@ -2717,7 +2715,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('online', onOnline);
     };
-  }, [cloudSyncState.provider, triggerCloudSync, preferences.idleSyncIntervalMinutes]);
+  }, [cloudSyncState.provider, preferences.idleSyncIntervalMinutes]);
 
   return (
     <AppContext.Provider

@@ -27,6 +27,7 @@ export class GDriveAuth {
   private static tokenClient: any = null;
   private static refreshTimer: any = null;
   private static refreshInProgressPromise: Promise<{ success: boolean; error?: string; user?: CloudUserInfo }> | null = null;
+  private static lastSilentRefreshAttempt: number = 0;
 
   public static getCustomClientId(): string {
     return localStorage.getItem(GDRIVE_CLIENT_ID_KEY) || '';
@@ -141,6 +142,14 @@ export class GDriveAuth {
       return this.refreshInProgressPromise;
     }
 
+    if (!interactive && Date.now() - this.lastSilentRefreshAttempt < 30000) {
+      return { success: false, error: 'Silent token refresh throttled' };
+    }
+
+    if (!interactive) {
+      this.lastSilentRefreshAttempt = Date.now();
+    }
+
     this.refreshInProgressPromise = new Promise(async (resolve) => {
       try {
         const client = await this.getOrInitTokenClient();
@@ -200,9 +209,10 @@ export class GDriveAuth {
       this.refreshTimer = null;
     }
 
-    if (!this.token || !this.tokenExpiry) return;
+    // Only schedule proactive refresh if token exists and has not already expired
+    if (!this.token || !this.tokenExpiry || Date.now() >= this.tokenExpiry) return;
 
-    // Refresh 5 minutes before expiration, or in 10s if already nearing/past expiration
+    // Refresh 5 minutes before expiration, or at minimum 10s from now
     const timeUntilRefresh = Math.max(this.tokenExpiry - Date.now() - 5 * 60 * 1000, 10000);
 
     this.refreshTimer = setTimeout(async () => {
