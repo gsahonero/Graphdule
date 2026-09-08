@@ -41,7 +41,7 @@ import {
   GCalendarItem,
 } from '../../storage';
 import { JsonFileProvider } from '../../storage/file/json-file-provider';
-import { getTodayString, formatDisplayDate, DateDisplayFormat, isAfter } from '../../domain/utils/date';
+import { formatDisplayDate, DateDisplayFormat, isAfter } from '../../domain/utils/date';
 import { createDefaultSampleProject, DEFAULT_SAMPLE_PROJECT_ID } from '../../config/sample-project';
 
 interface AppContextType {
@@ -176,6 +176,23 @@ interface AppContextType {
   toggleAttentionSystem: (enabled: boolean) => Promise<void>;
   setAttentionUnitMinutes: (minutes: number) => Promise<void>;
   setWeeklyPlannedAU: (au: number | undefined) => Promise<void>;
+  deleteWorkSession: (sessionIdOrEventId: string) => Promise<void>;
+  updateWorkSessionDuration: (sessionIdOrEventId: string, durationSeconds: number) => Promise<void>;
+  clearTaskWorkSessions: (taskId: string) => Promise<void>;
+  addManualWorkSession: (
+    taskId: string,
+    durationSeconds: number,
+    options?: {
+      startedAt?: string;
+      stoppedAt?: string;
+      entityText?: string;
+      projectId?: string;
+      projectName?: string;
+    }
+  ) => Promise<void>;
+  workSessionsModalTaskId: string | null;
+  openWorkSessionsModal: (taskId: string) => void;
+  closeWorkSessionsModal: () => void;
   attentionReviews: WeeklyAttentionReviewRecord[];
   triggerWeeklyReview: (weekStartDate: string, weekEndDate: string, userNotes?: string) => Promise<WeeklyAttentionReviewRecord>;
   deleteAttentionReview: (reviewId: string) => Promise<void>;
@@ -242,7 +259,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return Math.floor(baseAccum);
       }
       const ref = activeWorkSession.lastResumedAt || activeWorkSession.startedAt;
-      const running = Math.max(0, (Date.now() - new Date(ref).getTime()) / 1000);
+      const running = Math.max(0, (Date.now() - AttentionService.parseSafeEpochMs(ref)) / 1000);
       return Math.floor(baseAccum + running);
     };
 
@@ -1032,7 +1049,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let additional = 0;
     if (!sessionToStop.isPaused) {
       const ref = sessionToStop.lastResumedAt || sessionToStop.startedAt;
-      additional = Math.max(0, (Date.now() - new Date(ref).getTime()) / 1000);
+      additional = Math.max(0, (Date.now() - AttentionService.parseSafeEpochMs(ref)) / 1000);
     }
     const totalDurationSeconds = Math.round(baseAccum + additional);
     const au = AttentionService.durationSecondsToAU(totalDurationSeconds, attentionUnitMinutes);
@@ -1065,7 +1082,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const now = Date.now();
     const ref = activeWorkSession.lastResumedAt || activeWorkSession.startedAt;
-    const segment = Math.max(0, (now - new Date(ref).getTime()) / 1000);
+    const segment = Math.max(0, (now - AttentionService.parseSafeEpochMs(ref)) / 1000);
     const totalAccum = (activeWorkSession.accumulatedSecondsBeforeResume || 0) + segment;
 
     const updatedSession: ActiveWorkSession = {
@@ -1093,6 +1110,145 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     await updatePreferences({ activeWorkSession: updatedSession });
   }, [activeWorkSession, logActivityEvent, updatePreferences]);
+
+  const deleteWorkSession = useCallback(
+    async (sessionIdOrEventId: string) => {
+      // Find all events associated with this session (WORK_STOPPED, WORK_STARTED, WORK_PAUSED, WORK_RESUMED)
+      const toDeleteIds: string[] = [];
+      for (const ev of activityLog) {
+        const evSessionId = typeof ev.metadata?.sessionId === 'string' ? ev.metadata.sessionId : undefined;
+        if (ev.id === sessionIdOrEventId || (evSessionId && evSessionId === sessionIdOrEventId)) {
+          toDeleteIds.push(ev.id);
+        }
+      }
+
+      if (toDeleteIds.length === 0) {
+        toDeleteIds.push(sessionIdOrEventId);
+      }
+
+      if (storage.deleteActivityEvents) {
+        await storage.deleteActivityEvents(toDeleteIds);
+      }
+
+      const toDeleteSet = new Set(toDeleteIds);
+      setActivityLog((prev) => prev.filter((ev) => !toDeleteSet.has(ev.id)));
+      debouncedCloudSync();
+    },
+    [activityLog, storage, debouncedCloudSync]
+  );
+
+  const updateWorkSessionDuration = useCallback(
+    async (sessionIdOrEventId: string, durationSeconds: number) => {
+      const validSeconds = Math.max(0, Math.round(durationSeconds));
+      const newAU = AttentionService.durationSecondsToAU(validSeconds, attentionUnitMinutes);
+
+      const targetEvent = activityLog.find(
+        (ev) =>
+          ev.id === sessionIdOrEventId ||
+          (ev.type === 'WORK_STOPPED' && ev.metadata?.sessionId === sessionIdOrEventId)
+      );
+
+      if (!targetEvent) return;
+
+      const updatedEvent: ActivityEvent = {
+        ...targetEvent,
+        metadata: {
+          ...targetEvent.metadata,
+          durationSeconds: validSeconds,
+          au: newAU,
+        },
+      };
+
+      if (storage.updateActivityEvent) {
+        await storage.updateActivityEvent(updatedEvent);
+      }
+
+      setActivityLog((prev) =>
+        prev.map((ev) => (ev.id === targetEvent.id ? updatedEvent : ev))
+      );
+      debouncedCloudSync();
+    },
+    [activityLog, attentionUnitMinutes, storage, debouncedCloudSync]
+  );
+
+  const clearTaskWorkSessions = useCallback(
+    async (taskId: string) => {
+      const toDeleteIds: string[] = [];
+      for (const ev of activityLog) {
+        if (
+          ev.entityId === taskId &&
+          (ev.type === 'WORK_STARTED' ||
+            ev.type === 'work_started' ||
+            ev.type === 'WORK_PAUSED' ||
+            ev.type === 'work_paused' ||
+            ev.type === 'WORK_RESUMED' ||
+            ev.type === 'work_resumed' ||
+            ev.type === 'WORK_STOPPED' ||
+            ev.type === 'work_stopped')
+        ) {
+          toDeleteIds.push(ev.id);
+        }
+      }
+
+      if (toDeleteIds.length > 0 && storage.deleteActivityEvents) {
+        await storage.deleteActivityEvents(toDeleteIds);
+      }
+
+      const toDeleteSet = new Set(toDeleteIds);
+      setActivityLog((prev) => prev.filter((ev) => !toDeleteSet.has(ev.id)));
+      debouncedCloudSync();
+    },
+    [activityLog, storage, debouncedCloudSync]
+  );
+
+  const addManualWorkSession = useCallback(
+    async (
+      taskId: string,
+      durationSeconds: number,
+      options?: {
+        startedAt?: string;
+        stoppedAt?: string;
+        entityText?: string;
+        projectId?: string;
+        projectName?: string;
+      }
+    ) => {
+      const validSeconds = Math.max(0, Math.round(durationSeconds));
+      const au = AttentionService.durationSecondsToAU(validSeconds, attentionUnitMinutes);
+      const now = new Date().toISOString();
+      const stoppedAt = options?.stoppedAt || now;
+      const startedAt =
+        options?.startedAt ||
+        new Date(AttentionService.parseSafeEpochMs(stoppedAt) - validSeconds * 1000).toISOString();
+      const sessionId = `sess_manual_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+      await logActivityEvent('WORK_STOPPED', taskId, {
+        entityText: options?.entityText,
+        projectId: options?.projectId,
+        projectName: options?.projectName,
+        metadata: {
+          sessionId,
+          durationSeconds: validSeconds,
+          au,
+          startedAt,
+          stoppedAt,
+          isManualEntry: true,
+        },
+      });
+      debouncedCloudSync();
+    },
+    [attentionUnitMinutes, logActivityEvent, debouncedCloudSync]
+  );
+
+  const [workSessionsModalTaskId, setWorkSessionsModalTaskId] = useState<string | null>(null);
+
+  const openWorkSessionsModal = useCallback((taskId: string) => {
+    setWorkSessionsModalTaskId(taskId);
+  }, []);
+
+  const closeWorkSessionsModal = useCallback(() => {
+    setWorkSessionsModalTaskId(null);
+  }, []);
 
   const resumeWork = useCallback(async () => {
     if (!activeWorkSession || !activeWorkSession.isPaused) return;
@@ -1485,13 +1641,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addNode = useCallback(
     async (
       text: string,
-      dueDate: string = getTodayString(),
+      dueDate: string = '',
       parentNodeId?: string | null,
       position?: { x: number; y: number },
       estimatedAU?: number
     ): Promise<Node | null> => {
       if (!activeProjectDoc) return null;
-      const effectiveDueDate = dueDate || getTodayString();
+      const effectiveDueDate = dueDate ?? '';
       const newNode = ProjectService.createNode(
         activeProjectDoc.project.id,
         text,
@@ -2342,7 +2498,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const addStandaloneTask = useCallback(
     async (text: string, dueDate?: string, recurrence?: RecurrenceRule, estimatedAU?: number) => {
-      const targetDate = dueDate || getTodayString();
+      const targetDate = dueDate ?? '';
       const newTask = MyDayService.createStandaloneTask(text, targetDate, recurrence, estimatedAU);
       const updated = [...standaloneTasks, newTask];
       await storage.writeStandaloneTasks(updated);
@@ -2873,6 +3029,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         toggleAttentionSystem,
         setAttentionUnitMinutes,
         setWeeklyPlannedAU,
+        deleteWorkSession,
+        updateWorkSessionDuration,
+        clearTaskWorkSessions,
+        addManualWorkSession,
+        workSessionsModalTaskId,
+        openWorkSessionsModal,
+        closeWorkSessionsModal,
         attentionReviews,
         triggerWeeklyReview,
         deleteAttentionReview,

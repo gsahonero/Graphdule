@@ -60,7 +60,7 @@ export const NodeSchema = z.object({
   projectId: z.string().optional(),
   parentNodeId: z.string().nullable().optional(),
   text: z.string().min(1),
-  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Due date must be in YYYY-MM-DD format'),
+  dueDate: z.string().regex(/^(\d{4}-\d{2}-\d{2})?$/, 'Due date must be in YYYY-MM-DD format or empty'),
   status: NodeStatusSchema,
   position: z.object({
     x: z.number(),
@@ -126,7 +126,7 @@ export const RecurrenceRuleSchema = z.object({
 export const StandaloneTaskSchema = z.object({
   id: z.string().min(1),
   text: z.string().min(1),
-  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  dueDate: z.string().regex(/^(\d{4}-\d{2}-\d{2})?$/, 'Due date must be in YYYY-MM-DD format or empty'),
   status: NodeStatusSchema,
   recurrence: RecurrenceRuleSchema.optional(),
   recurrenceInstance: z.number().int().positive().optional(),

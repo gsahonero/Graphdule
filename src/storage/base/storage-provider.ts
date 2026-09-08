@@ -54,6 +54,8 @@ export interface IStorageProvider {
 
   readActivityLog?(): Promise<ActivityEvent[]>;
   appendActivityEvents?(events: ActivityEvent[]): Promise<void>;
+  deleteActivityEvents?(eventIds: string[]): Promise<void>;
+  updateActivityEvent?(event: ActivityEvent): Promise<void>;
   clearActivityLog?(): Promise<void>;
 
   readAttentionReviews?(): Promise<WeeklyAttentionReviewRecord[]>;

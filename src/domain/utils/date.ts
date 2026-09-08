@@ -23,12 +23,15 @@ export function formatDate(date: Date): string {
 }
 
 export function addDays(dateStr: string, days: number): string {
+  if (!dateStr) return '';
   const d = parseDate(dateStr);
+  if (isNaN(d.getTime())) return '';
   d.setDate(d.getDate() + days);
   return formatDate(d);
 }
 
 export function daysBetween(startDateStr: string, endDateStr: string): number {
+  if (!startDateStr || !endDateStr) return 0;
   const start = parseDate(startDateStr);
   const end = parseDate(endDateStr);
   const diffTime = end.getTime() - start.getTime();
@@ -36,25 +39,30 @@ export function daysBetween(startDateStr: string, endDateStr: string): number {
 }
 
 export function isBefore(dateA: string, dateB: string): boolean {
+  if (!dateA || !dateB) return false;
   return dateA < dateB;
 }
 
 export function isBeforeOrEqual(dateA: string, dateB: string): boolean {
+  if (!dateA || !dateB) return false;
   return dateA <= dateB;
 }
 
 export function isAfter(dateA: string, dateB: string): boolean {
+  if (!dateA || !dateB) return false;
   return dateA > dateB;
 }
 
 export function minDate(dates: string[]): string {
-  if (dates.length === 0) return getTodayString();
-  return dates.reduce((min, d) => (d < min ? d : min), dates[0]);
+  const valid = dates.filter(Boolean);
+  if (valid.length === 0) return '';
+  return valid.reduce((min, d) => (d < min ? d : min), valid[0]);
 }
 
 export function maxDate(dates: string[]): string {
-  if (dates.length === 0) return getTodayString();
-  return dates.reduce((max, d) => (d > max ? d : max), dates[0]);
+  const valid = dates.filter(Boolean);
+  if (valid.length === 0) return '';
+  return valid.reduce((max, d) => (d > max ? d : max), valid[0]);
 }
 
 export type DateDisplayFormat = 'DD/MM/YYYY' | 'MMM_D_YYYY';

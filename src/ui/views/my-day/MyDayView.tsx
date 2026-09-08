@@ -86,6 +86,7 @@ export const MyDayView: React.FC = () => {
     gcalendarSyncConfig,
     activityLog,
     updateTaskEstimate,
+    openWorkSessionsModal,
   } = useApp();
 
   const [newStandaloneText, setNewStandaloneText] = useState('');
@@ -162,12 +163,16 @@ export const MyDayView: React.FC = () => {
           onOpenChange={(open) => setActiveAuTaskId(open ? task.id : null)}
         />
         {trackedAU > 0 && (
-          <span
-            className="px-2 py-0.5 rounded-lg font-mono font-semibold text-[11px] bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 whitespace-nowrap"
-            title={`Tracked attention: ${AttentionService.formatAU(trackedAU, preferences.attentionUnitMinutes)}`}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              openWorkSessionsModal(task.id);
+            }}
+            className="px-2 py-0.5 rounded-lg font-mono font-semibold text-[11px] bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 whitespace-nowrap hover:bg-indigo-100 dark:hover:bg-indigo-900/60 cursor-pointer transition-colors"
+            title={`Tracked attention: ${AttentionService.formatAU(trackedAU, preferences.attentionUnitMinutes)} - Click to inspect or edit work sessions`}
           >
             Active: {trackedAU} AU
-          </span>
+          </button>
         )}
       </div>
     );

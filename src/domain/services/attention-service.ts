@@ -145,6 +145,30 @@ export class AttentionService {
   }
 
   /**
+   * Universal timezone-safe epoch millisecond parser.
+   * Handles ISO 8601 strings with or without Z/offsets, date-only strings, timestamps, and numbers safely.
+   */
+  public static parseSafeEpochMs(dateVal: string | number | Date | undefined | null): number {
+    if (!dateVal) return 0;
+    if (typeof dateVal === 'number') return isNaN(dateVal) ? 0 : dateVal;
+    if (dateVal instanceof Date) {
+      const t = dateVal.getTime();
+      return isNaN(t) ? 0 : t;
+    }
+
+    let s = String(dateVal).trim();
+    if (!s) return 0;
+
+    // ISO timestamp without offset/Z e.g. "2026-09-08T00:12:00" -> treat as UTC
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(s)) {
+      s += 'Z';
+    }
+
+    const parsed = new Date(s).getTime();
+    return isNaN(parsed) ? 0 : parsed;
+  }
+
+  /**
    * Reconstructs completed work sessions deterministically from raw telemetry events.
    * Source of truth is the immutable activity events log.
    */
@@ -153,7 +177,7 @@ export class AttentionService {
     auMinutes: number = 15
   ): WorkSession[] {
     const sorted = [...events].sort(
-      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      (a, b) => AttentionService.parseSafeEpochMs(a.timestamp) - AttentionService.parseSafeEpochMs(b.timestamp)
     );
 
     const sessions: WorkSession[] = [];
@@ -174,7 +198,7 @@ export class AttentionService {
         if (current) {
           const pauseElapsed = Math.max(
             0,
-            (new Date(ev.timestamp).getTime() - new Date(current.startedAt).getTime()) / 1000
+            (AttentionService.parseSafeEpochMs(ev.timestamp) - AttentionService.parseSafeEpochMs(current.startedAt)) / 1000
           );
           current.accumulatedSeconds += pauseElapsed;
         }
@@ -198,12 +222,23 @@ export class AttentionService {
         } else if (current) {
           const stopElapsed = Math.max(
             0,
-            (new Date(ev.timestamp).getTime() - new Date(current.startedAt).getTime()) / 1000
+            (AttentionService.parseSafeEpochMs(ev.timestamp) - AttentionService.parseSafeEpochMs(current.startedAt)) / 1000
           );
           durationSeconds = current.accumulatedSeconds + stopElapsed;
         }
 
-        const startedAt = current ? current.event.timestamp : ev.timestamp;
+        const startedAt =
+          typeof ev.metadata?.startedAt === 'string' && ev.metadata.startedAt
+            ? ev.metadata.startedAt
+            : current
+            ? current.event.timestamp
+            : ev.timestamp;
+
+        const stoppedAt =
+          typeof ev.metadata?.stoppedAt === 'string' && ev.metadata.stoppedAt
+            ? ev.metadata.stoppedAt
+            : ev.timestamp;
+
         const au = AttentionService.durationSecondsToAU(durationSeconds, auMinutes);
 
         sessions.push({
@@ -212,7 +247,7 @@ export class AttentionService {
           projectId: ev.projectId || current?.event.projectId,
           taskText: ev.entityText || current?.event.entityText,
           startedAt,
-          stoppedAt: ev.timestamp,
+          stoppedAt,
           durationSeconds: Math.round(durationSeconds),
           au,
         });
@@ -282,15 +317,15 @@ export class AttentionService {
     let calendarSpanDays: number | undefined;
 
     const startTime = taskDetails?.createdAt
-      ? new Date(taskDetails.createdAt).getTime()
+      ? AttentionService.parseSafeEpochMs(taskDetails.createdAt)
       : firstWorkedAt
-      ? new Date(firstWorkedAt).getTime()
+      ? AttentionService.parseSafeEpochMs(firstWorkedAt)
       : undefined;
 
     const endTime = taskDetails?.completedAt
-      ? new Date(taskDetails.completedAt).getTime()
+      ? AttentionService.parseSafeEpochMs(taskDetails.completedAt)
       : lastWorkedAt
-      ? new Date(lastWorkedAt).getTime()
+      ? AttentionService.parseSafeEpochMs(lastWorkedAt)
       : undefined;
 
     if (startTime && endTime && endTime >= startTime) {

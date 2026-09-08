@@ -1087,13 +1087,19 @@ describe('Graphdule Domain Invariants and Services', () => {
     });
   });
 
-  describe('Parent Completion Cascade & Default Today Date Invariants', () => {
-    it('defaults new node due date to today if omitted or empty', () => {
+  describe('Parent Completion Cascade & Default Empty Date Invariants', () => {
+    it('defaults new node due date to empty string if omitted or empty to require explicit deadline', () => {
       const node1 = ProjectService.createNode('proj_1', 'Task without date');
-      expect(node1.dueDate).toBe(getTodayString());
+      expect(node1.dueDate).toBe('');
 
       const node2 = ProjectService.createNode('proj_1', 'Task with empty string date', '');
-      expect(node2.dueDate).toBe(getTodayString());
+      expect(node2.dueDate).toBe('');
+
+      const task1 = MyDayService.createStandaloneTask('Standalone without date');
+      expect(task1.dueDate).toBe('');
+
+      const task2 = MyDayService.createStandaloneTask('Standalone with empty string date', '');
+      expect(task2.dueDate).toBe('');
     });
 
     it('cascades completion to parent node when all child subtasks are completed', () => {

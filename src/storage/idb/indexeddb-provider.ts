@@ -195,6 +195,21 @@ export class IndexedDBProvider implements IStorageProvider {
     await tx.done;
   }
 
+  public async deleteActivityEvents(eventIds: string[]): Promise<void> {
+    if (eventIds.length === 0) return;
+    const db = await this.getDB();
+    const tx = db.transaction('activity_log', 'readwrite');
+    for (const id of eventIds) {
+      await tx.store.delete(id);
+    }
+    await tx.done;
+  }
+
+  public async updateActivityEvent(event: ActivityEvent): Promise<void> {
+    const db = await this.getDB();
+    await db.put('activity_log', event);
+  }
+
   public async clearActivityLog(): Promise<void> {
     const db = await this.getDB();
     await db.clear('activity_log');

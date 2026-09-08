@@ -49,6 +49,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
     updateTaskEstimate,
     activeWorkSession,
     activeWorkElapsedSeconds,
+    openWorkSessionsModal,
   } = useApp();
   const {
     node,
@@ -525,9 +526,16 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
                         taskText={node.text}
                         projectId={node.projectId}
                       />
-                      <span className="text-[10px] font-mono font-semibold text-amber-600 dark:text-amber-300">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openWorkSessionsModal(node.id);
+                        }}
+                        className="text-[10px] font-mono font-semibold text-amber-600 dark:text-amber-300 hover:underline cursor-pointer transition-opacity"
+                        title="Click to view and edit recorded work sessions for this task"
+                      >
                         Active: {AttentionService.formatAU(trackedAU, preferences.attentionUnitMinutes)}
-                      </span>
+                      </button>
                     </div>
 
                     {/* Row 2: Estimate Stepper */}
@@ -589,10 +597,17 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
                     {trackedAU > 0 && (
                       <div className="pt-1.5 border-t border-slate-200/60 dark:border-slate-800/80 flex flex-col gap-1">
                         <div className="flex items-center justify-between text-[10px] font-mono">
-                          <span className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-300 font-semibold">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openWorkSessionsModal(node.id);
+                            }}
+                            className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-300 font-semibold hover:underline cursor-pointer transition-opacity"
+                            title="Click to view and edit recorded work sessions for this task"
+                          >
                             <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
                             <span>Active: {AttentionService.formatAU(trackedAU, preferences.attentionUnitMinutes)}</span>
-                          </span>
+                          </button>
                           {node.estimatedAU && node.estimatedAU > 0 ? (
                             <span className="text-slate-500 dark:text-slate-400 font-medium">
                               {Math.round((trackedAU / node.estimatedAU) * 100)}%
@@ -632,12 +647,16 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
                     setIsCalendarOpen((prev) => !prev);
                   }}
                   onMouseDown={(e) => e.stopPropagation()}
-                  className="flex items-center space-x-1.5 px-2 py-0.5 -mx-1 rounded-md text-slate-600 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-colors cursor-pointer group/date"
-                  title="Click to open calendar and set due date"
+                  className={`flex items-center space-x-1.5 px-2 py-0.5 -mx-1 rounded-md transition-colors cursor-pointer group/date ${
+                    !node.dueDate
+                      ? 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-dashed border-amber-300 dark:border-amber-700 animate-pulse'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-800/80'
+                  }`}
+                  title={!node.dueDate ? 'Select due date (required)' : 'Click to open calendar and set due date'}
                 >
-                  <Calendar className="w-3.5 h-3.5 text-slate-400 group-hover/date:text-emerald-500 transition-colors shrink-0" />
+                  <Calendar className={`w-3.5 h-3.5 shrink-0 transition-colors ${!node.dueDate ? 'text-amber-500' : 'text-slate-400 group-hover/date:text-emerald-500'}`} />
                   <span className="font-mono text-[10px] font-medium">
-                    {formatDateDisplay(node.dueDate)}
+                    {node.dueDate ? formatDateDisplay(node.dueDate) : 'Pick date'}
                   </span>
                 </button>
 
@@ -920,9 +939,16 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
                   taskText={node.text}
                   projectId={node.projectId}
                 />
-                <span className="text-[10px] font-mono font-semibold text-amber-600 dark:text-amber-300">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openWorkSessionsModal(node.id);
+                  }}
+                  className="text-[10px] font-mono font-semibold text-amber-600 dark:text-amber-300 hover:underline cursor-pointer transition-opacity"
+                  title="Click to view and edit recorded work sessions for this task"
+                >
                   Active: {AttentionService.formatAU(trackedAU, preferences.attentionUnitMinutes)}
-                </span>
+                </button>
               </div>
 
               {/* Row 2: Estimate Stepper */}
@@ -985,10 +1011,17 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
               {trackedAU > 0 && (
                 <div className="pt-1.5 border-t border-slate-200/60 dark:border-slate-800/80 flex flex-col gap-1">
                   <div className="flex items-center justify-between text-[10px] font-mono">
-                    <span className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-300 font-semibold">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openWorkSessionsModal(node.id);
+                      }}
+                      className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-300 font-semibold hover:underline cursor-pointer transition-opacity"
+                      title="Click to view and edit recorded work sessions for this task"
+                    >
                       <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
                       <span>Active: {AttentionService.formatAU(trackedAU, preferences.attentionUnitMinutes)}</span>
-                    </span>
+                    </button>
                     {node.estimatedAU && node.estimatedAU > 0 ? (
                       <span className="text-slate-500 dark:text-slate-400 font-medium">
                         {Math.round((trackedAU / node.estimatedAU) * 100)}%
@@ -1028,12 +1061,16 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
               setIsCalendarOpen((prev) => !prev);
             }}
             onMouseDown={(e) => e.stopPropagation()}
-            className="flex items-center space-x-1.5 px-2 py-0.5 -mx-1 rounded-md text-slate-600 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-colors cursor-pointer group/date"
-            title="Click to open calendar and set due date"
+            className={`flex items-center space-x-1.5 px-2 py-0.5 -mx-1 rounded-md transition-colors cursor-pointer group/date ${
+              !node.dueDate
+                ? 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-dashed border-amber-300 dark:border-amber-700 animate-pulse'
+                : 'text-slate-600 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-800/80'
+            }`}
+            title={!node.dueDate ? 'Select due date (required)' : 'Click to open calendar and set due date'}
           >
-            <Calendar className="w-3.5 h-3.5 text-slate-400 group-hover/date:text-emerald-500 transition-colors shrink-0" />
+            <Calendar className={`w-3.5 h-3.5 shrink-0 transition-colors ${!node.dueDate ? 'text-amber-500' : 'text-slate-400 group-hover/date:text-emerald-500'}`} />
             <span className="font-mono text-[10px] font-medium">
-              {formatDateDisplay(node.dueDate)}
+              {node.dueDate ? formatDateDisplay(node.dueDate) : 'Pick date'}
             </span>
           </button>
 

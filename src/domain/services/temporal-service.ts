@@ -9,6 +9,9 @@ export class TemporalService {
     fromNode: Node,
     toNode: Node
   ): { isValid: boolean; error?: string } {
+    if (!fromNode.dueDate || !toNode.dueDate) {
+      return { isValid: true };
+    }
     if (isAfter(fromNode.dueDate, toNode.dueDate)) {
       return {
         isValid: false,
@@ -34,7 +37,8 @@ export class TemporalService {
     if (!targetNode) return null;
 
     const oldDueDate = targetNode.dueDate;
-    const shiftDays = daysBetween(oldDueDate, newDueDate);
+    if (!newDueDate) return null;
+    const shiftDays = oldDueDate && newDueDate ? daysBetween(oldDueDate, newDueDate) : 0;
 
     // If no change or moving earlier, check if targetNode is now earlier than its predecessors or affects successors
     const affectedSuccessors: CascadeImpactPreview['affectedSuccessors'] = [];
@@ -58,6 +62,7 @@ export class TemporalService {
         if (!succNode) continue;
 
         const currentSuccDate = simulatedDates.get(succNode.id) || succNode.dueDate;
+        if (!currentDate || !currentSuccDate) continue;
 
         // If predecessor date is after successor date, we have a chronological conflict
         if (isAfter(currentDate, currentSuccDate)) {
@@ -154,11 +159,21 @@ export class TemporalService {
       };
     }
 
-    const descendantDueDates = descendants.map((d) => d.dueDate);
+    const descendantDueDates = descendants.map((d) => d.dueDate).filter(Boolean);
+    if (descendantDueDates.length === 0) {
+      return {
+        nodeId: node.id,
+        explicitDueDate: node.dueDate,
+        derivedStartDate: node.dueDate,
+        derivedDurationDays: 1,
+        isDerived: false,
+      };
+    }
+
     const earliestStart = minDate(descendantDueDates);
     const latestDue = maxDate(descendantDueDates);
-    const effectiveDue = isAfter(latestDue, node.dueDate) ? latestDue : node.dueDate;
-    const durationDays = Math.max(1, daysBetween(earliestStart, effectiveDue));
+    const effectiveDue = isAfter(latestDue, node.dueDate) ? latestDue : (node.dueDate || latestDue);
+    const durationDays = earliestStart && effectiveDue ? Math.max(1, daysBetween(earliestStart, effectiveDue)) : 1;
 
     return {
       nodeId: node.id,
@@ -186,7 +201,10 @@ export class TemporalService {
         const directChildren = currentNodes.filter((n) => n.parentNodeId === node.id);
         if (directChildren.length === 0) return node;
 
-        const maxChildDueDate = maxDate(directChildren.map((c) => c.dueDate));
+        const childDates = directChildren.map((c) => c.dueDate).filter(Boolean);
+        if (childDates.length === 0) return node;
+
+        const maxChildDueDate = maxDate(childDates);
         if (maxChildDueDate && maxChildDueDate !== node.dueDate) {
           changed = true;
           return {

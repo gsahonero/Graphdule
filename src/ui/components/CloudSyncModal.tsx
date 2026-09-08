@@ -867,14 +867,14 @@ export const CloudSyncModal: React.FC = () => {
         </div>
 
         {/* Modal Footer */}
-        <div className="p-4 px-6 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/50 flex items-center justify-between text-[11px] text-slate-500">
+        <div className="p-3.5 sm:p-4 sm:px-6 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[11px] text-slate-500">
           <div className="flex items-center space-x-1.5 text-emerald-600 dark:text-emerald-400">
-            <ShieldCheck className="w-4 h-4" />
-            <span>Zero-Lock-In & Local-First: Your data is always saved locally on your device.</span>
+            <ShieldCheck className="w-4 h-4 shrink-0" />
+            <span>Zero-Lock-In & Local-First: Saved locally on your device.</span>
           </div>
           <button
             onClick={() => setIsSyncModalOpen(false)}
-            className="px-4 py-1.5 rounded-xl bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium transition-colors cursor-pointer"
+            className="w-full sm:w-auto px-4 py-2 sm:py-1.5 rounded-xl bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium transition-colors cursor-pointer text-center"
           >
             Close
           </button>

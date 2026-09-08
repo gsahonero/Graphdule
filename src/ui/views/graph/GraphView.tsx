@@ -24,7 +24,7 @@ import { GraphNode, GraphNodeData } from './GraphNode';
 import { getLayoutedElements, isValidCoordinate, NODE_WIDTH, NODE_HEIGHT, COMPACT_NODE_SIZE } from './layout';
 import { Node, NodeStatus } from '../../../domain/models/types';
 import { ProjectService } from '../../../domain/services/project-service';
-import { getTodayString, addDays } from '../../../domain/utils/date';
+import { addDays } from '../../../domain/utils/date';
 import {
   Plus,
   Workflow,
@@ -953,7 +953,7 @@ const GraphCanvas: React.FC = () => {
 
   // Direct In-Canvas Node Creation (Toolbar button)
   const handleQuickAddNode = async () => {
-    const defaultDueDate = getTodayString();
+    const defaultDueDate = '';
     const parentId = currentParentNode ? currentParentNode.id : null;
     const lastNode = scopedNodes[scopedNodes.length - 1];
     let newPos = { x: 100, y: 150 };
@@ -982,7 +982,7 @@ const GraphCanvas: React.FC = () => {
     });
     const posX = isValidCoordinate(position.x) ? Math.round(position.x - 130) : 100;
     const posY = isValidCoordinate(position.y) ? Math.round(position.y - 70) : 150;
-    const defaultDueDate = getTodayString();
+    const defaultDueDate = '';
     const parentId = currentParentNode ? currentParentNode.id : null;
 
     const newNode = await addNode('New Task', defaultDueDate, parentId, { x: posX, y: posY });
@@ -1012,7 +1012,7 @@ const GraphCanvas: React.FC = () => {
       return {
         text,
         estimatedAU,
-        dueDate: addDays(decomposingNode.dueDate, -Math.max(1, (subtaskLines.length - i) * 2)),
+        dueDate: decomposingNode.dueDate ? addDays(decomposingNode.dueDate, -Math.max(1, (subtaskLines.length - i) * 2)) : '',
       };
     });
 

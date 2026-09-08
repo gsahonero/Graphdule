@@ -58,7 +58,7 @@ export const SyncStatusIndicator: React.FC = () => {
   return (
     <button
       onClick={() => setIsSyncModalOpen(true)}
-      className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-all cursor-pointer shadow-2xs ${
+      className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer shadow-2xs shrink-0 ${
         isSyncing
           ? 'bg-teal-500/10 text-teal-600 dark:text-teal-400 border-teal-500/30'
           : isError
@@ -73,13 +73,13 @@ export const SyncStatusIndicator: React.FC = () => {
     >
       {/* Icons */}
       {isSyncing ? (
-        <RefreshCw className="w-3.5 h-3.5 text-teal-500 animate-spin" />
+        <RefreshCw className="w-3.5 h-3.5 text-teal-500 animate-spin shrink-0" />
       ) : isError ? (
-        <AlertCircle className="w-3.5 h-3.5 text-rose-500" />
+        <AlertCircle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
       ) : isOffline ? (
-        <WifiOff className="w-3.5 h-3.5 text-amber-500" />
+        <WifiOff className="w-3.5 h-3.5 text-amber-500 shrink-0" />
       ) : (
-        <div className="flex items-center -space-x-1">
+        <div className="flex items-center -space-x-1 shrink-0">
           <Cloud className={`w-3.5 h-3.5 ${isCloudConnected ? 'text-teal-500' : 'text-slate-400'}`} />
           <CalendarDays className={`w-3 h-3 ${isCalendarConnected ? 'text-blue-500' : 'text-slate-400'}`} />
         </div>
@@ -95,7 +95,10 @@ export const SyncStatusIndicator: React.FC = () => {
 
       {/* Status Dot / Checkmark */}
       {isAnyConnected && !isSyncing && !isError && !isOffline && (
-        <CheckCircle2 className="w-3 h-3 text-teal-500 hidden sm:inline" />
+        <>
+          <CheckCircle2 className="w-3 h-3 text-teal-500 hidden sm:inline shrink-0" />
+          <span className="w-1.5 h-1.5 rounded-full bg-teal-500 sm:hidden shrink-0" />
+        </>
       )}
     </button>
   );

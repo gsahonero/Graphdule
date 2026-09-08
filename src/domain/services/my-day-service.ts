@@ -127,7 +127,7 @@ export class MyDayService {
     return {
       id: `task_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`,
       text,
-      dueDate: dueDate || getTodayString(),
+      dueDate: dueDate || '',
       status: 'planned',
       ...(recurrence ? { recurrence } : {}),
       ...(parentRecurringTaskId ? { parentRecurringTaskId } : {}),

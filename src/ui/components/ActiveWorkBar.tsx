@@ -16,7 +16,10 @@ export const ActiveWorkBar: React.FC = () => {
     setCurrentView,
     allActiveNodes,
     standaloneTasks,
+    openWorkSessionsModal,
   } = useApp();
+
+  const isRunaway = activeWorkElapsedSeconds > 7200; // > 2 hours continuous
 
   const activeTask = useMemo(() => {
     if (!activeWorkSession) return null;
@@ -65,7 +68,7 @@ export const ActiveWorkBar: React.FC = () => {
   return (
     <aside
       aria-label="Active focus work session"
-      className="fixed bottom-3 left-3 right-3 sm:left-auto sm:right-6 sm:bottom-6 z-50 flex items-center justify-between gap-2.5 sm:gap-3.5 px-3.5 sm:px-4 py-2 sm:py-2.5 bg-slate-900/95 dark:bg-slate-900/95 border border-amber-500/40 dark:border-amber-500/40 backdrop-blur-md rounded-2xl shadow-2xl shadow-amber-950/20 text-slate-100 sm:max-w-md md:max-w-lg lg:max-w-xl animate-in fade-in slide-in-from-bottom-3 duration-200 overflow-hidden"
+      className="fixed bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))] md:bottom-6 left-3 right-3 md:left-auto md:right-6 z-50 flex items-center justify-between gap-2.5 sm:gap-3.5 px-3.5 sm:px-4 py-2 sm:py-2.5 bg-slate-900/95 dark:bg-slate-900/95 border border-amber-500/40 dark:border-amber-500/40 backdrop-blur-md rounded-2xl shadow-2xl shadow-amber-950/20 text-slate-100 sm:max-w-md md:max-w-lg lg:max-w-xl animate-in fade-in slide-in-from-bottom-3 duration-200 overflow-hidden"
     >
       {/* Visual Attention Progress Track (at bottom edge of the bar) */}
       {clampedProgressWidth !== null && (
@@ -134,7 +137,11 @@ export const ActiveWorkBar: React.FC = () => {
             <span className="text-slate-600 shrink-0">•</span>
 
             {/* Timer & AU Badge */}
-            <div className="inline-flex items-center gap-1 font-mono text-slate-300 shrink-0">
+            <button
+              onClick={() => openWorkSessionsModal(activeWorkSession.taskId)}
+              className="inline-flex items-center gap-1 font-mono text-slate-300 shrink-0 hover:text-white hover:bg-slate-800/80 px-1.5 py-0.5 rounded transition-colors cursor-pointer"
+              title="Click to view and edit recorded work sessions for this task"
+            >
               <span className="font-semibold text-slate-200">
                 {formatTimer(activeWorkElapsedSeconds)}
               </span>
@@ -154,7 +161,15 @@ export const ActiveWorkBar: React.FC = () => {
                   {progressPercent}%
                 </span>
               )}
-            </div>
+              {isRunaway && (
+                <span
+                  className="ml-1 px-1 py-0.2 rounded text-[9px] font-semibold bg-rose-500/30 text-rose-300 border border-rose-500/40"
+                  title="Timer running > 2 hours. Click to manage or adjust."
+                >
+                  &gt;2h
+                </span>
+              )}
+            </button>
           </div>
         </div>
       </div>

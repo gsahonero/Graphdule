@@ -11,21 +11,26 @@ import { CascadeModal } from './ui/components/CascadeModal';
 import { OnboardingModal } from './ui/components/OnboardingModal';
 import { CloudSyncModal } from './ui/components/CloudSyncModal';
 import { ActiveWorkBar } from './ui/components/ActiveWorkBar';
+import { TaskWorkSessionsModal } from './ui/components/TaskWorkSessionsModal';
+import { BottomNav } from './ui/components/BottomNav';
 
 const AppContent: React.FC = () => {
   const { currentView } = useApp();
 
   return (
-    <div className="h-[100dvh] min-h-[100dvh] w-screen flex flex-col dark:bg-slate-950 dark:text-slate-100 bg-slate-100 text-slate-900 overflow-hidden select-none transition-colors duration-150 pb-[env(safe-area-inset-bottom,0px)]">
+    <div className="h-[100dvh] min-h-[100dvh] w-screen flex flex-col dark:bg-slate-950 dark:text-slate-100 bg-slate-100 text-slate-900 overflow-hidden select-none transition-colors duration-150">
       <Header />
       <StorageWarningBanner />
 
-      <main className="flex-1 flex overflow-hidden relative">
+      <main className="flex-1 flex overflow-hidden relative pb-14 md:pb-0">
         {currentView === 'projects' && <ProjectsView />}
         {currentView === 'project_detail' && <ProjectDetailView />}
         {currentView === 'my_day' && <MyDayView />}
         {currentView === 'attention_review' && <AttentionReviewView />}
       </main>
+
+      {/* Mobile Bottom Navigation (< md) */}
+      <BottomNav />
 
       {/* Global Modals, Drawers & Persistent Active Session Bar */}
       <ActiveWorkBar />
@@ -33,6 +38,7 @@ const AppContent: React.FC = () => {
       <CascadeModal />
       <OnboardingModal />
       <CloudSyncModal />
+      <TaskWorkSessionsModal />
     </div>
   );
 };

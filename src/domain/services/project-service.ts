@@ -85,7 +85,7 @@ export class ProjectService {
   public static createNode(
     projectId: string,
     text: string,
-    dueDate: string = getTodayString(),
+    dueDate: string = '',
     parentNodeId: string | null = null,
     position?: { x: number; y: number },
     estimatedAU?: number
@@ -96,7 +96,7 @@ export class ProjectService {
       projectId,
       parentNodeId: parentNodeId || null,
       text,
-      dueDate: dueDate || getTodayString(),
+      dueDate: dueDate || '',
       status: 'planned',
       position,
       estimatedAU,

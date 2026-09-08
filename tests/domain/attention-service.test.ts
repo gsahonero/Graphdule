@@ -649,4 +649,71 @@ describe('AttentionService - Attention Measurement System', () => {
       expect(updatedRoot?.status).toBe('in_progress');
     });
   });
+
+  describe('Universal Timezone-Safe Parsing & Session Duration Adjustments', () => {
+    it('reliably parses ISO dates with and without Z across environments', () => {
+      const withZ = '2026-09-08T00:12:00.000Z';
+      const parsedWithZ = AttentionService.parseSafeEpochMs(withZ);
+      expect(parsedWithZ).toBe(new Date(withZ).getTime());
+
+      // Without Z or offset: treated as UTC
+      const withoutZ = '2026-09-08T00:12:00';
+      const parsedWithoutZ = AttentionService.parseSafeEpochMs(withoutZ);
+      expect(parsedWithoutZ).toBe(new Date('2026-09-08T00:12:00Z').getTime());
+
+      // Number and Date inputs
+      const now = Date.now();
+      expect(AttentionService.parseSafeEpochMs(now)).toBe(now);
+      expect(AttentionService.parseSafeEpochMs(new Date(now))).toBe(now);
+
+      // Safe fallback for null/undefined/invalid
+      expect(AttentionService.parseSafeEpochMs(null)).toBe(0);
+      expect(AttentionService.parseSafeEpochMs(undefined)).toBe(0);
+      expect(AttentionService.parseSafeEpochMs('invalid')).toBe(0);
+    });
+
+    it('respects metadata.startedAt and metadata.stoppedAt and updated durationSeconds in WORK_STOPPED', () => {
+      const events: ActivityEvent[] = [
+        {
+          id: 'ev-stop-1',
+          timestamp: '2026-09-08T00:12:00.000Z',
+          type: 'WORK_STOPPED',
+          entityId: 'task-zoom',
+          entityText: 'Quotation for Zooms & Teams',
+          metadata: {
+            sessionId: 'sess_1',
+            startedAt: '2026-09-07T21:57:00.000Z',
+            stoppedAt: '2026-09-08T00:12:00.000Z',
+            durationSeconds: 8091, // ~8.99 AU
+          },
+        },
+      ];
+
+      const initialSessions = AttentionService.reconstructWorkSessions(events, 15);
+      expect(initialSessions.length).toBe(1);
+      expect(initialSessions[0].durationSeconds).toBe(8091);
+      expect(initialSessions[0].au).toBe(8.99);
+
+      // Simulate user editing the session duration to 20 minutes (1200 seconds = 1.33 AU)
+      const editedEvents: ActivityEvent[] = [
+        {
+          ...events[0],
+          metadata: {
+            ...events[0].metadata,
+            durationSeconds: 1200,
+            au: 1.33,
+          },
+        },
+      ];
+
+      const editedSessions = AttentionService.reconstructWorkSessions(editedEvents, 15);
+      expect(editedSessions.length).toBe(1);
+      expect(editedSessions[0].durationSeconds).toBe(1200);
+      expect(editedSessions[0].au).toBe(1.33);
+
+      // Simulate user deleting the session completely
+      const emptySessions = AttentionService.reconstructWorkSessions([], 15);
+      expect(emptySessions.length).toBe(0);
+    });
+  });
 });
