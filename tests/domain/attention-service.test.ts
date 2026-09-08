@@ -39,6 +39,14 @@ describe('AttentionService - Attention Measurement System', () => {
       expect(AttentionService.formatAU(1.0, 25)).toBe('1 AU (25m)');
       expect(AttentionService.formatAU(0.01, 15)).toBe('0.01 AU (9s)');
     });
+
+    it('strictly rounds AU to two decimal places in formatted labels', () => {
+      expect(AttentionService.formatAU(0.06666666666666667, 15)).toBe('0.07 AU (1m)');
+      expect(AttentionService.formatAU(0.07000000000000002, 15)).toBe('0.07 AU (1m)');
+      expect(AttentionService.formatAU(1.3333333333333333, 15)).toBe('1.33 AU (20m)');
+      expect(AttentionService.formatAU(2.5555555, 15)).toBe('2.56 AU (38m)');
+      expect(AttentionService.formatAU(0.004, 15)).toBe('0 AU');
+    });
   });
 
   describe('Event-Based Telemetry Session Reconstruction', () => {
@@ -47,7 +55,7 @@ describe('AttentionService - Attention Measurement System', () => {
         {
           id: 'ev1',
           timestamp: '2026-09-07T10:00:00.000Z',
-          type: 'WORK_STARTED',
+          type: 'work_started',
           entityId: 'task-1',
           entityText: 'Write compiler backend',
           projectId: 'proj-1',
@@ -55,7 +63,7 @@ describe('AttentionService - Attention Measurement System', () => {
         {
           id: 'ev2',
           timestamp: '2026-09-07T10:30:00.000Z',
-          type: 'WORK_STOPPED',
+          type: 'work_stopped',
           entityId: 'task-1',
           entityText: 'Write compiler backend',
           projectId: 'proj-1',
@@ -64,14 +72,14 @@ describe('AttentionService - Attention Measurement System', () => {
         {
           id: 'ev3',
           timestamp: '2026-09-07T11:00:00.000Z',
-          type: 'WORK_STARTED',
+          type: 'work_started',
           entityId: 'task-2',
           entityText: 'Fix memory leak',
         },
         {
           id: 'ev4',
           timestamp: '2026-09-07T11:15:00.000Z',
-          type: 'WORK_STOPPED',
+          type: 'work_stopped',
           entityId: 'task-2',
           entityText: 'Fix memory leak',
           metadata: { durationSeconds: 900 },
@@ -96,26 +104,26 @@ describe('AttentionService - Attention Measurement System', () => {
         {
           id: 'p1',
           timestamp: '2026-09-07T14:00:00.000Z',
-          type: 'WORK_STARTED',
+          type: 'work_started',
           entityId: 'task-pause',
           entityText: 'Review PR',
         },
         {
           id: 'p2',
           timestamp: '2026-09-07T14:15:00.000Z', // 15 min worked
-          type: 'WORK_PAUSED',
+          type: 'work_paused',
           entityId: 'task-pause',
         },
         {
           id: 'p3',
           timestamp: '2026-09-07T14:30:00.000Z', // 15 min paused (idle)
-          type: 'WORK_RESUMED',
+          type: 'work_resumed',
           entityId: 'task-pause',
         },
         {
           id: 'p4',
           timestamp: '2026-09-07T14:45:00.000Z', // 15 min worked
-          type: 'WORK_STOPPED',
+          type: 'work_stopped',
           entityId: 'task-pause',
           metadata: { durationSeconds: 1800 }, // Total 30 min worked
         },
@@ -157,13 +165,13 @@ describe('AttentionService - Attention Measurement System', () => {
         {
           id: 'ev-start',
           timestamp: '2026-09-07T12:00:00.000Z',
-          type: 'WORK_STARTED',
+          type: 'work_started',
           entityId: 'task-long-span',
         },
         {
           id: 'ev-stop',
           timestamp: '2026-09-07T12:15:00.000Z',
-          type: 'WORK_STOPPED',
+          type: 'work_stopped',
           entityId: 'task-long-span',
           metadata: { durationSeconds: 900 },
         },
@@ -245,14 +253,14 @@ describe('AttentionService - Attention Measurement System', () => {
         {
           id: 'e1',
           timestamp: '2026-09-02T10:00:00.000Z',
-          type: 'WORK_STARTED',
+          type: 'work_started',
           entityId: 'task-a1',
           projectId: 'proj-alpha',
         },
         {
           id: 'e2',
           timestamp: '2026-09-02T11:00:00.000Z',
-          type: 'WORK_STOPPED',
+          type: 'work_stopped',
           entityId: 'task-a1',
           projectId: 'proj-alpha',
           metadata: { durationSeconds: 3600 }, // 4 AU (60 min)
@@ -289,14 +297,14 @@ describe('AttentionService - Attention Measurement System', () => {
         {
           id: 'd1',
           timestamp: '2026-09-02T08:00:00.000Z',
-          type: 'TASK_DEFERRED',
+          type: 'date_moved',
           entityId: 'task-postponed',
           entityText: 'Write tax report',
         },
         {
           id: 'd2',
           timestamp: '2026-09-04T08:00:00.000Z',
-          type: 'TASK_DEFERRED',
+          type: 'date_moved',
           entityId: 'task-postponed',
           entityText: 'Write tax report',
         },
@@ -304,14 +312,14 @@ describe('AttentionService - Attention Measurement System', () => {
         {
           id: 'w1',
           timestamp: '2026-09-03T10:00:00.000Z',
-          type: 'WORK_STARTED',
+          type: 'work_started',
           entityId: 'task-other',
           entityText: 'Build UI widgets',
         },
         {
           id: 'w2',
           timestamp: '2026-09-03T11:30:00.000Z',
-          type: 'WORK_STOPPED',
+          type: 'work_stopped',
           entityId: 'task-other',
           entityText: 'Build UI widgets',
           metadata: { durationSeconds: 5400 }, // 6 AU
@@ -677,7 +685,7 @@ describe('AttentionService - Attention Measurement System', () => {
         {
           id: 'ev-stop-1',
           timestamp: '2026-09-08T00:12:00.000Z',
-          type: 'WORK_STOPPED',
+          type: 'work_stopped',
           entityId: 'task-zoom',
           entityText: 'Quotation for Zooms & Teams',
           metadata: {

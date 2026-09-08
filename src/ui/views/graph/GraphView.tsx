@@ -183,12 +183,17 @@ const GraphCanvas: React.FC = () => {
 
   const { project, nodes, edges, notes } = activeProjectDoc;
 
+  // Reconcile hierarchy presentation status efficiently for all nodes
+  const presentationNodes = useMemo(() => {
+    return ProjectService.resolveDocumentPresentationNodes(nodes);
+  }, [nodes]);
+
   // Scoped nodes for current hierarchy level (Root level has parentNodeId === null)
   const scopedNodes = useMemo(() => {
-    return nodes.filter(
+    return presentationNodes.filter(
       (n) => n.parentNodeId === (currentParentNode ? currentParentNode.id : null)
     );
-  }, [nodes, currentParentNode]);
+  }, [presentationNodes, currentParentNode]);
 
   // Scoped edges where both endpoints belong to current hierarchy level
   const scopedEdges = useMemo(() => {
@@ -1039,13 +1044,13 @@ const GraphCanvas: React.FC = () => {
   // Enhance RFNodes with current data handlers
   const decoratedNodes = useMemo(() => {
     return rfNodes.map((rfNode): RFNode => {
-      const nodeObj = nodes.find((n) => n.id === rfNode.id);
+      const nodeObj = presentationNodes.find((n) => n.id === rfNode.id);
       if (!nodeObj) return rfNode;
 
       const isEGN = nodeObj.id === project.endGoalNodeId;
       const nodeNotesCount = notes.filter((note) => note.nodeId === nodeObj.id).length;
-      const subtaskCount = nodes.filter((n) => n.parentNodeId === nodeObj.id).length;
-      const hasInProgressChild = nodes.some((n) => n.parentNodeId === nodeObj.id && n.status === 'in_progress');
+      const subtaskCount = presentationNodes.filter((n) => n.parentNodeId === nodeObj.id).length;
+      const hasInProgressChild = presentationNodes.some((n) => n.parentNodeId === nodeObj.id && n.status === 'in_progress');
 
       const nodeData: GraphNodeData = {
         node: nodeObj,
@@ -1098,7 +1103,7 @@ const GraphCanvas: React.FC = () => {
     });
   }, [
     rfNodes,
-    nodes,
+    presentationNodes,
     project.endGoalNodeId,
     notes,
     viewDensity,

@@ -149,41 +149,29 @@ export interface IdeaSeed {
   readonly updatedAt: string;
 }
 
-export type ActivityEventType =
-  | 'task_created'
-  | 'status_changed'
-  | 'task_completed'
-  | 'date_moved'
-  | 'attention_promoted'
-  | 'attention_demoted'
-  | 'project_parked'
-  | 'project_unparked'
-  | 'WORK_STARTED'
-  | 'work_started'
-  | 'WORK_STOPPED'
-  | 'work_stopped'
-  | 'WORK_PAUSED'
-  | 'work_paused'
-  | 'WORK_RESUMED'
-  | 'work_resumed'
-  | 'TASK_CREATED'
-  | 'TASK_COMPLETED'
-  | 'TASK_DEFERRED'
-  | 'task_deferred'
-  | 'TASK_ABANDONED'
-  | 'task_abandoned'
-  | 'ESTIMATE_CHANGED'
-  | 'estimate_changed'
-  | 'DEADLINE_CHANGED'
-  | 'deadline_changed'
-  | 'ATTENTION_SYSTEM_TOGGLED'
-  | 'attention_system_toggled'
-  | 'WEEKLY_GOAL_SET'
-  | 'weekly_goal_set'
-  | 'WEEKLY_REVIEW_TRIGGERED'
-  | 'weekly_review_triggered'
-  | 'NODE_NESTED'
-  | 'node_nested';
+export const ACTIVITY_EVENT_TYPES = [
+  'task_created',
+  'status_changed',
+  'task_completed',
+  'task_abandoned',
+  'date_moved',
+  'estimate_changed',
+  'node_nested',
+  'attention_promoted',
+  'attention_demoted',
+  'attention_system_toggled',
+  'project_parked',
+  'project_unparked',
+  'work_started',
+  'work_stopped',
+  'work_paused',
+  'work_resumed',
+  'weekly_goal_set',
+  'weekly_review_triggered',
+] as const;
+
+export type ActivityEventType = (typeof ACTIVITY_EVENT_TYPES)[number];
+
 
 export interface ActivityEvent {
   readonly id: string;

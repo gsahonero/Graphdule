@@ -1,5 +1,5 @@
 import { ActivityEvent, ActivityEventType } from '../models/types';
-import { ActivityEventSchema } from '../models/schema';
+import { ActivityEventSchema, normalizeEventType } from '../models/schema';
 
 export interface ActivityPatternMetrics {
   totalEvents: number;
@@ -43,7 +43,7 @@ export class ActivityLogService {
    * Factory to create an ActivityEvent with a valid ISO timestamp and UUID
    */
   static createEvent(
-    type: ActivityEventType,
+    type: ActivityEventType | string,
     entityIdOrOptions:
       | string
       | {
@@ -102,10 +102,12 @@ export class ActivityLogService {
       entityId = entityIdOrOptions;
     }
 
+    const normalizedType = normalizeEventType(type);
+
     const raw: ActivityEvent = {
       id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `act_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
       timestamp: new Date().toISOString(),
-      type,
+      type: normalizedType,
       entityId,
       entityText,
       projectId,
@@ -121,13 +123,89 @@ export class ActivityLogService {
   }
 
   /**
+   * Normalizes an activity event's type to canonical ActivityEventType.
+   */
+  static normalizeEvent(event: ActivityEvent): ActivityEvent {
+    const normalizedType = normalizeEventType(event.type);
+    if (event.type === normalizedType) return event;
+    return {
+      ...event,
+      type: normalizedType,
+    };
+  }
+
+  /**
+   * Removes duplicate events from an activity log:
+   * - Eliminates events with identical IDs
+   * - Collapses redundant near-simultaneous emissions (same entityId, same normalized type within 2000ms),
+   *   merging complementary metadata.
+   */
+  static deduplicateEvents(events: readonly ActivityEvent[]): ActivityEvent[] {
+    if (!events || events.length === 0) return [];
+
+    // Step 1: Normalize all events and remove exact ID duplicates
+    const seenIds = new Set<string>();
+    const normalized: ActivityEvent[] = [];
+    for (const raw of events) {
+      if (!raw || !raw.id) continue;
+      if (seenIds.has(raw.id)) continue;
+      seenIds.add(raw.id);
+      normalized.push(ActivityLogService.normalizeEvent(raw));
+    }
+
+    // Step 2: Sort chronologically
+    normalized.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+    // Step 3: Collapse near-simultaneous duplicate event emissions for the same entity and type
+    const result: ActivityEvent[] = [];
+    for (const ev of normalized) {
+      const evTime = new Date(ev.timestamp).getTime();
+      const prev = result.length > 0 ? result[result.length - 1] : undefined;
+      const isDifferentSession =
+        Boolean(prev?.metadata?.sessionId &&
+        ev.metadata?.sessionId &&
+        prev.metadata.sessionId !== ev.metadata.sessionId);
+
+      if (
+        prev &&
+        prev.entityId === ev.entityId &&
+        prev.type === ev.type &&
+        !isDifferentSession &&
+        Math.abs(evTime - new Date(prev.timestamp).getTime()) <= 2000
+      ) {
+        // Merge metadata and richer fields into the existing event
+        result[result.length - 1] = {
+          ...prev,
+          entityText: prev.entityText || ev.entityText,
+          projectId: prev.projectId || ev.projectId,
+          projectName: prev.projectName || ev.projectName,
+          fromStatus: prev.fromStatus || ev.fromStatus,
+          toStatus: prev.toStatus || ev.toStatus,
+          oldDueDate: prev.oldDueDate || ev.oldDueDate,
+          newDueDate: prev.newDueDate || ev.newDueDate,
+          metadata:
+            prev.metadata || ev.metadata
+              ? { ...(ev.metadata || {}), ...(prev.metadata || {}) }
+              : undefined,
+        };
+      } else {
+        result.push(ev);
+      }
+    }
+
+    return result;
+  }
+
+  /**
    * Computes productivity patterns and formats an LLM-ready prompt
    */
   static generatePatternAnalysis(
     events: readonly ActivityEvent[],
     daysBack?: number
   ): LLMPatternAnalysisPayload {
-    let filteredEvents = [...events];
+    const cleanEvents = ActivityLogService.deduplicateEvents(events);
+    let filteredEvents = [...cleanEvents];
+
     if (daysBack !== undefined && daysBack > 0) {
       const cutoff = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
       filteredEvents = filteredEvents.filter((e) => e.timestamp >= cutoff);

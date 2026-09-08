@@ -133,7 +133,7 @@ export const MyDayView: React.FC = () => {
     );
     const map = new Map<string, number>();
     for (const s of sessions) {
-      map.set(s.taskId, (map.get(s.taskId) || 0) + s.au);
+      map.set(s.taskId, Math.round(((map.get(s.taskId) || 0) + s.au) * 100) / 100);
     }
     return map;
   }, [activityLog, preferences.attentionSystemEnabled, preferences.attentionUnitMinutes]);
@@ -171,7 +171,7 @@ export const MyDayView: React.FC = () => {
             className="px-2 py-0.5 rounded-lg font-mono font-semibold text-[11px] bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 whitespace-nowrap hover:bg-indigo-100 dark:hover:bg-indigo-900/60 cursor-pointer transition-colors"
             title={`Tracked attention: ${AttentionService.formatAU(trackedAU, preferences.attentionUnitMinutes)} - Click to inspect or edit work sessions`}
           >
-            Active: {trackedAU} AU
+            Active: {Math.round(trackedAU * 100) / 100} AU
           </button>
         )}
       </div>

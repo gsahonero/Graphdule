@@ -328,7 +328,7 @@ export const AttentionReviewView: React.FC = () => {
             {activeReviewData.plannedAU ? (
               <div className="mt-3">
                 <div className="flex justify-between text-[11px] text-slate-400 mb-1">
-                  <span>Planned: {activeReviewData.plannedAU} AU</span>
+                  <span>Planned: {Math.round(activeReviewData.plannedAU * 100) / 100} AU</span>
                   <span>
                     {Math.round((activeReviewData.trackedAU / activeReviewData.plannedAU) * 100)}%
                   </span>
@@ -438,7 +438,7 @@ export const AttentionReviewView: React.FC = () => {
                         )}
                       </div>
                       <div className="flex items-center gap-2 font-mono">
-                        <span className="text-slate-200 font-semibold">{p.au} AU</span>
+                        <span className="text-slate-200 font-semibold">{Math.round(p.au * 100) / 100} AU</span>
                         <span className="text-slate-500">({p.percentage}%)</span>
                       </div>
                     </div>
@@ -461,7 +461,7 @@ export const AttentionReviewView: React.FC = () => {
                       <span className="font-medium text-slate-300">Standalone Tasks</span>
                       <div className="flex items-center gap-2 font-mono">
                         <span className="text-slate-200 font-semibold">
-                          {activeReviewData.standaloneAllocations.au} AU
+                          {Math.round(activeReviewData.standaloneAllocations.au * 100) / 100} AU
                         </span>
                         <span className="text-slate-500">
                           ({activeReviewData.standaloneAllocations.percentage}%)
@@ -514,7 +514,7 @@ export const AttentionReviewView: React.FC = () => {
                       </div>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0 font-mono">
-                      <span className="text-amber-400 font-semibold">{t.au} AU</span>
+                      <span className="text-amber-400 font-semibold">{Math.round(t.au * 100) / 100} AU</span>
                       <span className="text-slate-500 text-[11px]">({t.sessions} sess)</span>
                     </div>
                   </div>
@@ -627,7 +627,7 @@ export const AttentionReviewView: React.FC = () => {
                       </button>
                     </div>
                     <div className="text-[11px] text-slate-400 mt-1 font-mono">
-                      <span>{rev.data.trackedAU} AU tracked</span> •{' '}
+                      <span>{Math.round(rev.data.trackedAU * 100) / 100} AU tracked</span> •{' '}
                       <span>{rev.data.sessionCount} sessions</span>
                     </div>
                     {rev.userNotes && (

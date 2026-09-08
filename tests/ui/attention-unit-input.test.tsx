@@ -102,4 +102,43 @@ describe('AttentionUnitInput - Arbitrary AU numeric entry and live minutes', () 
     fireEvent.click(doneBtn);
     expect(onOpenChangeMock).toHaveBeenCalledWith(false);
   });
+
+  it('rounds floating-point values to 2 decimal places for display and commit', () => {
+    // Value with float leakage (e.g. 1.3333333333333333) should display as 1.33 AU
+    render(<AttentionUnitInput value={1.3333333333333333} onChange={onChangeMock} auMinutes={15} />);
+    expect(screen.getByText('1.33 AU')).toBeDefined();
+
+    // Opening and submitting 2.55555 should commit 2.56
+    fireEvent.click(screen.getByText('1.33 AU'));
+    const numInput = screen.getByPlaceholderText('0') as HTMLInputElement;
+    fireEvent.change(numInput, { target: { value: '2.55555' } });
+    const doneBtn = screen.getByRole('button', { name: 'Done' });
+    fireEvent.click(doneBtn);
+    expect(onChangeMock).toHaveBeenCalledWith(2.56);
+  });
+
+  it('stops double click propagation so parent card double click is never triggered', () => {
+    const onCardDoubleClick = vi.fn();
+
+    render(
+      <div onDoubleClick={onCardDoubleClick}>
+        <AttentionUnitInput value={1} onChange={onChangeMock} auMinutes={15} />
+      </div>
+    );
+
+    // Find the increase AU button (+0.5 AU)
+    const increaseBtn = screen.getByTitle('Increase by 0.5 AU');
+    expect(increaseBtn).toBeDefined();
+
+    // Double click the increase button
+    fireEvent.doubleClick(increaseBtn);
+
+    // Parent card onDoubleClick should NOT have been called
+    expect(onCardDoubleClick).not.toHaveBeenCalled();
+
+    // Double click the trigger badge
+    const badge = screen.getByText('1 AU');
+    fireEvent.doubleClick(badge);
+    expect(onCardDoubleClick).not.toHaveBeenCalled();
+  });
 });

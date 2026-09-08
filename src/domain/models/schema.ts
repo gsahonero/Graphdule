@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ACTIVITY_EVENT_TYPES, ActivityEventType } from './types';
 
 export const NodeStatusSchema = z.enum(['planned', 'in_progress', 'completed', 'abandoned']);
 export const ProjectStatusSchema = z.enum(['active', 'parked', 'archived', 'completed', 'abandoned']);
@@ -175,40 +176,67 @@ export const IdeaSeedSchema = z.object({
   updatedAt: z.string(),
 }).passthrough();
 
-export const ActivityEventTypeSchema = z.enum([
-  'task_created',
-  'status_changed',
-  'task_completed',
-  'date_moved',
-  'attention_promoted',
-  'attention_demoted',
-  'project_parked',
-  'project_unparked',
-  'WORK_STARTED',
-  'work_started',
-  'WORK_STOPPED',
-  'work_stopped',
-  'WORK_PAUSED',
-  'work_paused',
-  'WORK_RESUMED',
-  'work_resumed',
-  'TASK_CREATED',
-  'TASK_COMPLETED',
-  'TASK_DEFERRED',
-  'task_deferred',
-  'TASK_ABANDONED',
-  'task_abandoned',
-  'ESTIMATE_CHANGED',
-  'estimate_changed',
-  'DEADLINE_CHANGED',
-  'deadline_changed',
-  'ATTENTION_SYSTEM_TOGGLED',
-  'attention_system_toggled',
-  'WEEKLY_GOAL_SET',
-  'weekly_goal_set',
-  'WEEKLY_REVIEW_TRIGGERED',
-  'weekly_review_triggered',
-]);
+/**
+ * Normalizes any activity event type string to its canonical ActivityEventType.
+ * - Converts casing to lowercase snake_case
+ * - Normalizes aliases (e.g. TASK_DEFERRED, DEADLINE_CHANGED -> date_moved)
+ */
+export function normalizeEventType(raw: string): ActivityEventType {
+  if (typeof raw !== 'string') {
+    return 'status_changed';
+  }
+  const clean = raw.trim().toLowerCase();
+  switch (clean) {
+    case 'task_created':
+      return 'task_created';
+    case 'status_changed':
+      return 'status_changed';
+    case 'task_completed':
+      return 'task_completed';
+    case 'task_abandoned':
+      return 'task_abandoned';
+    case 'date_moved':
+    case 'task_deferred':
+    case 'deadline_changed':
+      return 'date_moved';
+    case 'estimate_changed':
+      return 'estimate_changed';
+    case 'node_nested':
+      return 'node_nested';
+    case 'attention_promoted':
+      return 'attention_promoted';
+    case 'attention_demoted':
+      return 'attention_demoted';
+    case 'attention_system_toggled':
+      return 'attention_system_toggled';
+    case 'project_parked':
+      return 'project_parked';
+    case 'project_unparked':
+      return 'project_unparked';
+    case 'work_started':
+      return 'work_started';
+    case 'work_stopped':
+      return 'work_stopped';
+    case 'work_paused':
+      return 'work_paused';
+    case 'work_resumed':
+      return 'work_resumed';
+    case 'weekly_goal_set':
+      return 'weekly_goal_set';
+    case 'weekly_review_triggered':
+      return 'weekly_review_triggered';
+    default:
+      return clean as ActivityEventType;
+  }
+}
+
+export const CanonicalActivityEventTypeSchema = z.enum(ACTIVITY_EVENT_TYPES);
+
+export const ActivityEventTypeSchema = z.preprocess(
+  (val) => (typeof val === 'string' ? normalizeEventType(val) : val),
+  CanonicalActivityEventTypeSchema
+);
+
 
 export const ActivityEventSchema = z.object({
   id: z.string().min(1),

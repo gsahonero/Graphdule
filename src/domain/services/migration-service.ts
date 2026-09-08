@@ -14,6 +14,8 @@ import {
   ActivityEvent,
   WeeklyAttentionReviewRecord,
 } from '../models/types';
+import { ActivityLogService } from './activity-log-service';
+
 
 export type ParsedImportPayload =
   | {
@@ -180,6 +182,8 @@ export class MigrationService {
         }
       }
 
+      const cleanEvents = ActivityLogService.deduplicateEvents(validEvents);
+
       return {
         success: true,
         payload: {
@@ -188,7 +192,7 @@ export class MigrationService {
           standaloneTasks: validStandalones.length > 0 ? validStandalones : undefined,
           preferences: validPrefs,
           ideaSeeds: validSeeds.length > 0 ? validSeeds : undefined,
-          activityLog: validEvents.length > 0 ? validEvents : undefined,
+          activityLog: cleanEvents.length > 0 ? cleanEvents : undefined,
           attentionReviews: validReviews.length > 0 ? validReviews : undefined,
         },
       };

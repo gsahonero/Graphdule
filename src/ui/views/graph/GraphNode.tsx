@@ -128,9 +128,10 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
       activityLog,
       preferences.attentionUnitMinutes || 15
     );
-    return sessions
+    const sum = sessions
       .filter((s) => s.taskId === node.id)
-      .reduce((sum, s) => sum + s.au, 0);
+      .reduce((acc, s) => acc + s.au, 0);
+    return Math.round(sum * 100) / 100;
   }, [activityLog, preferences.attentionSystemEnabled, preferences.attentionUnitMinutes, node.id]);
 
   const isCurrentActive = activeWorkSession?.taskId === node.id;
@@ -217,6 +218,20 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
     }
   };
 
+  const isInteractiveElement = (target: EventTarget | null): boolean => {
+    const el = target as HTMLElement | null;
+    if (!el) return false;
+    return Boolean(
+      el.closest('button') ||
+      el.closest('input') ||
+      el.closest('textarea') ||
+      el.closest('select') ||
+      el.closest('[role="button"]') ||
+      el.closest('.nodrag') ||
+      el.closest('[data-no-card-dblclick]')
+    );
+  };
+
   // --- COMPACT CIRCULAR NODE VIEW (Semantic Zoom / Compact Mode) ---
   if (isCompact) {
     return (
@@ -225,6 +240,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
         onMouseLeave={handleMouseLeave}
         onDoubleClick={(e) => {
           if (isEditing) return;
+          if (isInteractiveElement(e.target)) return;
           e.stopPropagation();
           if (!isEGN && onDrillDown) {
             onDrillDown();
@@ -516,6 +532,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
                     : 'bg-slate-50 dark:bg-slate-950 border-slate-200/80 dark:border-slate-800'
                 }`}
                 onClick={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => e.stopPropagation()}
               >
                 {isCurrentActive ? (
                   <div className="flex flex-col gap-2">
@@ -766,6 +783,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
     <div
       onDoubleClick={(e) => {
         if (isEditing) return;
+        if (isInteractiveElement(e.target)) return;
         e.stopPropagation();
         if (!isEGN && onDrillDown) {
           onDrillDown();
@@ -800,6 +818,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
           {node.status === 'abandoned' ? (
             <button
               onClick={toggleAbandoned}
+              onDoubleClick={(e) => e.stopPropagation()}
               disabled={hasInProgressChild}
               className={`flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-50 dark:bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-500/40 transition-colors ${
                 hasInProgressChild ? 'cursor-not-allowed opacity-90' : 'hover:bg-rose-100 dark:hover:bg-rose-500/30 cursor-pointer'
@@ -816,6 +835,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
           ) : (
             <button
               onClick={cycleStatus}
+              onDoubleClick={(e) => e.stopPropagation()}
               disabled={hasInProgressChild}
               className={`flex items-center space-x-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-all ${
                 hasInProgressChild
@@ -847,6 +867,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
           {!hasInProgressChild && node.status !== 'abandoned' && (
             <button
               onClick={toggleAbandoned}
+              onDoubleClick={(e) => e.stopPropagation()}
               className="p-1 rounded-full text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
               title="Mark task as abandoned"
             >
@@ -864,6 +885,10 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
         ) : subtaskCount > 0 ? (
           <button
             onClick={(e) => {
+              e.stopPropagation();
+              if (onDrillDown) onDrillDown();
+            }}
+            onDoubleClick={(e) => {
               e.stopPropagation();
               if (onDrillDown) onDrillDown();
             }}
@@ -911,6 +936,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
                 e.stopPropagation();
                 setIsEditing(true);
               }}
+              onDoubleClick={(e) => e.stopPropagation()}
               className="p-1 rounded text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 opacity-100 sm:opacity-0 sm:group-hover/text:opacity-100 transition-opacity shrink-0 ml-1.5 cursor-pointer"
               title="Edit task name"
             >
@@ -929,6 +955,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
               : 'bg-slate-50 dark:bg-slate-900/80 border-slate-200/80 dark:border-slate-800'
           }`}
           onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
         >
           {isCurrentActive ? (
             <div className="flex flex-col gap-2">
@@ -1060,6 +1087,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
               e.stopPropagation();
               setIsCalendarOpen((prev) => !prev);
             }}
+            onDoubleClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
             className={`flex items-center space-x-1.5 px-2 py-0.5 -mx-1 rounded-md transition-colors cursor-pointer group/date ${
               !node.dueDate
@@ -1093,6 +1121,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
               e.stopPropagation();
               onOpenNotes();
             }}
+            onDoubleClick={(e) => e.stopPropagation()}
             className="flex items-center space-x-0.5 p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors cursor-pointer"
             title="Notes"
           >
@@ -1107,6 +1136,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
             <button
               type="button"
               onClick={handleDecomposeAction}
+              onDoubleClick={(e) => e.stopPropagation()}
               className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors cursor-pointer"
               title="Decompose Task (Open subtasks)"
             >
@@ -1121,6 +1151,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
                 e.stopPropagation();
                 onDeleteNode();
               }}
+              onDoubleClick={(e) => e.stopPropagation()}
               className="p-1 rounded hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 transition-colors cursor-pointer"
               title="Delete Task"
             >

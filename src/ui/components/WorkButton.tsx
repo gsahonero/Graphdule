@@ -66,6 +66,7 @@ export const WorkButton: React.FC<WorkButtonProps> = ({
   if (isCurrentActive) {
     return (
       <div
+        onDoubleClick={(e) => e.stopPropagation()}
         className="inline-flex items-center gap-1 bg-amber-500/15 dark:bg-amber-500/20 border border-amber-500/40 rounded-full px-2 py-0.5 text-xs font-medium text-amber-300 whitespace-nowrap shrink-0 select-none"
         title="Active focus work session in progress"
       >
@@ -88,6 +89,7 @@ export const WorkButton: React.FC<WorkButtonProps> = ({
 
         <button
           onClick={handlePauseResume}
+          onDoubleClick={(e) => e.stopPropagation()}
           className="p-1 hover:text-white rounded transition-colors text-slate-300 ml-0.5"
           title={isPaused ? 'Resume work' : 'Pause work'}
         >
@@ -103,6 +105,7 @@ export const WorkButton: React.FC<WorkButtonProps> = ({
             e.stopPropagation();
             completeAndStopWork();
           }}
+          onDoubleClick={(e) => e.stopPropagation()}
           className="p-1 hover:text-emerald-300 rounded transition-colors text-emerald-400"
           title="Complete task & stop work clock"
         >
@@ -111,6 +114,7 @@ export const WorkButton: React.FC<WorkButtonProps> = ({
 
         <button
           onClick={handleToggle}
+          onDoubleClick={(e) => e.stopPropagation()}
           className="p-1 hover:text-rose-300 rounded transition-colors text-rose-400"
           title="Stop work clock without completing"
         >
@@ -123,6 +127,7 @@ export const WorkButton: React.FC<WorkButtonProps> = ({
   return (
     <button
       onClick={handleToggle}
+      onDoubleClick={(e) => e.stopPropagation()}
       className={`group inline-flex items-center gap-1 rounded-full border border-slate-700/60 dark:border-slate-700/60 bg-slate-800/40 hover:bg-amber-500/10 hover:border-amber-500/40 text-slate-400 hover:text-amber-300 transition-all font-medium whitespace-nowrap shrink-0 select-none ${
         compact ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-xs'
       }`}

@@ -18,6 +18,8 @@ import {
   ActiveWorkSession,
   WeeklyAttentionReviewRecord,
 } from '../../domain/models/types';
+import { normalizeEventType } from '../../domain/models/schema';
+
 import { ProjectService } from '../../domain/services/project-service';
 import { TemporalService } from '../../domain/services/temporal-service';
 import { GraphService } from '../../domain/services/graph-service';
@@ -245,6 +247,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
   const [activeWorkElapsedSeconds, setActiveWorkElapsedSeconds] = useState<number>(0);
   const [attentionReviews, setAttentionReviews] = useState<WeeklyAttentionReviewRecord[]>([]);
+
+  const activeWorkSessionRef = useRef<ActiveWorkSession | null>(activeWorkSession);
+  useEffect(() => {
+    activeWorkSessionRef.current = activeWorkSession;
+  }, [activeWorkSession]);
+
+  const isInitialMountRef = useRef<boolean>(true);
 
   // Live second-by-second ticker for running work clock
   useEffect(() => {
@@ -494,19 +503,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     if (storage.readActivityLog) {
       const events = await storage.readActivityLog();
-      setActivityLog(events);
+      setActivityLog(ActivityLogService.deduplicateEvents(events));
     }
     if (storage.readAttentionReviews) {
       const reviews = await storage.readAttentionReviews();
       setAttentionReviews(reviews);
     }
 
-    if (prefs.activeWorkSession && !activeWorkSession) {
-      setActiveWorkSession(prefs.activeWorkSession);
-      try {
-        localStorage.setItem('graphdule_active_work_session', JSON.stringify(prefs.activeWorkSession));
-      } catch {
-        // ignore
+    const isInitialMount = isInitialMountRef.current;
+    if (isInitialMount) {
+      isInitialMountRef.current = false;
+      const storedLocalSession = typeof window !== 'undefined' ? localStorage.getItem('graphdule_active_work_session') : null;
+      if (prefs.activeWorkSession && storedLocalSession) {
+        try {
+          const parsed = JSON.parse(storedLocalSession);
+          if (parsed && parsed.sessionId === prefs.activeWorkSession.sessionId) {
+            setActiveWorkSession(prefs.activeWorkSession);
+            activeWorkSessionRef.current = prefs.activeWorkSession;
+          }
+        } catch {
+          // ignore
+        }
       }
     }
 
@@ -718,11 +735,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCanRedo(undoRedoManagerRef.current.canRedo(updatedDoc.project.id));
       }
 
-      const syncedNodes = TemporalService.syncParentDueDates(updatedDoc.nodes);
+      const dueSynced = TemporalService.syncParentDueDates(updatedDoc.nodes);
+      const auSynced = AttentionService.syncParentEstimatedAU(dueSynced);
+      const hierarchySynced = ProjectService.syncParentStatusHierarchy(auSynced).updatedNodes;
       const now = new Date().toISOString();
       const docWithTimestamp: ProjectDocument = {
         ...updatedDoc,
-        nodes: syncedNodes,
+        nodes: hierarchySynced,
         exportedAt: now,
         project: {
           ...updatedDoc.project,
@@ -1014,7 +1033,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const toggleAttentionSystem = useCallback(
     async (enabled: boolean) => {
       await updatePreferences({ attentionSystemEnabled: enabled });
-      await logActivityEvent(enabled ? 'ATTENTION_SYSTEM_TOGGLED' : 'attention_system_toggled', 'system', {
+      await logActivityEvent('attention_system_toggled', 'system', {
         entityText: `Attention measurement system ${enabled ? 'enabled' : 'disabled'}`,
         metadata: { enabled },
       });
@@ -1032,18 +1051,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const setWeeklyPlannedAU = useCallback(
     async (au: number | undefined) => {
-      await updatePreferences({ weeklyPlannedAU: au });
-      await logActivityEvent('WEEKLY_GOAL_SET', 'system', {
-        entityText: `Weekly planned attention set to ${au !== undefined ? `${au} AU` : 'none'}`,
-        metadata: { plannedAU: au },
+      const roundedAU = au !== undefined ? Math.round(au * 100) / 100 : undefined;
+      await updatePreferences({ weeklyPlannedAU: roundedAU });
+      await logActivityEvent('weekly_goal_set', 'system', {
+        entityText: `Weekly planned attention set to ${roundedAU !== undefined ? `${roundedAU} AU` : 'none'}`,
+        metadata: { plannedAU: roundedAU },
       });
     },
     [updatePreferences, logActivityEvent]
   );
 
   const stopWork = useCallback(async () => {
-    if (!activeWorkSession) return;
-    const sessionToStop = activeWorkSession;
+    const sessionToStop = activeWorkSessionRef.current || activeWorkSession;
+    if (!sessionToStop) return;
+
+    // Immediately clear in-memory state and localStorage so the UI bar instantly disappears!
+    activeWorkSessionRef.current = null;
+    setActiveWorkSession(null);
+    setActiveWorkElapsedSeconds(0);
+    try {
+      localStorage.removeItem('graphdule_active_work_session');
+    } catch {
+      // ignore
+    }
 
     const baseAccum = sessionToStop.accumulatedSecondsBeforeResume || 0;
     let additional = 0;
@@ -1055,7 +1085,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const au = AttentionService.durationSecondsToAU(totalDurationSeconds, attentionUnitMinutes);
     const stoppedAt = new Date().toISOString();
 
-    await logActivityEvent('WORK_STOPPED', sessionToStop.taskId, {
+    await logActivityEvent('work_stopped', sessionToStop.taskId, {
       entityText: sessionToStop.taskText,
       projectId: sessionToStop.projectId,
       projectName: sessionToStop.projectName,
@@ -1068,12 +1098,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       },
     });
 
-    setActiveWorkSession(null);
-    try {
-      localStorage.removeItem('graphdule_active_work_session');
-    } catch {
-      // ignore
-    }
     await updatePreferences({ activeWorkSession: null });
   }, [activeWorkSession, attentionUnitMinutes, logActivityEvent, updatePreferences]);
 
@@ -1092,7 +1116,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       lastResumedAt: undefined,
     };
 
-    await logActivityEvent('WORK_PAUSED', activeWorkSession.taskId, {
+    await logActivityEvent('work_paused', activeWorkSession.taskId, {
       entityText: activeWorkSession.taskText,
       projectId: activeWorkSession.projectId,
       projectName: activeWorkSession.projectName,
@@ -1102,6 +1126,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       },
     });
 
+    activeWorkSessionRef.current = updatedSession;
     setActiveWorkSession(updatedSession);
     try {
       localStorage.setItem('graphdule_active_work_session', JSON.stringify(updatedSession));
@@ -1145,7 +1170,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const targetEvent = activityLog.find(
         (ev) =>
           ev.id === sessionIdOrEventId ||
-          (ev.type === 'WORK_STOPPED' && ev.metadata?.sessionId === sessionIdOrEventId)
+          (normalizeEventType(ev.type) === 'work_stopped' && ev.metadata?.sessionId === sessionIdOrEventId)
       );
 
       if (!targetEvent) return;
@@ -1175,16 +1200,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     async (taskId: string) => {
       const toDeleteIds: string[] = [];
       for (const ev of activityLog) {
+        const t = normalizeEventType(ev.type);
         if (
           ev.entityId === taskId &&
-          (ev.type === 'WORK_STARTED' ||
-            ev.type === 'work_started' ||
-            ev.type === 'WORK_PAUSED' ||
-            ev.type === 'work_paused' ||
-            ev.type === 'WORK_RESUMED' ||
-            ev.type === 'work_resumed' ||
-            ev.type === 'WORK_STOPPED' ||
-            ev.type === 'work_stopped')
+          (t === 'work_started' ||
+            t === 'work_paused' ||
+            t === 'work_resumed' ||
+            t === 'work_stopped')
         ) {
           toDeleteIds.push(ev.id);
         }
@@ -1222,7 +1244,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         new Date(AttentionService.parseSafeEpochMs(stoppedAt) - validSeconds * 1000).toISOString();
       const sessionId = `sess_manual_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-      await logActivityEvent('WORK_STOPPED', taskId, {
+      await logActivityEvent('work_stopped', taskId, {
         entityText: options?.entityText,
         projectId: options?.projectId,
         projectName: options?.projectName,
@@ -1260,7 +1282,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       lastResumedAt: resumedAt,
     };
 
-    await logActivityEvent('WORK_RESUMED', activeWorkSession.taskId, {
+    await logActivityEvent('work_resumed', activeWorkSession.taskId, {
       entityText: activeWorkSession.taskText,
       projectId: activeWorkSession.projectId,
       projectName: activeWorkSession.projectName,
@@ -1269,6 +1291,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       },
     });
 
+    activeWorkSessionRef.current = updatedSession;
     setActiveWorkSession(updatedSession);
     try {
       localStorage.setItem('graphdule_active_work_session', JSON.stringify(updatedSession));
@@ -1290,7 +1313,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           );
           await storage.writeStandaloneTasks(updated);
           setStandaloneTasks(updated);
-          await logActivityEvent('ESTIMATE_CHANGED', taskId, {
+          await logActivityEvent('estimate_changed', taskId, {
             entityText: standaloneTarget.text,
             metadata: { oldEstimateAU: oldEstimate, newEstimateAU: estimatedAU },
           });
@@ -1316,7 +1339,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             ...activeProjectDoc,
             nodes: syncedNodes,
           });
-          await logActivityEvent('ESTIMATE_CHANGED', taskId, {
+          await logActivityEvent('estimate_changed', taskId, {
             entityText: node.text,
             projectId: activeProjectDoc.project.id,
             projectName: activeProjectDoc.project.name,
@@ -1346,7 +1369,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             const syncedNodes = AttentionService.syncParentEstimatedAU(updatedNodes);
             const updatedDoc: ProjectDocument = { ...doc, nodes: syncedNodes };
             await storage.writeProject(updatedDoc);
-            await logActivityEvent('ESTIMATE_CHANGED', taskId, {
+            await logActivityEvent('estimate_changed', taskId, {
               entityText: node.text,
               projectId: doc.project.id,
               projectName: doc.project.name,
@@ -1389,7 +1412,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       setAttentionReviews(updatedReviews);
 
-      await logActivityEvent('WEEKLY_REVIEW_TRIGGERED', record.id, {
+      await logActivityEvent('weekly_review_triggered', record.id, {
         entityText: `Weekly review triggered for ${weekStartDate} - ${weekEndDate}`,
         metadata: {
           reviewId: record.id,
@@ -1670,15 +1693,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         entityText: newNode.text,
         projectId: activeProjectDoc.project.id,
         projectName: activeProjectDoc.project.name,
-      }).catch(() => {});
-      logActivityEvent('TASK_CREATED', newNode.id, {
-        entityText: newNode.text,
-        projectId: activeProjectDoc.project.id,
-        projectName: activeProjectDoc.project.name,
-        metadata: { estimatedAU },
+        metadata: estimatedAU !== undefined ? { estimatedAU } : undefined,
       }).catch(() => {});
       if (estimatedAU !== undefined && estimatedAU > 0) {
-        logActivityEvent('ESTIMATE_CHANGED', newNode.id, {
+        logActivityEvent('estimate_changed', newNode.id, {
           entityText: newNode.text,
           projectId: activeProjectDoc.project.id,
           metadata: { newAU: estimatedAU },
@@ -1760,21 +1778,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               oldDueDate: prevNode.dueDate,
               newDueDate: updatedNode.dueDate,
             }).catch(() => {});
-            logActivityEvent('TASK_DEFERRED', updatedNode.id, {
-              entityText: updatedNode.text,
-              projectId: activeProjectDoc.project.id,
-              projectName: activeProjectDoc.project.name,
-              oldDueDate: prevNode.dueDate,
-              newDueDate: updatedNode.dueDate,
-            }).catch(() => {});
           }
-          logActivityEvent('DEADLINE_CHANGED', updatedNode.id, {
-            entityText: updatedNode.text,
-            projectId: activeProjectDoc.project.id,
-            projectName: activeProjectDoc.project.name,
-            oldDueDate: prevNode.dueDate,
-            newDueDate: updatedNode.dueDate,
-          }).catch(() => {});
 
           GCalendarSync.syncTaskDateChange({
             taskId: updatedNode.id,
@@ -1801,17 +1805,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 projectName: activeProjectDoc.project.name,
                 metadata: { isAttentionProject: activeProjectDoc.project.isAttention },
               }).catch(() => {});
-              logActivityEvent('TASK_COMPLETED', updatedNode.id, {
-                entityText: updatedNode.text,
-                projectId: activeProjectDoc.project.id,
-                projectName: activeProjectDoc.project.name,
-                metadata: { isAttentionProject: activeProjectDoc.project.isAttention },
-              }).catch(() => {});
               if (activeWorkSession?.taskId === updatedNode.id) {
                 stopWork().catch(() => {});
               }
             } else if (updatedNode.status === 'abandoned') {
-              logActivityEvent('TASK_ABANDONED', updatedNode.id, {
+              logActivityEvent('task_abandoned', updatedNode.id, {
                 entityText: updatedNode.text,
                 projectId: activeProjectDoc.project.id,
                 projectName: activeProjectDoc.project.name,
@@ -1870,24 +1868,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const deleteNode = useCallback(
     async (nodeId: string) => {
       if (!activeProjectDoc) return;
+
+      // If active work session is on this node or one of its descendants, stop work immediately!
+      const session = activeWorkSessionRef.current || activeWorkSession;
+      if (
+        session &&
+        (session.taskId === nodeId ||
+          ProjectService.isDescendantOf(activeProjectDoc.nodes, session.taskId, nodeId))
+      ) {
+        await stopWork();
+      }
+
       const res = ProjectService.deleteNodeFromProject(activeProjectDoc, nodeId);
       if (!res.success) {
         alert(res.error);
         return;
       }
 
-      const syncedNodes = AttentionService.syncParentEstimatedAU(res.document.nodes);
-      await saveProjectDoc({
-        ...res.document,
-        nodes: syncedNodes,
-      });
+      await saveProjectDoc(res.document);
       GCalendarSync.syncTaskDelete(nodeId).catch(() => {});
 
       if (selectedNode?.id === nodeId) {
         setSelectedNode(null);
       }
     },
-    [activeProjectDoc, selectedNode, saveProjectDoc]
+    [activeProjectDoc, selectedNode, saveProjectDoc, activeWorkSession, stopWork]
   );
 
   const updateNodePositions = useCallback(
@@ -2059,7 +2064,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const sessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       const startedAt = new Date().toISOString();
 
-      await logActivityEvent('WORK_STARTED', taskId, {
+      await logActivityEvent('work_started', taskId, {
         entityText: taskText,
         projectId,
         projectName,
@@ -2077,6 +2082,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isPaused: false,
       };
 
+      activeWorkSessionRef.current = newSession;
       setActiveWorkSession(newSession);
       try {
         localStorage.setItem('graphdule_active_work_session', JSON.stringify(newSession));
@@ -2384,7 +2390,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await saveProjectDoc(result.document);
 
       if (sourceNode && targetParent) {
-        await logActivityEvent('NODE_NESTED', sourceNodeId, {
+        await logActivityEvent('node_nested', sourceNodeId, {
           entityText: sourceNode.text,
           projectId: activeProjectDoc.project.id,
           projectName: activeProjectDoc.project.name,
@@ -2506,13 +2512,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       logActivityEvent('task_created', newTask.id, {
         entityText: newTask.text,
-      }).catch(() => {});
-      logActivityEvent('TASK_CREATED', newTask.id, {
-        entityText: newTask.text,
-        metadata: { estimatedAU },
+        metadata: estimatedAU !== undefined ? { estimatedAU } : undefined,
       }).catch(() => {});
       if (estimatedAU !== undefined && estimatedAU > 0) {
-        logActivityEvent('ESTIMATE_CHANGED', newTask.id, {
+        logActivityEvent('estimate_changed', newTask.id, {
           entityText: newTask.text,
           metadata: { newAU: estimatedAU },
         }).catch(() => {});
@@ -2578,14 +2581,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           logActivityEvent('task_completed', taskId, {
             entityText: targetTask.text,
           }).catch(() => {});
-          logActivityEvent('TASK_COMPLETED', taskId, {
-            entityText: targetTask.text,
-          }).catch(() => {});
           if (activeWorkSession?.taskId === taskId) {
             stopWork().catch(() => {});
           }
         } else if (status === 'abandoned') {
-          logActivityEvent('TASK_ABANDONED', taskId, {
+          logActivityEvent('task_abandoned', taskId, {
             entityText: targetTask.text,
           }).catch(() => {});
           if (activeWorkSession?.taskId === taskId) {
@@ -2668,8 +2668,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const completeAndStopWork = useCallback(async () => {
-    if (!activeWorkSession) return;
-    const { taskId, projectId } = activeWorkSession;
+    const session = activeWorkSessionRef.current || activeWorkSession;
+    if (!session) return;
+    const { taskId, projectId } = session;
     await stopWork();
     if (projectId === 'standalone' || standaloneTasks.some((t) => t.id === taskId)) {
       await updateStandaloneTaskStatus(taskId, 'completed');
@@ -2762,7 +2763,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const newEvents = payload.activityLog.filter((e) => !currentLogIds.has(e.id));
           if (newEvents.length > 0) {
             await storage.appendActivityEvents(newEvents);
-            setActivityLog((prev) => [...prev, ...newEvents]);
+            setActivityLog((prev) => ActivityLogService.deduplicateEvents([...prev, ...newEvents]));
           }
         }
 

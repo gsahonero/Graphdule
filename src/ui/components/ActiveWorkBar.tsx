@@ -74,7 +74,7 @@ export const ActiveWorkBar: React.FC = () => {
       {clampedProgressWidth !== null && (
         <div
           className="absolute bottom-0 left-0 right-0 h-1 bg-slate-800/80"
-          title={`Attention Progress: ${progressPercent}% of ${estimatedAU} AU estimated`}
+          title={`Attention Progress: ${progressPercent}% of ${estimatedAU !== undefined ? Math.round(estimatedAU * 100) / 100 : 0} AU estimated`}
         >
           <div
             className={`h-full transition-all duration-300 ${
@@ -147,7 +147,7 @@ export const ActiveWorkBar: React.FC = () => {
               </span>
               <span className="text-slate-600">·</span>
               <span className="text-amber-400 font-bold">
-                {currentAU} AU
+                {Math.round(currentAU * 100) / 100} AU
               </span>
               {estimatedAU !== undefined && estimatedAU > 0 && (
                 <span
@@ -156,7 +156,7 @@ export const ActiveWorkBar: React.FC = () => {
                       ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                       : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                   }`}
-                  title={`${progressPercent}% of ${estimatedAU} AU estimated (${currentAU}/${estimatedAU} AU)`}
+                  title={`${progressPercent}% of ${Math.round(estimatedAU * 100) / 100} AU estimated (${Math.round(currentAU * 100) / 100}/${Math.round(estimatedAU * 100) / 100} AU)`}
                 >
                   {progressPercent}%
                 </span>

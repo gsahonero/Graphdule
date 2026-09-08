@@ -9,6 +9,8 @@ import {
   WeeklyAttentionReviewData,
   WorkSession,
 } from '../models/types';
+import { normalizeEventType } from '../models/schema';
+
 
 export class AttentionService {
   /**
@@ -26,15 +28,16 @@ export class AttentionService {
    * Format AU into human-readable label with equivalent real time (e.g., '2 AU (30m)' or '4 AU (1h)').
    */
   public static formatAU(au: number, auMinutes: number = 15): string {
+    const roundedAU = Math.round(au * 100) / 100;
     const minutes = auMinutes > 0 ? auMinutes : 15;
-    const totalMinutes = Math.round(au * minutes);
+    const totalMinutes = Math.round(roundedAU * minutes);
 
     if (totalMinutes <= 0) {
-      const totalSeconds = Math.round(au * minutes * 60);
+      const totalSeconds = Math.round(roundedAU * minutes * 60);
       if (totalSeconds > 0) {
-        return `${au} AU (${totalSeconds}s)`;
+        return `${roundedAU} AU (${totalSeconds}s)`;
       }
-      return `${au} AU`;
+      return `${roundedAU} AU`;
     }
 
     let timeStr = '';
@@ -46,7 +49,7 @@ export class AttentionService {
       timeStr = remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
     }
 
-    return `${au} AU (${timeStr})`;
+    return `${roundedAU} AU (${timeStr})`;
   }
 
   /**
@@ -184,16 +187,16 @@ export class AttentionService {
     const openSessions = new Map<string, { event: ActivityEvent; startedAt: string; accumulatedSeconds: number }>();
 
     for (const ev of sorted) {
-      const type = ev.type;
+      const type = normalizeEventType(ev.type);
       const taskId = ev.entityId;
 
-      if (type === 'WORK_STARTED' || type === 'work_started') {
+      if (type === 'work_started') {
         openSessions.set(taskId, {
           event: ev,
           startedAt: ev.timestamp,
           accumulatedSeconds: 0,
         });
-      } else if (type === 'WORK_PAUSED' || type === 'work_paused') {
+      } else if (type === 'work_paused') {
         const current = openSessions.get(taskId);
         if (current) {
           const pauseElapsed = Math.max(
@@ -202,7 +205,7 @@ export class AttentionService {
           );
           current.accumulatedSeconds += pauseElapsed;
         }
-      } else if (type === 'WORK_RESUMED' || type === 'work_resumed') {
+      } else if (type === 'work_resumed') {
         const current = openSessions.get(taskId);
         if (current) {
           current.startedAt = ev.timestamp;
@@ -213,7 +216,7 @@ export class AttentionService {
             accumulatedSeconds: 0,
           });
         }
-      } else if (type === 'WORK_STOPPED' || type === 'work_stopped') {
+      } else if (type === 'work_stopped') {
         const current = openSessions.get(taskId);
         let durationSeconds = 0;
 
@@ -500,7 +503,7 @@ export class AttentionService {
         weekSessions.map((s) => ({
           id: s.id,
           timestamp: s.startedAt,
-          type: 'WORK_STOPPED',
+          type: 'work_stopped',
           entityId: s.taskId,
           entityText: s.taskText,
           projectId: s.projectId,
@@ -543,7 +546,7 @@ export class AttentionService {
     for (const ev of events) {
       const t = new Date(ev.timestamp).getTime();
       if (t >= weekStartMs && t <= weekEndMs) {
-        if (ev.type === 'TASK_DEFERRED' || ev.type === 'task_deferred' || ev.type === 'date_moved') {
+        if (normalizeEventType(ev.type) === 'date_moved') {
           const prev = taskDeferralCounts.get(ev.entityId) || { count: 0, text: ev.entityText };
           taskDeferralCounts.set(ev.entityId, { count: prev.count + 1, text: ev.entityText || prev.text });
         }

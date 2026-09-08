@@ -325,7 +325,7 @@ export const TaskWorkSessionsModal: React.FC = () => {
                         <>
                           <div className="text-right">
                             <div className="text-xs font-mono font-bold text-indigo-600 dark:text-indigo-300">
-                              {session.au} AU
+                              {Math.round(session.au * 100) / 100} AU
                             </div>
                             <div className="text-[10px] text-slate-400 font-mono">
                               {formatDurationDetailed(session.durationSeconds)}

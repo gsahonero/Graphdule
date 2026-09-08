@@ -302,8 +302,12 @@ export class ProjectService {
   }
 
   /**
-   * Full hierarchy status synchronization: ensures that for all nodes in the document,
-   * if any child node is in progress, the parent node is also in progress.
+   * Full hierarchy status synchronization: ensures that for all nodes in the document:
+   * 1. If any child is in progress, the parent node is in progress.
+   * 2. If all subtasks are completed (or completed/abandoned with >=1 completed), the parent is completed.
+   * 3. If all subtasks are abandoned, the parent is abandoned.
+   * 4. If no subtask is in progress and not all are completed, the parent cannot remain stuck in progress or completed,
+   *    reverting to planned.
    */
   public static syncParentStatusHierarchy(nodes: readonly Node[]): {
     updatedNodes: Node[];
@@ -317,13 +321,31 @@ export class ProjectService {
       changed = false;
       for (let i = 0; i < updatedNodes.length; i++) {
         const parent = updatedNodes[i];
-        const hasInProgress = updatedNodes.some(
-          (n) => n.parentNodeId === parent.id && n.status === 'in_progress'
-        );
-        if (hasInProgress && parent.status !== 'in_progress') {
+        const children = updatedNodes.filter((n) => n.parentNodeId === parent.id);
+        if (children.length === 0) continue;
+
+        let targetStatus: NodeStatus;
+        if (children.some((c) => c.status === 'in_progress')) {
+          targetStatus = 'in_progress';
+        } else if (children.every((c) => c.status === 'completed')) {
+          targetStatus = 'completed';
+        } else if (
+          children.every((c) => c.status === 'completed' || c.status === 'abandoned') &&
+          children.some((c) => c.status === 'completed')
+        ) {
+          targetStatus = 'completed';
+        } else if (children.every((c) => c.status === 'abandoned')) {
+          targetStatus = 'abandoned';
+        } else if (parent.status === 'in_progress' || parent.status === 'completed') {
+          targetStatus = 'planned';
+        } else {
+          targetStatus = parent.status;
+        }
+
+        if (parent.status !== targetStatus) {
           updatedNodes[i] = {
             ...parent,
-            status: 'in_progress',
+            status: targetStatus,
             updatedAt: new Date().toISOString(),
           };
           if (!affectedParentIds.includes(parent.id)) {
@@ -335,6 +357,113 @@ export class ProjectService {
     }
 
     return { updatedNodes, affectedParentIds };
+  }
+
+  /**
+   * Ultra-lightweight presentation status reconciliation for a single node.
+   * Resolves the effective status of a node based on its children hierarchy.
+   */
+  public static resolveNodePresentationStatus(
+    node: Node,
+    allNodes: readonly Node[],
+    visited = new Set<string>()
+  ): NodeStatus {
+    if (visited.has(node.id)) return node.status;
+    visited.add(node.id);
+
+    const children = allNodes.filter((n) => n.parentNodeId === node.id);
+    if (children.length === 0) {
+      return node.status;
+    }
+
+    const childStatuses = children.map((c) =>
+      this.resolveNodePresentationStatus(c, allNodes, visited)
+    );
+
+    if (childStatuses.some((s) => s === 'in_progress')) {
+      return 'in_progress';
+    }
+    if (childStatuses.every((s) => s === 'completed')) {
+      return 'completed';
+    }
+    if (
+      childStatuses.every((s) => s === 'completed' || s === 'abandoned') &&
+      childStatuses.some((s) => s === 'completed')
+    ) {
+      return 'completed';
+    }
+    if (childStatuses.every((s) => s === 'abandoned')) {
+      return 'abandoned';
+    }
+    if (node.status === 'in_progress' || node.status === 'completed') {
+      return 'planned';
+    }
+    return node.status;
+  }
+
+  /**
+   * Efficient O(N) memory-light batch reconciliation for node presentation in views.
+   * Takes the full array of document nodes and returns a cloned array where each node
+   * whose effective status differs from its stored status is updated to its effective status.
+   */
+  public static resolveDocumentPresentationNodes(nodes: readonly Node[]): Node[] {
+    if (!nodes || nodes.length === 0) return [];
+
+    // Group direct children by parentNodeId in a single pass O(N)
+    const parentMap = new Map<string, Node[]>();
+    for (const n of nodes) {
+      if (n.parentNodeId) {
+        let list = parentMap.get(n.parentNodeId);
+        if (!list) {
+          list = [];
+          parentMap.set(n.parentNodeId, list);
+        }
+        list.push(n);
+      }
+    }
+
+    const memo = new Map<string, NodeStatus>();
+    const resolveStatus = (node: Node, visited: Set<string>): NodeStatus => {
+      if (memo.has(node.id)) return memo.get(node.id)!;
+      if (visited.has(node.id)) return node.status;
+      visited.add(node.id);
+
+      const children = parentMap.get(node.id);
+      if (!children || children.length === 0) {
+        memo.set(node.id, node.status);
+        return node.status;
+      }
+
+      const childStatuses = children.map((c) => resolveStatus(c, visited));
+      let resolved: NodeStatus;
+      if (childStatuses.some((s) => s === 'in_progress')) {
+        resolved = 'in_progress';
+      } else if (childStatuses.every((s) => s === 'completed')) {
+        resolved = 'completed';
+      } else if (
+        childStatuses.every((s) => s === 'completed' || s === 'abandoned') &&
+        childStatuses.some((s) => s === 'completed')
+      ) {
+        resolved = 'completed';
+      } else if (childStatuses.every((s) => s === 'abandoned')) {
+        resolved = 'abandoned';
+      } else if (node.status === 'in_progress' || node.status === 'completed') {
+        resolved = 'planned';
+      } else {
+        resolved = node.status;
+      }
+
+      memo.set(node.id, resolved);
+      return resolved;
+    };
+
+    return nodes.map((node) => {
+      const effStatus = resolveStatus(node, new Set<string>());
+      if (effStatus !== node.status) {
+        return { ...node, status: effStatus };
+      }
+      return node;
+    });
   }
 
   /**

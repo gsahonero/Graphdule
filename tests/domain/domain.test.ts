@@ -1454,5 +1454,81 @@ describe('Graphdule Domain Invariants and Services', () => {
       const syncedParent = updatedNodes.find((n) => n.id === parent.id);
       expect(syncedParent?.status).toBe('in_progress');
     });
+
+    it('syncs parent to completed when all remaining children are completed (e.g., 2 completed, 3rd deleted)', () => {
+      const parent = {
+        ...ProjectService.createNode('p1', 'Parent', '2026-11-01'),
+        status: 'in_progress' as const,
+      };
+      const child1 = {
+        ...ProjectService.createNode('p1', 'Child 1', '2026-11-02', parent.id),
+        status: 'completed' as const,
+      };
+      const child2 = {
+        ...ProjectService.createNode('p1', 'Child 2', '2026-11-03', parent.id),
+        status: 'completed' as const,
+      };
+      // Note: Child 3 was deleted, leaving only child1 and child2
+      const { updatedNodes, affectedParentIds } = ProjectService.syncParentStatusHierarchy([
+        parent,
+        child1,
+        child2,
+      ]);
+
+      expect(affectedParentIds).toContain(parent.id);
+      const syncedParent = updatedNodes.find((n) => n.id === parent.id);
+      expect(syncedParent?.status).toBe('completed');
+    });
+
+    it('reverts parent from in_progress to planned when no children are in progress and not all are completed', () => {
+      const parent = {
+        ...ProjectService.createNode('p1', 'Parent', '2026-11-01'),
+        status: 'in_progress' as const,
+      };
+      const child1 = {
+        ...ProjectService.createNode('p1', 'Child 1', '2026-11-02', parent.id),
+        status: 'completed' as const,
+      };
+      const child2 = {
+        ...ProjectService.createNode('p1', 'Child 2', '2026-11-03', parent.id),
+        status: 'planned' as const,
+      };
+
+      const { updatedNodes, affectedParentIds } = ProjectService.syncParentStatusHierarchy([
+        parent,
+        child1,
+        child2,
+      ]);
+
+      expect(affectedParentIds).toContain(parent.id);
+      const syncedParent = updatedNodes.find((n) => n.id === parent.id);
+      expect(syncedParent?.status).toBe('planned');
+    });
+
+    it('reconciles presentation status with resolveNodePresentationStatus and resolveDocumentPresentationNodes', () => {
+      const parent = {
+        ...ProjectService.createNode('p1', 'Parent Node', '2026-11-01'),
+        status: 'in_progress' as const, // stored state out of sync
+      };
+      const child1 = {
+        ...ProjectService.createNode('p1', 'Subtask 1', '2026-11-02', parent.id),
+        status: 'completed' as const,
+      };
+      const child2 = {
+        ...ProjectService.createNode('p1', 'Subtask 2', '2026-11-03', parent.id),
+        status: 'completed' as const,
+      };
+
+      const allNodes = [parent, child1, child2];
+
+      // Single node check
+      const presentationStatus = ProjectService.resolveNodePresentationStatus(parent, allNodes);
+      expect(presentationStatus).toBe('completed');
+
+      // Batch document check
+      const presentationNodes = ProjectService.resolveDocumentPresentationNodes(allNodes);
+      const parentPresentation = presentationNodes.find((n) => n.id === parent.id);
+      expect(parentPresentation?.status).toBe('completed');
+    });
   });
 });
