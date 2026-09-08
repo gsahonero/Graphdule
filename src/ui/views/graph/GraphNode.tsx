@@ -466,16 +466,15 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
             {/* Popover Attention tracking & estimate row */}
             {preferences.attentionSystemEnabled && (
               <div
-                className="flex items-center justify-between gap-1 px-1.5 py-1 rounded bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800 nodrag nowheel nopan"
+                className="flex flex-col gap-1.5 p-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800 nodrag nowheel nopan"
                 onClick={(e) => e.stopPropagation()}
               >
-                <WorkButton
-                  taskId={node.id}
-                  taskText={node.text}
-                  projectId={node.projectId}
-                  trackedAU={trackedAU}
-                />
-                <div className="flex items-center space-x-1">
+                <div className="flex items-center justify-between gap-2">
+                  <WorkButton
+                    taskId={node.id}
+                    taskText={node.text}
+                    projectId={node.projectId}
+                  />
                   <AttentionUnitInput
                     value={node.estimatedAU}
                     onChange={(newAU) => updateTaskEstimate(node.id, newAU, true)}
@@ -483,12 +482,39 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
                     auMinutes={preferences.attentionUnitMinutes}
                     compact={true}
                   />
-                  {trackedAU > 0 && (
-                    <span className="px-1 py-0.5 rounded font-semibold text-[10px] font-mono bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/50">
-                      Act: {trackedAU} AU
-                    </span>
-                  )}
                 </div>
+
+                {/* Dedicated Active Attention (Tracked Time) & Progress */}
+                {trackedAU > 0 && (
+                  <div className="pt-1.5 border-t border-slate-200/60 dark:border-slate-800/80 flex flex-col gap-1">
+                    <div className="flex items-center justify-between text-[10px] font-mono">
+                      <span className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-300 font-semibold">
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                        <span>Active: {AttentionService.formatAU(trackedAU, preferences.attentionUnitMinutes)}</span>
+                      </span>
+                      {node.estimatedAU && node.estimatedAU > 0 ? (
+                        <span className="text-slate-500 dark:text-slate-400 font-medium">
+                          {Math.round((trackedAU / node.estimatedAU) * 100)}%
+                        </span>
+                      ) : null}
+                    </div>
+
+                    {node.estimatedAU && node.estimatedAU > 0 && (
+                      <div className="w-full h-1 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-300 ${
+                            trackedAU > node.estimatedAU
+                              ? 'bg-amber-500'
+                              : 'bg-indigo-500 dark:bg-indigo-400'
+                          }`}
+                          style={{
+                            width: `${Math.min(100, Math.round((trackedAU / node.estimatedAU) * 100))}%`,
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -775,16 +801,16 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
       {/* Attention tracking & estimate row */}
       {preferences.attentionSystemEnabled && (
         <div
-          className="flex items-center justify-between gap-1 px-1.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800 nodrag nowheel nopan"
+          className="flex flex-col gap-1.5 p-2 rounded-xl bg-slate-50 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800 nodrag nowheel nopan"
           onClick={(e) => e.stopPropagation()}
         >
-          <WorkButton
-            taskId={node.id}
-            taskText={node.text}
-            projectId={node.projectId}
-            trackedAU={trackedAU}
-          />
-          <div className="flex items-center space-x-1">
+          {/* Top row: Work action button & Estimated AU */}
+          <div className="flex items-center justify-between gap-2">
+            <WorkButton
+              taskId={node.id}
+              taskText={node.text}
+              projectId={node.projectId}
+            />
             <AttentionUnitInput
               value={node.estimatedAU}
               onChange={(newAU) => updateTaskEstimate(node.id, newAU, true)}
@@ -792,15 +818,39 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
               auMinutes={preferences.attentionUnitMinutes}
               compact={true}
             />
-            {trackedAU > 0 && (
-              <span
-                className="px-1.5 py-0.5 rounded font-semibold text-[10px] font-mono bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/50"
-                title={`Tracked: ${trackedAU} AU`}
-              >
-                Act: {trackedAU} AU
-              </span>
-            )}
           </div>
+
+          {/* Dedicated Active Attention (Tracked Time) & Progress */}
+          {trackedAU > 0 && (
+            <div className="pt-1.5 border-t border-slate-200/60 dark:border-slate-800/80 flex flex-col gap-1">
+              <div className="flex items-center justify-between text-[10px] font-mono">
+                <span className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-300 font-semibold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                  <span>Active: {AttentionService.formatAU(trackedAU, preferences.attentionUnitMinutes)}</span>
+                </span>
+                {node.estimatedAU && node.estimatedAU > 0 ? (
+                  <span className="text-slate-500 dark:text-slate-400 font-medium">
+                    {Math.round((trackedAU / node.estimatedAU) * 100)}%
+                  </span>
+                ) : null}
+              </div>
+
+              {node.estimatedAU && node.estimatedAU > 0 && (
+                <div className="w-full h-1 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 ${
+                      trackedAU > node.estimatedAU
+                        ? 'bg-amber-500'
+                        : 'bg-indigo-500 dark:bg-indigo-400'
+                    }`}
+                    style={{
+                      width: `${Math.min(100, Math.round((trackedAU / node.estimatedAU) * 100))}%`,
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

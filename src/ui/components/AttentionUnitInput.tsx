@@ -168,7 +168,7 @@ export const AttentionUnitInput: React.FC<AttentionUnitInputProps> = ({
         onClick={() => {
           if (!disabled) setIsOpen((prev) => !prev);
         }}
-        className={`group inline-flex items-center gap-1.5 rounded-lg border transition-all cursor-pointer select-none ${
+        className={`group inline-flex items-center gap-1.5 rounded-lg border transition-all cursor-pointer select-none whitespace-nowrap shrink-0 ${
           disabled
             ? 'opacity-50 cursor-not-allowed border-slate-700/40 bg-slate-800/20 text-slate-500'
             : value !== undefined && value > 0
@@ -184,12 +184,12 @@ export const AttentionUnitInput: React.FC<AttentionUnitInputProps> = ({
         <Clock className={`flex-shrink-0 ${compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} text-amber-500/80`} />
 
         {value !== undefined && value > 0 ? (
-          <span className="inline-flex items-center gap-1 font-mono">
+          <span className="inline-flex items-center gap-1 font-mono whitespace-nowrap">
             <span className="font-semibold">{value} AU</span>
             <span className="text-[11px] opacity-75 font-normal">· {formattedMinutes}</span>
           </span>
         ) : (
-          <span className="text-slate-400 dark:text-slate-500">{placeholder}</span>
+          <span className="text-slate-400 dark:text-slate-500 whitespace-nowrap">{placeholder}</span>
         )}
 
         {/* Quick Stepper +/- controls directly visible when not compact or hovered */}

@@ -9,6 +9,7 @@ interface WorkButtonProps {
   projectName?: string;
   compact?: boolean;
   trackedAU?: number;
+  showTrackedAU?: boolean;
 }
 
 export const WorkButton: React.FC<WorkButtonProps> = ({
@@ -18,6 +19,7 @@ export const WorkButton: React.FC<WorkButtonProps> = ({
   projectName,
   compact = false,
   trackedAU,
+  showTrackedAU = false,
 }) => {
   const {
     attentionSystemEnabled,
@@ -128,7 +130,7 @@ export const WorkButton: React.FC<WorkButtonProps> = ({
     >
       <Play className="w-2.5 h-2.5 fill-current transition-transform group-hover:scale-110" />
       <span>Work</span>
-      {trackedAU !== undefined && trackedAU > 0 && (
+      {showTrackedAU && trackedAU !== undefined && trackedAU > 0 && (
         <span className="text-[10px] text-amber-400/80 font-mono ml-0.5">
           {trackedAU} AU
         </span>

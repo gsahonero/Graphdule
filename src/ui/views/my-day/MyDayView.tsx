@@ -149,7 +149,6 @@ export const MyDayView: React.FC = () => {
           taskId={task.id}
           taskText={task.text}
           projectId={task.projectId}
-          trackedAU={trackedAU}
         />
         <AttentionUnitInput
           value={task.estimatedAU}
@@ -160,10 +159,10 @@ export const MyDayView: React.FC = () => {
         />
         {trackedAU > 0 && (
           <span
-            className="px-1.5 py-0.5 rounded font-mono font-semibold text-[11px] bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60"
-            title={`Tracked attention: ${trackedAU} AU (${AttentionService.formatAU(trackedAU, preferences.attentionUnitMinutes)})`}
+            className="px-2 py-0.5 rounded-lg font-mono font-semibold text-[11px] bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 whitespace-nowrap"
+            title={`Tracked attention: ${AttentionService.formatAU(trackedAU, preferences.attentionUnitMinutes)}`}
           >
-            Act: {trackedAU} AU
+            Active: {trackedAU} AU
           </span>
         )}
       </div>

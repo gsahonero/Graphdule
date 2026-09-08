@@ -30,6 +30,10 @@ export class AttentionService {
     const totalMinutes = Math.round(au * minutes);
 
     if (totalMinutes <= 0) {
+      const totalSeconds = Math.round(au * minutes * 60);
+      if (totalSeconds > 0) {
+        return `${au} AU (${totalSeconds}s)`;
+      }
       return `${au} AU`;
     }
 

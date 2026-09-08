@@ -36,6 +36,7 @@ describe('AttentionService - Attention Measurement System', () => {
       expect(AttentionService.formatAU(4.0, 15)).toBe('4 AU (1h)');
       expect(AttentionService.formatAU(5.5, 15)).toBe('5.5 AU (1h 23m)');
       expect(AttentionService.formatAU(1.0, 25)).toBe('1 AU (25m)');
+      expect(AttentionService.formatAU(0.01, 15)).toBe('0.01 AU (9s)');
     });
   });
 
