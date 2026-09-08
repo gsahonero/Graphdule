@@ -60,6 +60,42 @@ export class AttentionService {
   }
 
   /**
+   * Computes the week date range strictly from Monday to Monday for weekly attention reviews.
+   * Returns { weekStartDate: 'YYYY-MM-DD', weekEndDate: 'YYYY-MM-DD' }, where both dates are Mondays.
+   * @param referenceDate Base date to compute from (defaults to current date)
+   * @param weekOffset Offset in weeks (0 = current week, -1 = previous week, etc.)
+   */
+  public static getMondayToMondayWeekRange(
+    referenceDate: Date = new Date(),
+    weekOffset: number = 0
+  ): { weekStartDate: string; weekEndDate: string } {
+    const target = new Date(referenceDate);
+    target.setDate(target.getDate() + weekOffset * 7);
+
+    // Get Monday of target week (0 = Sun, 1 = Mon, ..., 6 = Sat)
+    const day = target.getDay();
+    const diffToMonday = day === 0 ? -6 : 1 - day;
+    const monday = new Date(target);
+    monday.setDate(target.getDate() + diffToMonday);
+
+    // End is next Monday (+ 7 days)
+    const nextMonday = new Date(monday);
+    nextMonday.setDate(monday.getDate() + 7);
+
+    const toYMD = (d: Date) => {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const date = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${date}`;
+    };
+
+    return {
+      weekStartDate: toYMD(monday),
+      weekEndDate: toYMD(nextMonday),
+    };
+  }
+
+  /**
    * Enforces the invariant: A parent node AU can only be equal to the sum of the children AU.
    * Recursively computes bottom-up from leaves to roots across arbitrary tree depths.
    * If any direct child has an estimatedAU defined, parent.estimatedAU = sum(children.estimatedAU || 0).

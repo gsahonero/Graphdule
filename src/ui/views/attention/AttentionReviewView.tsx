@@ -43,26 +43,9 @@ export const AttentionReviewView: React.FC = () => {
   const [isTriggering, setIsTriggering] = useState<boolean>(false);
   const [expandedRuleIds, setExpandedRuleIds] = useState<Set<string>>(new Set());
 
-  // Compute start (Monday) and end (Sunday) dates for the target week
+  // Compute start (Monday) and end (Monday) dates for the target week
   const { weekStartDate, weekEndDate } = useMemo(() => {
-    const now = new Date();
-    // Adjust for weekOffset weeks
-    now.setDate(now.getDate() + weekOffset * 7);
-
-    // Get Monday
-    const day = now.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
-    const diffToMonday = day === 0 ? -6 : 1 - day;
-    const monday = new Date(now);
-    monday.setDate(now.getDate() + diffToMonday);
-
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
-
-    const toYMD = (d: Date) => d.toISOString().split('T')[0];
-    return {
-      weekStartDate: toYMD(monday),
-      weekEndDate: toYMD(sunday),
-    };
+    return AttentionService.getMondayToMondayWeekRange(new Date(), weekOffset);
   }, [weekOffset]);
 
   // If a historical review is selected, show that, otherwise compute live review for week

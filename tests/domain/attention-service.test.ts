@@ -515,4 +515,59 @@ describe('AttentionService - Attention Measurement System', () => {
       expect(syncedParent?.estimatedAU).toBeUndefined();
     });
   });
+
+  describe('Monday-to-Monday Week Calculation', () => {
+    it('calculates strictly Monday to Monday for the current week', () => {
+      // 2026-09-07 is Monday
+      const mondayRef = new Date(2026, 8, 7, 12, 0, 0); // Note: month is 0-indexed (8 = September)
+      const range = AttentionService.getMondayToMondayWeekRange(mondayRef, 0);
+      expect(range.weekStartDate).toBe('2026-09-07');
+      expect(range.weekEndDate).toBe('2026-09-14');
+    });
+
+    it('calculates the same Monday-to-Monday window when referenced mid-week or on Sunday', () => {
+      // Wednesday 2026-09-09
+      const wednesdayRef = new Date(2026, 8, 9, 14, 30, 0);
+      const wedRange = AttentionService.getMondayToMondayWeekRange(wednesdayRef, 0);
+      expect(wedRange.weekStartDate).toBe('2026-09-07');
+      expect(wedRange.weekEndDate).toBe('2026-09-14');
+
+      // Sunday 2026-09-13
+      const sundayRef = new Date(2026, 8, 13, 23, 59, 0);
+      const sunRange = AttentionService.getMondayToMondayWeekRange(sundayRef, 0);
+      expect(sunRange.weekStartDate).toBe('2026-09-07');
+      expect(sunRange.weekEndDate).toBe('2026-09-14');
+    });
+
+    it('handles week offsets correctly (previous and upcoming weeks)', () => {
+      const refDate = new Date(2026, 8, 7, 10, 0, 0); // Monday Sep 7
+
+      // Previous week (-1)
+      const prevWeek = AttentionService.getMondayToMondayWeekRange(refDate, -1);
+      expect(prevWeek.weekStartDate).toBe('2026-08-31');
+      expect(prevWeek.weekEndDate).toBe('2026-09-07');
+
+      // Next week (+1)
+      const nextWeek = AttentionService.getMondayToMondayWeekRange(refDate, 1);
+      expect(nextWeek.weekStartDate).toBe('2026-09-14');
+      expect(nextWeek.weekEndDate).toBe('2026-09-21');
+    });
+
+    it('handles month and year rollover gracefully', () => {
+      // Wednesday Dec 30, 2026
+      const endOfYear = new Date(2026, 11, 30, 10, 0, 0);
+      const range = AttentionService.getMondayToMondayWeekRange(endOfYear, 0);
+      expect(range.weekStartDate).toBe('2026-12-28');
+      expect(range.weekEndDate).toBe('2027-01-04');
+
+      // Both start and end dates must be Mondays (day 1)
+      const startParts = range.weekStartDate.split('-').map(Number);
+      const endParts = range.weekEndDate.split('-').map(Number);
+      const startDate = new Date(startParts[0], startParts[1] - 1, startParts[2]);
+      const endDate = new Date(endParts[0], endParts[1] - 1, endParts[2]);
+
+      expect(startDate.getDay()).toBe(1); // Monday
+      expect(endDate.getDay()).toBe(1); // Monday
+    });
+  });
 });
