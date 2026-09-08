@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useContext } from 'react';
-import { ChevronLeft, ChevronRight, CheckCircle2, Clock, Circle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CheckCircle2, Clock, Circle, X } from 'lucide-react';
 import { getTodayString, addDays, parseDate, formatDate, formatDisplayDate } from '../../domain/utils/date';
 import { AppContext } from '../context/AppContext';
 import { NodeStatus } from '../../domain/models/types';
@@ -52,15 +52,14 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
   customTasks,
 }) => {
   const popoverRef = useRef<HTMLDivElement>(null);
-  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Parse initial selected date or fallback to today
   const initialDate = value ? parseDate(value) : new Date();
   const [viewYear, setViewYear] = useState<number>(initialDate.getFullYear());
   const [viewMonth, setViewMonth] = useState<number>(initialDate.getMonth()); // 0-indexed
 
-  // Workload hover state
-  const [hoveredDate, setHoveredDate] = useState<string | null>(null);
+  // Workload details panel state (opened on clicking a day balloon)
+  const [activePanelDate, setActivePanelDate] = useState<string | null>(null);
   const [previewPlacement, setPreviewPlacement] = useState<'right' | 'left' | 'bottom'>('right');
 
   // Safely consume AppContext (gracefully null if outside provider)
@@ -188,15 +187,12 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleKeyDown);
-      if (hoverTimeoutRef.current) {
-        clearTimeout(hoverTimeoutRef.current);
-      }
     };
   }, [onClose]);
 
-  // Viewport-aware smart placement of hover preview card
+  // Viewport-aware smart placement of workload details panel
   useEffect(() => {
-    if (!hoveredDate || !popoverRef.current) return;
+    if (!activePanelDate || !popoverRef.current) return;
     const rect = popoverRef.current.getBoundingClientRect();
     const screenW = typeof window !== 'undefined' ? window.innerWidth : 1024;
 
@@ -208,10 +204,11 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
     } else {
       setPreviewPlacement('bottom');
     }
-  }, [hoveredDate]);
+  }, [activePanelDate]);
 
   const handlePrevMonth = (e: React.MouseEvent) => {
     e.stopPropagation();
+    setActivePanelDate(null);
     if (viewMonth === 0) {
       setViewMonth(11);
       setViewYear((y) => y - 1);
@@ -222,6 +219,7 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
 
   const handleNextMonth = (e: React.MouseEvent) => {
     e.stopPropagation();
+    setActivePanelDate(null);
     if (viewMonth === 11) {
       setViewMonth(0);
       setViewYear((y) => y + 1);
@@ -264,45 +262,6 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
     const target = daysFromToday === 0 ? today : addDays(today, daysFromToday);
     onChange(target);
     onClose();
-  };
-
-  // Hover handlers for day cell & balloon preview
-  const handleMouseEnterDay = (dateStr: string) => {
-    if (hoverTimeoutRef.current) {
-      clearTimeout(hoverTimeoutRef.current);
-      hoverTimeoutRef.current = null;
-    }
-    const dayTasks = tasksByDate.get(dateStr);
-    if (dayTasks && dayTasks.length > 0) {
-      setHoveredDate(dateStr);
-    } else {
-      setHoveredDate(null);
-    }
-  };
-
-  const handleMouseLeaveDay = () => {
-    if (hoverTimeoutRef.current) {
-      clearTimeout(hoverTimeoutRef.current);
-    }
-    hoverTimeoutRef.current = setTimeout(() => {
-      setHoveredDate(null);
-    }, 120);
-  };
-
-  const handleMouseEnterPreview = () => {
-    if (hoverTimeoutRef.current) {
-      clearTimeout(hoverTimeoutRef.current);
-      hoverTimeoutRef.current = null;
-    }
-  };
-
-  const handleMouseLeavePreview = () => {
-    if (hoverTimeoutRef.current) {
-      clearTimeout(hoverTimeoutRef.current);
-    }
-    hoverTimeoutRef.current = setTimeout(() => {
-      setHoveredDate(null);
-    }, 120);
   };
 
   // Build Month Grid
@@ -380,8 +339,84 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
       ? 'bottom-full mb-2'
       : 'top-full mt-2';
 
-  const hoveredTasks = hoveredDate ? tasksByDate.get(hoveredDate) || [] : [];
-  const totalAU = hoveredTasks.reduce((acc, t) => acc + (t.estimatedAU || 0), 0);
+  const panelTasks = activePanelDate ? tasksByDate.get(activePanelDate) || [] : [];
+  const activeTasks = panelTasks.filter((t) => t.status !== 'completed');
+  const completedTasks = panelTasks.filter((t) => t.status === 'completed');
+  const pendingAU = activeTasks.reduce((acc, t) => acc + (t.estimatedAU || 0), 0);
+  const completedAU = completedTasks.reduce((acc, t) => acc + (t.estimatedAU || 0), 0);
+
+  const renderTaskRow = (task: CalendarDayTask) => {
+    const isCurrent = task.id === currentTaskId;
+    const isCompleted = task.status === 'completed';
+    const isInProgress = task.status === 'in_progress';
+
+    return (
+      <div
+        key={task.id}
+        data-testid={`preview-task-${task.id}`}
+        className={`p-1.5 rounded-lg border text-left transition-colors flex items-start space-x-2 ${
+          isCurrent
+            ? 'bg-emerald-50/70 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700/60 ring-1 ring-emerald-500/20'
+            : isCompleted
+            ? 'bg-slate-50/60 dark:bg-slate-800/30 border-slate-100 dark:border-slate-800/60 opacity-80'
+            : 'bg-slate-50 dark:bg-slate-800/50 border-slate-100 dark:border-slate-800 hover:bg-slate-100/70 dark:hover:bg-slate-800'
+        }`}
+      >
+        {/* Status icon */}
+        <div className="pt-0.5 shrink-0">
+          {isCompleted ? (
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+          ) : isInProgress ? (
+            <Clock className="w-3.5 h-3.5 text-blue-500 animate-pulse" />
+          ) : (
+            <Circle className="w-3.5 h-3.5 text-slate-400" />
+          )}
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center space-x-1 mb-0.5">
+            <span
+              className={`text-xs leading-snug font-medium truncate block flex-1 ${
+                isCompleted
+                  ? 'line-through text-slate-400 dark:text-slate-500'
+                  : 'text-slate-800 dark:text-slate-100'
+              }`}
+              title={task.text}
+            >
+              {task.text}
+            </span>
+            {isCurrent && (
+              <span className="shrink-0 text-[9px] font-bold px-1 rounded bg-emerald-500 text-white">
+                Current
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
+            <span className="truncate max-w-[130px] font-medium text-slate-600 dark:text-slate-300">
+              {task.projectName}
+            </span>
+            {task.estimatedAU !== undefined && task.estimatedAU > 0 ? (
+              <span
+                className={`shrink-0 font-mono font-semibold px-1 py-0.2 rounded text-[9.5px] ${
+                  isCompleted
+                    ? 'text-slate-400 bg-slate-100 dark:bg-slate-800'
+                    : 'text-amber-600 dark:text-amber-400 bg-amber-100/60 dark:bg-amber-950/50'
+                }`}
+              >
+                {Math.round(task.estimatedAU * 10) / 10} AU
+              </span>
+            ) : (
+              <span className="shrink-0 text-slate-400 font-mono text-[9px]">
+                — AU
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div
@@ -430,15 +465,17 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
       <div className="grid grid-cols-7 gap-1 text-center">
         {cells.map((cell, idx) => {
           const isCurrentMonth = cell.monthType === 'current';
-          const tasks = tasksByDate.get(cell.dateString) || [];
-          const taskCount = tasks.length;
+          const dayTasks = tasksByDate.get(cell.dateString) || [];
+          const taskCount = dayTasks.length;
+          const completedCount = dayTasks.filter((t) => t.status === 'completed').length;
+          const pendingCount = taskCount - completedCount;
+          const isAllCompleted = taskCount > 0 && pendingCount === 0;
+          const isPanelOpen = activePanelDate === cell.dateString;
 
           return (
             <div
               key={`${cell.dateString}-${idx}`}
               className="relative flex items-center justify-center"
-              onMouseEnter={() => handleMouseEnterDay(cell.dateString)}
-              onMouseLeave={handleMouseLeaveDay}
             >
               <button
                 type="button"
@@ -459,27 +496,38 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
                 )}
               </button>
 
-              {/* Workload Balloon Badge */}
+              {/* Workload Balloon Badge (Click to open workload panel) */}
               {taskCount > 0 && (
-                <div
-                  onMouseEnter={() => handleMouseEnterDay(cell.dateString)}
+                <button
+                  type="button"
                   onClick={(e) => {
-                    handleSelectDay(cell.dayNum, cell.monthType, e);
+                    e.stopPropagation();
+                    setActivePanelDate((prev) => (prev === cell.dateString ? null : cell.dateString));
                   }}
-                  title={`${taskCount} ${taskCount === 1 ? 'task' : 'tasks'} due on this day (hover for details)`}
+                  title={
+                    isAllCompleted
+                      ? `${taskCount} tasks (all completed) • Click to view tasks`
+                      : completedCount > 0
+                      ? `${pendingCount} pending, ${completedCount} completed • Click to view tasks`
+                      : `${taskCount} ${taskCount === 1 ? 'task' : 'tasks'} due • Click to view tasks`
+                  }
                   data-testid={`task-balloon-${cell.dateString}`}
-                  className={`absolute -top-1 -right-0.5 z-20 cursor-pointer select-none font-bold text-[9px] tracking-tight flex items-center justify-center shadow-sm transition-transform hover:scale-125 ${
+                  className={`absolute -top-1 -right-0.5 z-20 cursor-pointer select-none font-bold text-[9px] tracking-tight flex items-center justify-center shadow-sm transition-all duration-150 hover:scale-125 hover:shadow-md hover:ring-2 hover:ring-offset-1 ${
+                    isPanelOpen ? 'scale-125 ring-2 ring-offset-1 ring-slate-800 dark:ring-white z-30' : ''
+                  } ${
                     taskCount > 9 ? 'px-1 h-3.5 min-w-[14px] rounded-full' : 'w-3.5 h-3.5 rounded-full'
                   } ${
-                    taskCount >= 6
-                      ? 'bg-rose-500 text-white ring-1 ring-white dark:ring-slate-900 shadow-rose-500/30'
-                      : taskCount >= 3
-                      ? 'bg-amber-500 text-white ring-1 ring-white dark:ring-slate-900 shadow-amber-500/30'
-                      : 'bg-indigo-500 text-white ring-1 ring-white dark:ring-slate-900 shadow-indigo-500/30'
+                    isAllCompleted
+                      ? 'bg-emerald-500 hover:bg-emerald-600 text-white ring-1 ring-white dark:ring-slate-900 shadow-emerald-500/30 hover:ring-emerald-400'
+                      : pendingCount >= 6
+                      ? 'bg-rose-500 hover:bg-rose-600 text-white ring-1 ring-white dark:ring-slate-900 shadow-rose-500/30 hover:ring-rose-400'
+                      : pendingCount >= 3
+                      ? 'bg-amber-500 hover:bg-amber-600 text-white ring-1 ring-white dark:ring-slate-900 shadow-amber-500/30 hover:ring-amber-400'
+                      : 'bg-indigo-500 hover:bg-indigo-600 text-white ring-1 ring-white dark:ring-slate-900 shadow-indigo-500/30 hover:ring-indigo-400'
                   }`}
                 >
                   {taskCount}
-                </div>
+                </button>
               )}
             </div>
           );
@@ -511,114 +559,128 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
         </button>
       </div>
 
-      {/* Hover Preview Popover */}
-      {hoveredDate && hoveredTasks.length > 0 && (
+      {/* Click-Triggered Workload Details Panel */}
+      {activePanelDate && panelTasks.length > 0 && (
         <div
           data-testid="calendar-workload-preview"
-          onMouseEnter={handleMouseEnterPreview}
-          onMouseLeave={handleMouseLeavePreview}
+          onClick={(e) => e.stopPropagation()}
           className={`nodrag nowheel nopan absolute ${
             previewPlacement === 'right'
               ? 'left-full ml-2 top-0'
               : previewPlacement === 'left'
               ? 'right-full mr-2 top-0'
               : 'top-full mt-2 left-0 right-0'
-          } w-[280px] max-w-[calc(100vw-2rem)] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-3 z-[10000] select-none animate-in fade-in zoom-in-95 duration-100 ring-1 ring-slate-950/10 text-left`}
+          } w-[290px] max-w-[calc(100vw-2rem)] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-3 z-[10000] select-none animate-in fade-in zoom-in-95 duration-100 ring-1 ring-slate-950/10 text-left flex flex-col`}
         >
           {/* Header */}
-          <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center justify-between pb-2 mb-1.5 border-b border-slate-100 dark:border-slate-800">
             <div className="flex flex-col min-w-0 pr-1">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                 Deadline workload
               </span>
               <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
                 {appContext?.formatDateDisplay
-                  ? appContext.formatDateDisplay(hoveredDate)
-                  : formatDisplayDate(hoveredDate, 'MMM_D_YYYY')}
+                  ? appContext.formatDateDisplay(activePanelDate)
+                  : formatDisplayDate(activePanelDate, 'MMM_D_YYYY')}
               </span>
             </div>
             <div className="flex items-center space-x-1.5 shrink-0">
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
-                {hoveredTasks.length} {hoveredTasks.length === 1 ? 'task' : 'tasks'}
-              </span>
-              {totalAU > 0 && (
-                <span
-                  className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60 flex items-center space-x-1"
-                  title="Total Attention Units (UA/AU)"
-                >
-                  <Clock className="w-2.5 h-2.5 shrink-0" />
-                  <span>{Math.round(totalAU * 10) / 10} AU</span>
+              <button
+                type="button"
+                data-testid="close-workload-panel"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActivePanelDate(null);
+                }}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                title="Close panel"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Subheader Badges */}
+          <div className="flex items-center justify-between mb-2 px-0.5">
+            <div className="flex items-center space-x-1">
+              {activeTasks.length === 0 ? (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60">
+                  All {completedTasks.length} completed
+                </span>
+              ) : completedTasks.length > 0 ? (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                  {activeTasks.length} pending • {completedTasks.length} done
+                </span>
+              ) : (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                  {activeTasks.length} {activeTasks.length === 1 ? 'task' : 'tasks'}
                 </span>
               )}
+            </div>
+
+            <div className="flex items-center space-x-1">
+              {pendingAU > 0 ? (
+                <span
+                  className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60 flex items-center space-x-1"
+                  title="Pending Attention Units (UA/AU)"
+                >
+                  <Clock className="w-2.5 h-2.5 shrink-0" />
+                  <span>{Math.round(pendingAU * 10) / 10} AU</span>
+                </span>
+              ) : completedAU > 0 ? (
+                <span
+                  className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60 flex items-center space-x-1"
+                  title="Completed Attention Units (UA/AU)"
+                >
+                  <CheckCircle2 className="w-2.5 h-2.5 shrink-0" />
+                  <span>{Math.round(completedAU * 10) / 10} AU</span>
+                </span>
+              ) : null}
             </div>
           </div>
 
           {/* Scrollable Tasks List */}
           <div className="space-y-1.5 max-h-56 overflow-y-auto pr-0.5">
-            {hoveredTasks.map((task) => {
-              const isCurrent = task.id === currentTaskId;
-              const isCompleted = task.status === 'completed';
-              const isInProgress = task.status === 'in_progress';
-
-              return (
-                <div
-                  key={task.id}
-                  data-testid={`preview-task-${task.id}`}
-                  className={`p-1.5 rounded-lg border text-left transition-colors flex items-start space-x-2 ${
-                    isCurrent
-                      ? 'bg-emerald-50/70 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700/60 ring-1 ring-emerald-500/20'
-                      : 'bg-slate-50 dark:bg-slate-800/50 border-slate-100 dark:border-slate-800 hover:bg-slate-100/70 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  {/* Status icon */}
-                  <div className="pt-0.5 shrink-0">
-                    {isCompleted ? (
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                    ) : isInProgress ? (
-                      <Clock className="w-3.5 h-3.5 text-blue-500 animate-pulse" />
-                    ) : (
-                      <Circle className="w-3.5 h-3.5 text-slate-400" />
-                    )}
+            {/* Active / Pending Tasks */}
+            {activeTasks.length > 0 && (
+              <>
+                {completedTasks.length > 0 && (
+                  <div className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider px-1 pt-0.5">
+                    Pending ({activeTasks.length})
                   </div>
+                )}
+                {activeTasks.map((task) => renderTaskRow(task))}
+              </>
+            )}
 
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center space-x-1 mb-0.5">
-                      <span
-                        className={`text-xs leading-snug font-medium truncate block flex-1 ${
-                          isCompleted
-                            ? 'line-through text-slate-400 dark:text-slate-500'
-                            : 'text-slate-800 dark:text-slate-100'
-                        }`}
-                        title={task.text}
-                      >
-                        {task.text}
-                      </span>
-                      {isCurrent && (
-                        <span className="shrink-0 text-[9px] font-bold px-1 rounded bg-emerald-500 text-white">
-                          Current
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
-                      <span className="truncate max-w-[130px] font-medium text-slate-600 dark:text-slate-300">
-                        {task.projectName}
-                      </span>
-                      {task.estimatedAU !== undefined && task.estimatedAU > 0 ? (
-                        <span className="shrink-0 font-mono font-semibold text-amber-600 dark:text-amber-400 bg-amber-100/60 dark:bg-amber-950/50 px-1 py-0.2 rounded text-[9.5px]">
-                          {Math.round(task.estimatedAU * 10) / 10} AU
-                        </span>
-                      ) : (
-                        <span className="shrink-0 text-slate-400 font-mono text-[9px]">
-                          — AU
-                        </span>
-                      )}
-                    </div>
+            {/* Completed Tasks */}
+            {completedTasks.length > 0 && (
+              <>
+                {activeTasks.length > 0 && (
+                  <div className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider px-1 pt-2 border-t border-slate-100 dark:border-slate-800">
+                    Completed ({completedTasks.length})
                   </div>
-                </div>
-              );
-            })}
+                )}
+                {completedTasks.map((task) => renderTaskRow(task))}
+              </>
+            )}
+          </div>
+
+          {/* Footer Action: Set as deadline */}
+          <div className="pt-2 mt-2 border-t border-slate-100 dark:border-slate-800">
+            <button
+              type="button"
+              data-testid="select-panel-date"
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange(activePanelDate);
+                onClose();
+              }}
+              className="w-full py-1.5 px-3 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition-colors cursor-pointer flex items-center justify-center space-x-1.5"
+            >
+              <span>Set as deadline</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
       )}

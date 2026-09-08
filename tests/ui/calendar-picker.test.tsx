@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { CalendarPicker, CalendarDayTask } from '../../src/ui/components/CalendarPicker';
 import { AppContext } from '../../src/ui/context/AppContext';
 
-describe('CalendarPicker - Deadline task counts and hover preview balloon', () => {
+describe('CalendarPicker - Deadline task counts, completed green balloon, and click panel', () => {
   const onChangeMock = vi.fn();
   const onCloseMock = vi.fn();
 
@@ -12,6 +12,7 @@ describe('CalendarPicker - Deadline task counts and hover preview balloon', () =
   });
 
   const mockTasks: CalendarDayTask[] = [
+    // 9 pending tasks on 2026-09-09 + 1 completed task (total 10, pending 9 -> Rose)
     {
       id: 'task-1',
       text: 'Finalize quarterly financial report',
@@ -93,6 +94,16 @@ describe('CalendarPicker - Deadline task counts and hover preview balloon', () =
       isStandalone: true,
       projectName: 'Standalone',
     },
+    // 14 tasks on 2026-09-08, ALL completed (should be GREEN)
+    ...Array.from({ length: 14 }, (_, i) => ({
+      id: `task-yesterday-${i + 1}`,
+      text: `Completed yesterday task ${i + 1}`,
+      dueDate: '2026-09-08',
+      status: 'completed' as const,
+      estimatedAU: 1,
+      projectName: 'Daily Routine',
+    })),
+    // 1 task on 2026-09-15 (pending 1 -> Indigo)
     {
       id: 'task-11',
       text: 'Prepare slide deck for board meeting',
@@ -101,9 +112,18 @@ describe('CalendarPicker - Deadline task counts and hover preview balloon', () =
       estimatedAU: 4,
       projectName: 'Executive',
     },
+    // 4 tasks on 2026-09-22 (pending 4 -> Amber)
+    ...Array.from({ length: 4 }, (_, i) => ({
+      id: `task-amber-${i + 1}`,
+      text: `Amber task ${i + 1}`,
+      dueDate: '2026-09-22',
+      status: 'planned' as const,
+      estimatedAU: 0.5,
+      projectName: 'Design',
+    })),
   ];
 
-  it('renders a workload balloon badge with the exact number of tasks (e.g. 10) on a date', () => {
+  it('renders green balloon when all tasks are completed (e.g. 14 completed tasks on 2026-09-08)', () => {
     render(
       <CalendarPicker
         value="2026-09-01"
@@ -113,21 +133,40 @@ describe('CalendarPicker - Deadline task counts and hover preview balloon', () =
       />
     );
 
-    // Look for balloon on September 9th (10 tasks)
-    const balloonSept9 = screen.getByTestId('task-balloon-2026-09-09');
-    expect(balloonSept9).toBeDefined();
-    expect(balloonSept9.textContent).toBe('10');
-
-    // Look for balloon on September 15th (1 task)
-    const balloonSept15 = screen.getByTestId('task-balloon-2026-09-15');
-    expect(balloonSept15).toBeDefined();
-    expect(balloonSept15.textContent).toBe('1');
-
-    // Day without tasks (e.g. Sept 10) should not have a balloon
-    expect(screen.queryByTestId('task-balloon-2026-09-10')).toBeNull();
+    const balloonSept8 = screen.getByTestId('task-balloon-2026-09-08');
+    expect(balloonSept8).toBeDefined();
+    expect(balloonSept8.textContent).toBe('14');
+    // All completed must be green (bg-emerald-500)
+    expect(balloonSept8.className).toContain('bg-emerald-500');
   });
 
-  it('displays hover preview with task titles, projects, and respective UAs when hovering the balloon', async () => {
+  it('renders rose balloon for heavy pending workload (>=6) and amber for moderate (3-5)', () => {
+    render(
+      <CalendarPicker
+        value="2026-09-01"
+        onChange={onChangeMock}
+        onClose={onCloseMock}
+        customTasks={mockTasks}
+      />
+    );
+
+    // September 9th has 9 pending tasks -> rose
+    const balloonSept9 = screen.getByTestId('task-balloon-2026-09-09');
+    expect(balloonSept9.textContent).toBe('10');
+    expect(balloonSept9.className).toContain('bg-rose-500');
+
+    // September 22nd has 4 pending tasks -> amber
+    const balloonSept22 = screen.getByTestId('task-balloon-2026-09-22');
+    expect(balloonSept22.textContent).toBe('4');
+    expect(balloonSept22.className).toContain('bg-amber-500');
+
+    // September 15th has 1 pending task -> indigo
+    const balloonSept15 = screen.getByTestId('task-balloon-2026-09-15');
+    expect(balloonSept15.textContent).toBe('1');
+    expect(balloonSept15.className).toContain('bg-indigo-500');
+  });
+
+  it('opens workload panel on clicking the balloon and keeps it open for scrolling until closed', async () => {
     render(
       <CalendarPicker
         value="2026-09-01"
@@ -140,28 +179,49 @@ describe('CalendarPicker - Deadline task counts and hover preview balloon', () =
 
     const balloonSept9 = screen.getByTestId('task-balloon-2026-09-09');
 
-    // Hover over the balloon
-    fireEvent.mouseEnter(balloonSept9);
+    // Preview should NOT be open yet
+    expect(screen.queryByTestId('calendar-workload-preview')).toBeNull();
 
-    // Preview popover should appear
-    const preview = await screen.findByTestId('calendar-workload-preview');
-    expect(preview).toBeDefined();
+    // Click the balloon to open panel
+    fireEvent.click(balloonSept9);
 
-    // Verify header contents (10 tasks, total AU = 14 AU)
-    expect(screen.getByText('10 tasks')).toBeDefined();
-    expect(screen.getByText('14 AU')).toBeDefined();
+    // Panel is now open!
+    const panel = await screen.findByTestId('calendar-workload-preview');
+    expect(panel).toBeDefined();
 
-    // Verify task items with their respective UAs
+    // Verify subheader: 9 pending • 1 done
+    expect(screen.getByText('9 pending • 1 done')).toBeDefined();
+    expect(screen.getByText('13.5 AU')).toBeDefined();
+
+    // Verify task content with respective UAs
     expect(screen.getByText('Finalize quarterly financial report')).toBeDefined();
-    expect(screen.getAllByText('2 AU').length).toBe(2);
-    expect(screen.getAllByText('Q3 Finance').length).toBe(2);
-
-    // Verify "Current" indicator for currentTaskId
     expect(screen.getByText('Current')).toBeDefined();
-
-    // Verify completed task
     expect(screen.getByText('Order office ergonomic supplies')).toBeDefined();
-    expect(screen.getByText('Standalone')).toBeDefined();
+
+    // Close button works
+    const closeBtn = screen.getByTestId('close-workload-panel');
+    fireEvent.click(closeBtn);
+    expect(screen.queryByTestId('calendar-workload-preview')).toBeNull();
+  });
+
+  it('allows clicking "Set as deadline" button inside the panel to select date and close calendar', async () => {
+    render(
+      <CalendarPicker
+        value="2026-09-01"
+        onChange={onChangeMock}
+        onClose={onCloseMock}
+        customTasks={mockTasks}
+      />
+    );
+
+    const balloonSept8 = screen.getByTestId('task-balloon-2026-09-08');
+    fireEvent.click(balloonSept8);
+
+    const setDeadlineBtn = await screen.findByTestId('select-panel-date');
+    fireEvent.click(setDeadlineBtn);
+
+    expect(onChangeMock).toHaveBeenCalledWith('2026-09-08');
+    expect(onCloseMock).toHaveBeenCalled();
   });
 
   it('consumes tasks from AppContext when customTasks is not provided', async () => {
@@ -208,18 +268,18 @@ describe('CalendarPicker - Deadline task counts and hover preview balloon', () =
     expect(balloonSept20).toBeDefined();
     expect(balloonSept20.textContent).toBe('2');
 
-    // Hover over balloon
-    fireEvent.mouseEnter(balloonSept20);
+    // Click to open panel
+    fireEvent.click(balloonSept20);
 
-    const preview = await screen.findByTestId('calendar-workload-preview');
-    expect(preview).toBeDefined();
+    const panel = await screen.findByTestId('calendar-workload-preview');
+    expect(panel).toBeDefined();
     expect(screen.getByText('2 tasks')).toBeDefined();
     expect(screen.getByText('4 AU')).toBeDefined();
     expect(screen.getByText('Implement search algorithm')).toBeDefined();
     expect(screen.getByText('Buy groceries')).toBeDefined();
   });
 
-  it('allows clicking the day button or the balloon to select date and close calendar', () => {
+  it('allows clicking the day number directly to select date and close calendar immediately', () => {
     render(
       <CalendarPicker
         value="2026-09-01"
@@ -229,8 +289,9 @@ describe('CalendarPicker - Deadline task counts and hover preview balloon', () =
       />
     );
 
-    const balloonSept9 = screen.getByTestId('task-balloon-2026-09-09');
-    fireEvent.click(balloonSept9);
+    // Click the day button for the 9th
+    const dayBtn = screen.getByText('9');
+    fireEvent.click(dayBtn);
 
     expect(onChangeMock).toHaveBeenCalledWith('2026-09-09');
     expect(onCloseMock).toHaveBeenCalled();
