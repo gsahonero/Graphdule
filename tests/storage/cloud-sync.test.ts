@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SyncCoordinator } from '../../src/storage/sync/sync-coordinator';
-import { ProjectDocument, StandaloneTask, WeeklyAttentionReviewRecord } from '../../src/domain/models/types';
+import { ProjectDocument, StandaloneTask, WeeklyAttentionReviewRecord, UserPreferences } from '../../src/domain/models/types';
 import { GDriveAuth } from '../../src/storage/gdrive/gdrive-auth';
 import { GDriveClient } from '../../src/storage/gdrive/gdrive-client';
 import { OneDriveAuth } from '../../src/storage/onedrive/onedrive-auth';
@@ -738,13 +738,20 @@ describe('Cloud Sync & Multi-Device Coordination', () => {
       };
 
       const identicalTasks: StandaloneTask[] = [
-        { id: 'task_1', text: 'Existing Task', dueDate: '2026-09-05', status: 'planned', createdAt: '2026-09-01T10:00:00Z' },
+        {
+          id: 'task_1',
+          text: 'Existing Task',
+          dueDate: '2026-09-05',
+          status: 'planned',
+          createdAt: '2026-09-01T10:00:00Z',
+          updatedAt: '2026-09-01T10:00:00Z',
+        },
       ];
 
-      const identicalPrefs = {
-        myDayMode: 'today' as const,
-        theme: 'dark' as const,
-        dateFormat: 'DD/MM/YYYY' as const,
+      const identicalPrefs: UserPreferences = {
+        myDayMode: 'today',
+        theme: 'dark',
+        dateFormat: 'DD/MM/YYYY',
         onboardingCompleted: true,
         preferredStorageProvider: 'browser',
       };
@@ -778,8 +785,8 @@ describe('Cloud Sync & Multi-Device Coordination', () => {
         return null;
       });
       vi.spyOn(GDriveClient, 'findFileByName').mockImplementation(async (name: string) => {
-        if (name === 'standalone_tasks.json') return { id: 'cloud_tasks_file', name };
-        if (name === 'preferences.json') return { id: 'cloud_prefs_file', name };
+        if (name === 'standalone_tasks.json') return { id: 'cloud_tasks_file', name, modifiedTime: '2026-09-01T10:00:00Z' };
+        if (name === 'preferences.json') return { id: 'cloud_prefs_file', name, modifiedTime: '2026-09-01T10:00:00Z' };
         return null;
       });
 
@@ -846,7 +853,17 @@ describe('Cloud Sync & Multi-Device Coordination', () => {
           createdAt: '2026-09-01T10:00:00Z',
           updatedAt: '2026-09-01T10:00:00Z',
         },
-        nodes: [{ id: 'node_1', text: 'Goal', projectId: 'proj_1', status: 'planned', createdAt: '2026-09-01T10:00:00Z' }],
+        nodes: [
+          {
+            id: 'node_1',
+            text: 'Goal',
+            projectId: 'proj_1',
+            status: 'planned',
+            dueDate: '2026-09-05',
+            createdAt: '2026-09-01T10:00:00Z',
+            updatedAt: '2026-09-01T10:00:00Z',
+          },
+        ],
         edges: [],
         notes: [],
         history: [],
