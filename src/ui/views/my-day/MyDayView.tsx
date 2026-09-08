@@ -991,6 +991,7 @@ export const MyDayView: React.FC = () => {
                 onClose={() => setActiveCalendarLateId(null)}
                 position="bottom"
                 align="right"
+                currentTaskId={task.id}
               />
             )}
           </div>
@@ -1091,6 +1092,7 @@ export const MyDayView: React.FC = () => {
                 onClose={() => setActiveCalendarLateId(null)}
                 position="bottom"
                 align="right"
+                currentTaskId={task.id}
               />
             )}
           </div>
@@ -1256,6 +1258,7 @@ export const MyDayView: React.FC = () => {
                 onClose={() => setActiveCalendarTodayProjectId(null)}
                 position="bottom"
                 align="right"
+                currentTaskId={task.id}
               />
             )}
           </div>
@@ -1349,6 +1352,7 @@ export const MyDayView: React.FC = () => {
                 onClose={() => setActiveCalendarTaskId(null)}
                 position="bottom"
                 align="right"
+                currentTaskId={task.id}
               />
             )}
           </div>

@@ -684,6 +684,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
                     onClose={() => setIsCalendarOpen(false)}
                     position="bottom"
                     align="left"
+                    currentTaskId={node.id}
                   />
                 )}
               </div>
@@ -1109,6 +1110,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
               onClose={() => setIsCalendarOpen(false)}
               position="top"
               align="left"
+              currentTaskId={node.id}
             />
           )}
         </div>
