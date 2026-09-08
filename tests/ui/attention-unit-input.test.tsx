@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { AttentionUnitInput } from '../../src/ui/components/AttentionUnitInput';
 import * as AppContextModule from '../../src/ui/context/AppContext';
@@ -75,5 +75,31 @@ describe('AttentionUnitInput - Arbitrary AU numeric entry and live minutes', () 
     fireEvent.click(doneBtn);
 
     expect(onChangeMock).toHaveBeenCalledWith(undefined);
+  });
+
+  it('notifies onOpenChange when opening and closing popover with correct alignment', () => {
+    const onOpenChangeMock = vi.fn();
+    render(
+      <AttentionUnitInput
+        value={1}
+        onChange={onChangeMock}
+        auMinutes={15}
+        align="right"
+        onOpenChange={onOpenChangeMock}
+      />
+    );
+
+    // Open
+    fireEvent.click(screen.getByText('1 AU'));
+    expect(onOpenChangeMock).toHaveBeenCalledWith(true);
+
+    // Verify right alignment class
+    const popover = screen.getByText('Attention Estimate').closest('.absolute');
+    expect(popover?.className).toContain('right-0');
+
+    // Close
+    const doneBtn = screen.getByRole('button', { name: 'Done' });
+    fireEvent.click(doneBtn);
+    expect(onOpenChangeMock).toHaveBeenCalledWith(false);
   });
 });

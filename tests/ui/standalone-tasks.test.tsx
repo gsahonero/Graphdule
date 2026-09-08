@@ -9,6 +9,7 @@ describe('Standalone Tasks Name Editing and Tooltip in MyDayView', () => {
   const updateStandaloneTaskMock = vi.fn();
   const updateStandaloneTaskStatusMock = vi.fn();
   const deleteStandaloneTaskMock = vi.fn();
+  const addStandaloneTaskMock = vi.fn();
 
   const mockStandaloneTasks: StandaloneTask[] = [
     {
@@ -48,7 +49,7 @@ describe('Standalone Tasks Name Editing and Tooltip in MyDayView', () => {
       allActiveNodes: [],
       projectsMap: new Map(),
       standaloneTasks: mockStandaloneTasks,
-      addStandaloneTask: vi.fn(),
+      addStandaloneTask: addStandaloneTaskMock,
       updateStandaloneTask: updateStandaloneTaskMock,
       updateStandaloneTaskStatus: updateStandaloneTaskStatusMock,
       deleteStandaloneTask: deleteStandaloneTaskMock,
@@ -172,5 +173,60 @@ describe('Standalone Tasks Name Editing and Tooltip in MyDayView', () => {
         'Super very long standalone task name that exceeds normal screen container space and must be truncated'
       )
     ).toBeDefined();
+  });
+
+  it('forces user to pick a date by defaulting date to empty and disabling submission', () => {
+    render(<MyDayView />);
+
+    // Check that the date selector button shows "Pick date" placeholder
+    const dateBtn = screen.getAllByTitle('Select due date (required)')[0];
+    expect(dateBtn).toBeDefined();
+    expect(dateBtn.textContent).toContain('Pick date');
+
+    const input = screen.getByPlaceholderText(/Add a standalone task/i);
+    fireEvent.change(input, { target: { value: 'New standalone task' } });
+
+    // Submit button should be disabled because no date was chosen
+    const submitBtn = screen.getAllByTitle('Please select a due date')[0] as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(true);
+
+    // Attempting to submit via form submit does not call addStandaloneTask
+    fireEvent.submit(input.closest('form')!);
+    expect(addStandaloneTaskMock).not.toHaveBeenCalled();
+  });
+
+  it('enables submission when a date is selected and creates task, then resets date to empty', async () => {
+    render(<MyDayView />);
+
+    const input = screen.getByPlaceholderText(/Add a standalone task/i);
+    fireEvent.change(input, { target: { value: 'Buy groceries' } });
+
+    // Click date button to open CalendarPicker
+    const dateBtn = screen.getAllByTitle('Select due date (required)')[0];
+    fireEvent.click(dateBtn);
+
+    // CalendarPicker quick button "Today"
+    const todayQuickBtn = screen.getAllByText('Today')[0];
+    fireEvent.click(todayQuickBtn);
+
+    // Now submit button should be enabled and date button displays formatted date
+    const enabledSubmitBtn = screen.getAllByTitle('Add task')[0] as HTMLButtonElement;
+    expect(enabledSubmitBtn.disabled).toBe(false);
+
+    await act(async () => {
+      fireEvent.click(enabledSubmitBtn);
+    });
+
+    expect(addStandaloneTaskMock).toHaveBeenCalledTimes(1);
+    expect(addStandaloneTaskMock).toHaveBeenCalledWith(
+      'Buy groceries',
+      expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      undefined,
+      undefined
+    );
+
+    // After creation, input text and date should be reset to empty
+    expect((input as HTMLInputElement).value).toBe('');
+    expect(screen.getAllByTitle('Select due date (required)')[0].textContent).toContain('Pick date');
   });
 });

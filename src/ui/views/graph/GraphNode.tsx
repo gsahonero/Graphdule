@@ -42,7 +42,14 @@ export interface GraphNodeData extends Record<string, unknown> {
 }
 
 export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
-  const { formatDateDisplay, preferences, activityLog, updateTaskEstimate } = useApp();
+  const {
+    formatDateDisplay,
+    preferences,
+    activityLog,
+    updateTaskEstimate,
+    activeWorkSession,
+    activeWorkElapsedSeconds,
+  } = useApp();
   const {
     node,
     isEGN,
@@ -125,6 +132,15 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
       .reduce((sum, s) => sum + s.au, 0);
   }, [activityLog, preferences.attentionSystemEnabled, preferences.attentionUnitMinutes, node.id]);
 
+  const isCurrentActive = activeWorkSession?.taskId === node.id;
+  const isPaused = isCurrentActive && !!activeWorkSession?.isPaused;
+
+  const formatTimer = (totalSeconds: number): string => {
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  };
+
   useEffect(() => {
     setEditText(node.text);
   }, [node.text]);
@@ -183,6 +199,9 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
     if (isDropTargetParent) {
       return 'border-amber-500 ring-4 ring-amber-500/70 shadow-2xl bg-amber-500/15 dark:bg-amber-500/25 scale-[1.03] z-50';
     }
+    if (isCurrentActive) {
+      return 'border-amber-500 ring-2 ring-amber-500/50 shadow-amber-500/20 bg-amber-50/20 dark:bg-amber-950/25 shadow-md';
+    }
     if (selected) return 'border-emerald-500 ring-2 ring-emerald-500/40 shadow-emerald-950/20 dark:shadow-emerald-950/80 bg-white dark:bg-slate-900/95';
     if (isEGN) return 'border-emerald-500/80 shadow-md bg-white dark:bg-slate-900/95';
     switch (node.status) {
@@ -214,6 +233,8 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
         className={`relative w-28 h-28 rounded-full flex flex-col items-center justify-center p-2.5 text-center transition-all select-none shadow-md ${
           isDropTargetParent
             ? 'ring-4 ring-amber-500 bg-amber-500/25 scale-110 z-50 border-2 border-amber-500 shadow-amber-500/40'
+            : isCurrentActive
+            ? 'ring-4 ring-amber-500 shadow-amber-500/40'
             : selected
             ? 'ring-4 ring-emerald-500 shadow-emerald-500/30'
             : isEGN
@@ -228,6 +249,8 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
         } ${
           isDropTargetParent
             ? 'bg-amber-100 dark:bg-amber-950/60 border-2 border-amber-500 text-amber-900 dark:text-amber-100'
+            : isCurrentActive
+            ? 'bg-amber-50/95 dark:bg-amber-950/80 border-2 border-amber-500 text-amber-900 dark:text-amber-100'
             : isEGN
             ? 'bg-emerald-50 dark:bg-emerald-950 border-2 border-emerald-500 text-emerald-900 dark:text-emerald-100'
             : node.status === 'completed'
@@ -284,9 +307,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            if (!isEGN && !hasInProgressChild) {
-              cycleStatus(e);
-            }
+            cycleStatus(e);
           }}
           disabled={isEGN || hasInProgressChild}
           className={`shrink-0 mb-1 p-1 rounded-full transition-transform ${
@@ -326,12 +347,34 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
           {node.text}
         </span>
 
+        {/* Active work timer badge on circle */}
+        {isCurrentActive && (
+          <div
+            className="nodrag nowheel nopan absolute -bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-900/95 dark:bg-slate-900/95 border border-amber-500/80 text-[10px] font-mono font-semibold text-amber-300 shadow-lg whitespace-nowrap pointer-events-auto"
+            title={`Active work session: ${formatTimer(activeWorkElapsedSeconds)}`}
+          >
+            <span className="relative flex h-2 w-2">
+              <span
+                className={`absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                  isPaused ? 'bg-amber-400' : 'bg-emerald-400 animate-ping'
+                }`}
+              />
+              <span
+                className={`relative inline-flex rounded-full h-2 w-2 ${
+                  isPaused ? 'bg-amber-400' : 'bg-emerald-500'
+                }`}
+              />
+            </span>
+            <span>{formatTimer(activeWorkElapsedSeconds)}</span>
+          </div>
+        )}
+
         {/* Floating Rich Tooltip / Hover Card Popover with Full Modification Capabilities */}
         {(isHovered || isCalendarOpen || isEditing || selected) && (
           <div
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
-            className="nodrag nowheel nopan absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-72 max-w-[calc(100vw-2rem)] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 shadow-2xl z-[999] pointer-events-auto text-left space-y-2.5 animate-in fade-in zoom-in-95 duration-150"
+            className="nodrag nowheel nopan absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-80 max-w-[calc(100vw-2rem)] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 shadow-2xl z-[999] pointer-events-auto text-left space-y-2.5 animate-in fade-in zoom-in-95 duration-150"
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
           >
@@ -463,57 +506,117 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
               )}
             </div>
 
-            {/* Popover Attention tracking & estimate row */}
+            {/* Popover Attention tracking & estimate section */}
             {preferences.attentionSystemEnabled && (
               <div
-                className="flex flex-col gap-1.5 p-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800 nodrag nowheel nopan"
+                className={`flex flex-col gap-2 p-2 rounded-xl border nodrag nowheel nopan ${
+                  isCurrentActive
+                    ? 'bg-amber-500/10 dark:bg-amber-500/15 border-amber-500/40 shadow-sm'
+                    : 'bg-slate-50 dark:bg-slate-950 border-slate-200/80 dark:border-slate-800'
+                }`}
                 onClick={(e) => e.stopPropagation()}
               >
-                <div className="flex items-center justify-between gap-2">
-                  <WorkButton
-                    taskId={node.id}
-                    taskText={node.text}
-                    projectId={node.projectId}
-                  />
-                  <AttentionUnitInput
-                    value={node.estimatedAU}
-                    onChange={(newAU) => updateTaskEstimate(node.id, newAU, true)}
-                    isParentDerived={subtaskCount > 0}
-                    auMinutes={preferences.attentionUnitMinutes}
-                    compact={true}
-                  />
-                </div>
-
-                {/* Dedicated Active Attention (Tracked Time) & Progress */}
-                {trackedAU > 0 && (
-                  <div className="pt-1.5 border-t border-slate-200/60 dark:border-slate-800/80 flex flex-col gap-1">
-                    <div className="flex items-center justify-between text-[10px] font-mono">
-                      <span className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-300 font-semibold">
-                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
-                        <span>Active: {AttentionService.formatAU(trackedAU, preferences.attentionUnitMinutes)}</span>
+                {isCurrentActive ? (
+                  <div className="flex flex-col gap-2">
+                    {/* Row 1: Dedicated Active Work Bar */}
+                    <div className="flex items-center justify-between gap-2">
+                      <WorkButton
+                        taskId={node.id}
+                        taskText={node.text}
+                        projectId={node.projectId}
+                      />
+                      <span className="text-[10px] font-mono font-semibold text-amber-600 dark:text-amber-300">
+                        Active: {AttentionService.formatAU(trackedAU, preferences.attentionUnitMinutes)}
                       </span>
-                      {node.estimatedAU && node.estimatedAU > 0 ? (
-                        <span className="text-slate-500 dark:text-slate-400 font-medium">
-                          {Math.round((trackedAU / node.estimatedAU) * 100)}%
-                        </span>
-                      ) : null}
                     </div>
 
+                    {/* Row 2: Estimate Stepper */}
+                    <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-amber-500/20">
+                      <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                        Estimate:
+                      </span>
+                      <AttentionUnitInput
+                        value={node.estimatedAU}
+                        onChange={(newAU) => updateTaskEstimate(node.id, newAU, true)}
+                        isParentDerived={subtaskCount > 0}
+                        auMinutes={preferences.attentionUnitMinutes}
+                        compact={true}
+                        align="right"
+                      />
+                    </div>
+
+                    {/* Row 3: Progress Bar */}
                     {node.estimatedAU && node.estimatedAU > 0 && (
-                      <div className="w-full h-1 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all duration-300 ${
-                            trackedAU > node.estimatedAU
-                              ? 'bg-amber-500'
-                              : 'bg-indigo-500 dark:bg-indigo-400'
-                          }`}
-                          style={{
-                            width: `${Math.min(100, Math.round((trackedAU / node.estimatedAU) * 100))}%`,
-                          }}
-                        />
+                      <div className="flex flex-col gap-1 pt-1">
+                        <div className="flex items-center justify-between text-[10px] font-mono">
+                          <span className="text-slate-500 dark:text-slate-400">Progress</span>
+                          <span className="font-semibold text-amber-600 dark:text-amber-400">
+                            {Math.round((trackedAU / node.estimatedAU) * 100)}%
+                          </span>
+                        </div>
+                        <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all duration-300 ${
+                              trackedAU > node.estimatedAU ? 'bg-rose-500' : 'bg-amber-500'
+                            }`}
+                            style={{
+                              width: `${Math.min(100, Math.round((trackedAU / node.estimatedAU) * 100))}%`,
+                            }}
+                          />
+                        </div>
                       </div>
                     )}
                   </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between gap-2">
+                      <WorkButton
+                        taskId={node.id}
+                        taskText={node.text}
+                        projectId={node.projectId}
+                      />
+                      <AttentionUnitInput
+                        value={node.estimatedAU}
+                        onChange={(newAU) => updateTaskEstimate(node.id, newAU, true)}
+                        isParentDerived={subtaskCount > 0}
+                        auMinutes={preferences.attentionUnitMinutes}
+                        compact={true}
+                        align="right"
+                      />
+                    </div>
+
+                    {/* Dedicated Active Attention (Tracked Time) & Progress */}
+                    {trackedAU > 0 && (
+                      <div className="pt-1.5 border-t border-slate-200/60 dark:border-slate-800/80 flex flex-col gap-1">
+                        <div className="flex items-center justify-between text-[10px] font-mono">
+                          <span className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-300 font-semibold">
+                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                            <span>Active: {AttentionService.formatAU(trackedAU, preferences.attentionUnitMinutes)}</span>
+                          </span>
+                          {node.estimatedAU && node.estimatedAU > 0 ? (
+                            <span className="text-slate-500 dark:text-slate-400 font-medium">
+                              {Math.round((trackedAU / node.estimatedAU) * 100)}%
+                            </span>
+                          ) : null}
+                        </div>
+
+                        {node.estimatedAU && node.estimatedAU > 0 && (
+                          <div className="w-full h-1 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all duration-300 ${
+                                trackedAU > node.estimatedAU
+                                  ? 'bg-amber-500'
+                                  : 'bg-indigo-500 dark:bg-indigo-400'
+                              }`}
+                              style={{
+                                width: `${Math.min(100, Math.round((trackedAU / node.estimatedAU) * 100))}%`,
+                              }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}
@@ -650,7 +753,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
         }
       }}
       style={{ transform: nodeScale !== 1.0 ? `scale(${nodeScale})` : undefined, transformOrigin: 'center' }}
-      className={`relative w-68 rounded-2xl border p-3.5 transition-all text-xs flex flex-col gap-2.5 shadow-sm dark:shadow-xl select-none ${getStatusBorder()}`}
+      className={`relative w-80 rounded-2xl border p-3.5 transition-all text-xs flex flex-col gap-2.5 shadow-sm dark:shadow-xl select-none ${getStatusBorder()}`}
       title={isEGN ? undefined : 'Double-click to open internal decomposed tasks'}
     >
       {/* Target handle (incoming dependency) */}
@@ -798,58 +901,118 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
         )}
       </div>
 
-      {/* Attention tracking & estimate row */}
+      {/* Attention tracking & estimate section */}
       {preferences.attentionSystemEnabled && (
         <div
-          className="flex flex-col gap-1.5 p-2 rounded-xl bg-slate-50 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800 nodrag nowheel nopan"
+          className={`flex flex-col gap-2 p-2 rounded-xl border nodrag nowheel nopan ${
+            isCurrentActive
+              ? 'bg-amber-500/10 dark:bg-amber-500/15 border-amber-500/40 shadow-sm'
+              : 'bg-slate-50 dark:bg-slate-900/80 border-slate-200/80 dark:border-slate-800'
+          }`}
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Top row: Work action button & Estimated AU */}
-          <div className="flex items-center justify-between gap-2">
-            <WorkButton
-              taskId={node.id}
-              taskText={node.text}
-              projectId={node.projectId}
-            />
-            <AttentionUnitInput
-              value={node.estimatedAU}
-              onChange={(newAU) => updateTaskEstimate(node.id, newAU, true)}
-              isParentDerived={subtaskCount > 0}
-              auMinutes={preferences.attentionUnitMinutes}
-              compact={true}
-            />
-          </div>
-
-          {/* Dedicated Active Attention (Tracked Time) & Progress */}
-          {trackedAU > 0 && (
-            <div className="pt-1.5 border-t border-slate-200/60 dark:border-slate-800/80 flex flex-col gap-1">
-              <div className="flex items-center justify-between text-[10px] font-mono">
-                <span className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-300 font-semibold">
-                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
-                  <span>Active: {AttentionService.formatAU(trackedAU, preferences.attentionUnitMinutes)}</span>
+          {isCurrentActive ? (
+            <div className="flex flex-col gap-2">
+              {/* Row 1: Dedicated Active Work Bar */}
+              <div className="flex items-center justify-between gap-2">
+                <WorkButton
+                  taskId={node.id}
+                  taskText={node.text}
+                  projectId={node.projectId}
+                />
+                <span className="text-[10px] font-mono font-semibold text-amber-600 dark:text-amber-300">
+                  Active: {AttentionService.formatAU(trackedAU, preferences.attentionUnitMinutes)}
                 </span>
-                {node.estimatedAU && node.estimatedAU > 0 ? (
-                  <span className="text-slate-500 dark:text-slate-400 font-medium">
-                    {Math.round((trackedAU / node.estimatedAU) * 100)}%
-                  </span>
-                ) : null}
               </div>
 
+              {/* Row 2: Estimate Stepper */}
+              <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-amber-500/20">
+                <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                  Estimate:
+                </span>
+                <AttentionUnitInput
+                  value={node.estimatedAU}
+                  onChange={(newAU) => updateTaskEstimate(node.id, newAU, true)}
+                  isParentDerived={subtaskCount > 0}
+                  auMinutes={preferences.attentionUnitMinutes}
+                  compact={true}
+                  align="right"
+                />
+              </div>
+
+              {/* Row 3: Progress Bar */}
               {node.estimatedAU && node.estimatedAU > 0 && (
-                <div className="w-full h-1 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-300 ${
-                      trackedAU > node.estimatedAU
-                        ? 'bg-amber-500'
-                        : 'bg-indigo-500 dark:bg-indigo-400'
-                    }`}
-                    style={{
-                      width: `${Math.min(100, Math.round((trackedAU / node.estimatedAU) * 100))}%`,
-                    }}
-                  />
+                <div className="flex flex-col gap-1 pt-1">
+                  <div className="flex items-center justify-between text-[10px] font-mono">
+                    <span className="text-slate-500 dark:text-slate-400">Progress</span>
+                    <span className="font-semibold text-amber-600 dark:text-amber-400">
+                      {Math.round((trackedAU / node.estimatedAU) * 100)}%
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-300 ${
+                        trackedAU > node.estimatedAU ? 'bg-rose-500' : 'bg-amber-500'
+                      }`}
+                      style={{
+                        width: `${Math.min(100, Math.round((trackedAU / node.estimatedAU) * 100))}%`,
+                      }}
+                    />
+                  </div>
                 </div>
               )}
             </div>
+          ) : (
+            <>
+              {/* Top row: Work action button & Estimated AU */}
+              <div className="flex items-center justify-between gap-2">
+                <WorkButton
+                  taskId={node.id}
+                  taskText={node.text}
+                  projectId={node.projectId}
+                />
+                <AttentionUnitInput
+                  value={node.estimatedAU}
+                  onChange={(newAU) => updateTaskEstimate(node.id, newAU, true)}
+                  isParentDerived={subtaskCount > 0}
+                  auMinutes={preferences.attentionUnitMinutes}
+                  compact={true}
+                  align="right"
+                />
+              </div>
+
+              {/* Dedicated Active Attention (Tracked Time) & Progress */}
+              {trackedAU > 0 && (
+                <div className="pt-1.5 border-t border-slate-200/60 dark:border-slate-800/80 flex flex-col gap-1">
+                  <div className="flex items-center justify-between text-[10px] font-mono">
+                    <span className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-300 font-semibold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                      <span>Active: {AttentionService.formatAU(trackedAU, preferences.attentionUnitMinutes)}</span>
+                    </span>
+                    {node.estimatedAU && node.estimatedAU > 0 ? (
+                      <span className="text-slate-500 dark:text-slate-400 font-medium">
+                        {Math.round((trackedAU / node.estimatedAU) * 100)}%
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {node.estimatedAU && node.estimatedAU > 0 && (
+                    <div className="w-full h-1 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-300 ${
+                          trackedAU > node.estimatedAU
+                            ? 'bg-amber-500'
+                            : 'bg-indigo-500 dark:bg-indigo-400'
+                        }`}
+                        style={{
+                          width: `${Math.min(100, Math.round((trackedAU / node.estimatedAU) * 100))}%`,
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

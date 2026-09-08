@@ -3,6 +3,7 @@ import {
   AttentionService,
   ActivityEvent,
   Node,
+  ProjectService,
   ProjectSummary,
 } from '../../src/domain';
 
@@ -569,6 +570,83 @@ describe('AttentionService - Attention Measurement System', () => {
 
       expect(startDate.getDay()).toBe(1); // Monday
       expect(endDate.getDay()).toBe(1); // Monday
+    });
+  });
+
+  describe('In-Progress Hierarchy Propagation for Active Work', () => {
+    it('cascades in-progress status up the parent hierarchy when subtask work starts', () => {
+      const root: Node = {
+        id: 'root-1',
+        projectId: 'p1',
+        text: 'Root Project Objective',
+        status: 'planned',
+        dueDate: '2026-12-31',
+        parentNodeId: null,
+        position: { x: 0, y: 0 },
+        createdAt: '2026-09-01T00:00:00.000Z',
+        updatedAt: '2026-09-01T00:00:00.000Z',
+      };
+
+      const level1: Node = {
+        id: 'lvl1-1',
+        projectId: 'p1',
+        text: 'Milestone 1',
+        status: 'planned',
+        dueDate: '2026-10-31',
+        parentNodeId: 'root-1',
+        position: { x: 0, y: 100 },
+        createdAt: '2026-09-01T00:00:00.000Z',
+        updatedAt: '2026-09-01T00:00:00.000Z',
+      };
+
+      const level2: Node = {
+        id: 'lvl2-1',
+        projectId: 'p1',
+        text: 'Subtask 1.1',
+        status: 'planned',
+        dueDate: '2026-10-15',
+        parentNodeId: 'lvl1-1',
+        position: { x: 0, y: 200 },
+        createdAt: '2026-09-01T00:00:00.000Z',
+        updatedAt: '2026-09-01T00:00:00.000Z',
+      };
+
+      const level3: Node = {
+        id: 'lvl3-1',
+        projectId: 'p1',
+        text: 'Detailed Leaf Task (Work Started)',
+        status: 'planned',
+        dueDate: '2026-10-05',
+        parentNodeId: 'lvl2-1',
+        position: { x: 0, y: 300 },
+        createdAt: '2026-09-01T00:00:00.000Z',
+        updatedAt: '2026-09-01T00:00:00.000Z',
+      };
+
+      const nodes = [root, level1, level2, level3];
+
+      // Starting work on level3 sets level3 status to in_progress
+      const updatedLeaf = ProjectService.updateNodeStatus(level3, 'in_progress');
+      const nodesWithLeaf = nodes.map((n) => (n.id === level3.id ? updatedLeaf : n));
+
+      // Cascade in_progress up the hierarchy
+      const { updatedNodes, inProgressParentIds } = ProjectService.cascadeParentInProgress(
+        nodesWithLeaf,
+        level3.id
+      );
+
+      // Verify all ancestors up to the root became in_progress
+      expect(inProgressParentIds).toEqual(['lvl2-1', 'lvl1-1', 'root-1']);
+
+      const updatedRoot = updatedNodes.find((n) => n.id === 'root-1');
+      const updatedLvl1 = updatedNodes.find((n) => n.id === 'lvl1-1');
+      const updatedLvl2 = updatedNodes.find((n) => n.id === 'lvl2-1');
+      const updatedLvl3 = updatedNodes.find((n) => n.id === 'lvl3-1');
+
+      expect(updatedLvl3?.status).toBe('in_progress');
+      expect(updatedLvl2?.status).toBe('in_progress');
+      expect(updatedLvl1?.status).toBe('in_progress');
+      expect(updatedRoot?.status).toBe('in_progress');
     });
   });
 });

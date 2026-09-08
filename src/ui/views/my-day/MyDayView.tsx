@@ -89,7 +89,7 @@ export const MyDayView: React.FC = () => {
   } = useApp();
 
   const [newStandaloneText, setNewStandaloneText] = useState('');
-  const [newStandaloneDueDate, setNewStandaloneDueDate] = useState(getTodayString());
+  const [newStandaloneDueDate, setNewStandaloneDueDate] = useState('');
   const [newStandaloneRecurrence, setNewStandaloneRecurrence] = useState<RecurrenceRule | undefined>(undefined);
   const [newStandaloneEstimatedAU, setNewStandaloneEstimatedAU] = useState<string>('');
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
@@ -99,7 +99,9 @@ export const MyDayView: React.FC = () => {
   const [standaloneFilter, setStandaloneFilter] = useState<'all' | 'overdue' | 'today' | 'upcoming'>('all');
   const [activeCalendarTaskId, setActiveCalendarTaskId] = useState<string | null>(null);
   const [activeRecurrenceTaskId, setActiveRecurrenceTaskId] = useState<string | null>(null);
+  const [activeAuTaskId, setActiveAuTaskId] = useState<string | null>(null);
   const [isNewRecurrenceOpen, setIsNewRecurrenceOpen] = useState(false);
+  const [isNewAuOpen, setIsNewAuOpen] = useState(false);
 
   // Standalone task inline name editing
   const [editingStandaloneTaskId, setEditingStandaloneTaskId] = useState<string | null>(null);
@@ -156,6 +158,8 @@ export const MyDayView: React.FC = () => {
           isParentDerived={isParent}
           auMinutes={preferences.attentionUnitMinutes}
           compact={true}
+          align="right"
+          onOpenChange={(open) => setActiveAuTaskId(open ? task.id : null)}
         />
         {trackedAU > 0 && (
           <span
@@ -700,10 +704,11 @@ export const MyDayView: React.FC = () => {
 
   const handleAddStandalone = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newStandaloneText.trim()) return;
+    if (!newStandaloneText.trim() || !newStandaloneDueDate) return;
     const estAU = preferences.attentionSystemEnabled && newStandaloneEstimatedAU ? parseFloat(newStandaloneEstimatedAU) : undefined;
     await addStandaloneTask(newStandaloneText.trim(), newStandaloneDueDate, newStandaloneRecurrence, isNaN(estAU as number) ? undefined : estAU);
     setNewStandaloneText('');
+    setNewStandaloneDueDate('');
     setNewStandaloneEstimatedAU('');
     setNewStandaloneRecurrence(undefined);
   };
@@ -832,12 +837,13 @@ export const MyDayView: React.FC = () => {
       (n) => n.parentNodeId === task.id && n.status === 'in_progress'
     );
     const isCalendarOpen = activeCalendarLateId === task.id;
+    const isElevated = isCalendarOpen || activeAuTaskId === task.id;
 
     return (
       <div
         key={task.id}
         className={`bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-900/60 hover:border-rose-300 dark:hover:border-rose-700 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0 group transition-all shadow-xs ${
-          isCalendarOpen ? 'relative z-30' : ''
+          isElevated ? 'relative z-40' : ''
         }`}
       >
         <div className="flex items-start sm:items-center space-x-3 min-w-0 flex-1 sm:mr-2">
@@ -1004,12 +1010,13 @@ export const MyDayView: React.FC = () => {
   ) => {
     const overdueDays = Math.max(1, daysBetween(task.dueDate, today));
     const isCalendarOpen = activeCalendarLateId === task.id;
+    const isElevated = isCalendarOpen || activeAuTaskId === task.id;
 
     return (
       <div
         key={task.id}
         className={`bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-900/60 hover:border-rose-300 dark:hover:border-rose-700 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0 group transition-all shadow-xs ${
-          isCalendarOpen ? 'relative z-30' : ''
+          isElevated ? 'relative z-40' : ''
         }`}
       >
         <div className="flex items-start sm:items-center space-x-3 min-w-0 flex-1 sm:mr-2">
@@ -1110,12 +1117,13 @@ export const MyDayView: React.FC = () => {
       (n) => n.parentNodeId === task.id && n.status === 'in_progress'
     );
     const isCalendarOpen = activeCalendarTodayProjectId === task.id;
+    const isElevated = isCalendarOpen || activeAuTaskId === task.id;
 
     return (
       <div
         key={task.id}
         className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0 group transition-all shadow-xs ${
-          isCalendarOpen ? 'relative z-30' : ''
+          isElevated ? 'relative z-40' : ''
         }`}
       >
         <div className="flex items-start sm:items-center space-x-3 min-w-0 flex-1 sm:mr-2">
@@ -1262,14 +1270,17 @@ export const MyDayView: React.FC = () => {
   };
 
   const renderStandaloneTaskRow = (task: StandaloneTask) => {
-    const isElevated = activeCalendarTaskId === task.id || activeRecurrenceTaskId === task.id;
+    const isElevated =
+      activeCalendarTaskId === task.id ||
+      activeRecurrenceTaskId === task.id ||
+      activeAuTaskId === task.id;
     const isTaskOverdue = isBefore(task.dueDate, today);
 
     return (
       <div
         key={task.id}
         className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0 group transition-all shadow-xs ${
-          isElevated ? 'relative z-30' : ''
+          isElevated ? 'relative z-40' : ''
         }`}
       >
         <div className="flex items-start sm:items-center space-x-3 min-w-0 flex-1 sm:mr-2">
@@ -2251,14 +2262,14 @@ export const MyDayView: React.FC = () => {
         </div>
 
         {/* Inline Add Standalone Task */}
-        <form onSubmit={handleAddStandalone} className={`flex flex-col sm:flex-row sm:items-center gap-2 ${isCalendarOpen || isNewRecurrenceOpen ? 'relative z-30' : ''}`}>
+        <form onSubmit={handleAddStandalone} className={`flex flex-col sm:flex-row sm:items-center gap-2 ${isCalendarOpen || isNewRecurrenceOpen || isNewAuOpen ? 'relative z-50' : 'relative z-10'}`}>
           <div className="relative flex-1">
             <input
               type="text"
               placeholder="Add a standalone task (e.g. Call dentist, buy printer paper)..."
               value={newStandaloneText}
               onChange={(e) => setNewStandaloneText(e.target.value)}
-              className="w-full text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg py-2.5 pl-3 pr-3 sm:pr-48 text-slate-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500 shadow-sm"
+              className="w-full text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg py-2.5 pl-3 pr-3 sm:pr-72 text-slate-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500 shadow-sm"
             />
             {/* Desktop right controls inside input */}
             <div className="hidden sm:flex absolute right-1.5 top-1/2 -translate-y-1/2 items-center space-x-1">
@@ -2270,13 +2281,15 @@ export const MyDayView: React.FC = () => {
                   auMinutes={preferences.attentionUnitMinutes}
                   compact={true}
                   placeholder="+ AU"
+                  align="right"
+                  onOpenChange={setIsNewAuOpen}
                 />
               )}
 
               {/* Recurrence Selector */}
               <RecurrencePicker
                 value={newStandaloneRecurrence}
-                baseDate={newStandaloneDueDate}
+                baseDate={newStandaloneDueDate || getTodayString()}
                 onChange={setNewStandaloneRecurrence}
                 onOpenChange={setIsNewRecurrenceOpen}
                 buttonVariant={newStandaloneRecurrence ? 'badge' : 'icon'}
@@ -2291,11 +2304,19 @@ export const MyDayView: React.FC = () => {
                     e.stopPropagation();
                     setIsCalendarOpen((prev) => !prev);
                   }}
-                  className="flex items-center space-x-1.5 px-2.5 py-1 text-xs font-mono font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 border border-slate-200 dark:border-slate-700 rounded-md transition-colors cursor-pointer group/cal"
-                  title="Click to select due date"
+                  className={`flex items-center space-x-1.5 px-2.5 py-1 text-xs font-mono font-medium rounded-md transition-colors cursor-pointer group/cal border ${
+                    newStandaloneDueDate
+                      ? 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 border-slate-200 dark:border-slate-700'
+                      : 'bg-amber-50/70 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 border-dashed border-amber-300 dark:border-amber-600/70'
+                  }`}
+                  title={newStandaloneDueDate ? 'Click to select due date' : 'Select due date (required)'}
                 >
-                  <Calendar className="w-3.5 h-3.5 text-slate-400 group-hover/cal:text-emerald-500 transition-colors shrink-0" />
-                  <span>{formatDateDisplay(newStandaloneDueDate)}</span>
+                  <Calendar className={`w-3.5 h-3.5 shrink-0 transition-colors ${
+                    newStandaloneDueDate
+                      ? 'text-slate-400 group-hover/cal:text-emerald-500'
+                      : 'text-amber-500 group-hover/cal:text-amber-600'
+                  }`} />
+                  <span>{newStandaloneDueDate ? formatDateDisplay(newStandaloneDueDate) : 'Pick date'}</span>
                 </button>
 
                 {isCalendarOpen && (
@@ -2321,11 +2342,12 @@ export const MyDayView: React.FC = () => {
                   auMinutes={preferences.attentionUnitMinutes}
                   compact={true}
                   placeholder="+ AU"
+                  onOpenChange={setIsNewAuOpen}
                 />
               )}
               <RecurrencePicker
                 value={newStandaloneRecurrence}
-                baseDate={newStandaloneDueDate}
+                baseDate={newStandaloneDueDate || getTodayString()}
                 onChange={setNewStandaloneRecurrence}
                 onOpenChange={setIsNewRecurrenceOpen}
                 buttonVariant={newStandaloneRecurrence ? 'badge' : 'icon'}
@@ -2339,11 +2361,19 @@ export const MyDayView: React.FC = () => {
                     e.stopPropagation();
                     setIsCalendarOpen((prev) => !prev);
                   }}
-                  className="flex items-center space-x-1.5 px-2.5 py-1.5 text-xs font-mono font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 border border-slate-200 dark:border-slate-700 rounded-md transition-colors cursor-pointer group/cal"
-                  title="Click to select due date"
+                  className={`flex items-center space-x-1.5 px-2.5 py-1.5 text-xs font-mono font-medium rounded-md transition-colors cursor-pointer group/cal border ${
+                    newStandaloneDueDate
+                      ? 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 border-slate-200 dark:border-slate-700'
+                      : 'bg-amber-50/70 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 border-dashed border-amber-300 dark:border-amber-600/70'
+                  }`}
+                  title={newStandaloneDueDate ? 'Click to select due date' : 'Select due date (required)'}
                 >
-                  <Calendar className="w-3.5 h-3.5 text-slate-400 group-hover/cal:text-emerald-500 transition-colors shrink-0" />
-                  <span>{formatDateDisplay(newStandaloneDueDate)}</span>
+                  <Calendar className={`w-3.5 h-3.5 shrink-0 transition-colors ${
+                    newStandaloneDueDate
+                      ? 'text-slate-400 group-hover/cal:text-emerald-500'
+                      : 'text-amber-500 group-hover/cal:text-amber-600'
+                  }`} />
+                  <span>{newStandaloneDueDate ? formatDateDisplay(newStandaloneDueDate) : 'Pick date'}</span>
                 </button>
 
                 {isCalendarOpen && (
@@ -2360,8 +2390,15 @@ export const MyDayView: React.FC = () => {
 
             <button
               type="submit"
-              disabled={!newStandaloneText.trim()}
-              className="flex items-center justify-center space-x-1 px-4 py-1.5 rounded-lg text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-colors shrink-0 cursor-pointer shadow-sm"
+              disabled={!newStandaloneText.trim() || !newStandaloneDueDate}
+              title={
+                !newStandaloneText.trim()
+                  ? 'Enter a task description'
+                  : !newStandaloneDueDate
+                  ? 'Please select a due date'
+                  : 'Add task'
+              }
+              className="flex items-center justify-center space-x-1 px-4 py-1.5 rounded-lg text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-colors shrink-0 cursor-pointer shadow-sm disabled:cursor-not-allowed"
             >
               <Plus className="w-4 h-4" />
               <span>Add</span>
@@ -2371,8 +2408,15 @@ export const MyDayView: React.FC = () => {
           {/* Desktop-only submit button */}
           <button
             type="submit"
-            disabled={!newStandaloneText.trim()}
-            className="hidden sm:flex px-4 py-2.5 rounded-lg text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-colors shrink-0 cursor-pointer shadow-sm"
+            disabled={!newStandaloneText.trim() || !newStandaloneDueDate}
+            title={
+              !newStandaloneText.trim()
+                ? 'Enter a task description'
+                : !newStandaloneDueDate
+                ? 'Please select a due date'
+                : 'Add task'
+            }
+            className="hidden sm:flex px-4 py-2.5 rounded-lg text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-colors shrink-0 cursor-pointer shadow-sm disabled:cursor-not-allowed"
           >
             <Plus className="w-4 h-4" />
           </button>

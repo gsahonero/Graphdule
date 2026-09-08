@@ -6,7 +6,7 @@ import {
   DAY_NAMES,
   SHORT_DAY_NAMES,
 } from '../../domain/services/recurrence-service';
-import { parseDate, formatDisplayDate } from '../../domain/utils/date';
+import { parseDate, formatDisplayDate, getTodayString } from '../../domain/utils/date';
 import { CalendarPicker } from './CalendarPicker';
 
 interface RecurrencePickerProps {
@@ -43,10 +43,11 @@ export const RecurrencePicker: React.FC<RecurrencePickerProps> = ({
   };
 
   // Custom Form State
-  const baseD = parseDate(baseDate);
+  const effectiveBaseDate = baseDate || getTodayString();
+  const baseD = parseDate(effectiveBaseDate);
   const initialDow = baseD.getDay();
   const initialDayOfMonth = baseD.getDate();
-  const initialNth = RecurrenceService.getNthWeekdayOfDate(baseDate);
+  const initialNth = RecurrenceService.getNthWeekdayOfDate(effectiveBaseDate);
 
   const [frequency, setFrequency] = useState<RecurrenceFrequency>(value?.frequency || 'weekly');
   const [interval, setInterval] = useState<number>(value?.interval || 1);
@@ -93,7 +94,7 @@ export const RecurrencePicker: React.FC<RecurrencePickerProps> = ({
   }, [isOpen, onClose]);
 
   // Presets based on baseDate
-  const presets = RecurrenceService.getQuickPresets(baseDate);
+  const presets = RecurrenceService.getQuickPresets(effectiveBaseDate);
 
   // Current preview rule in custom mode
   const currentCustomRule: RecurrenceRule = {
@@ -476,7 +477,7 @@ export const RecurrencePicker: React.FC<RecurrencePickerProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      setCustomEndDate(baseDate);
+                      setCustomEndDate(effectiveBaseDate);
                       setCustomCount(undefined);
                     }}
                     className={`py-1 rounded-lg font-medium transition-all cursor-pointer ${

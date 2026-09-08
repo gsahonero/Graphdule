@@ -1122,51 +1122,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await updatePreferences({ activeWorkSession: updatedSession });
   }, [activeWorkSession, logActivityEvent, updatePreferences]);
 
-  const startWork = useCallback(
-    async (taskId: string, taskText: string, projectId?: string, projectName?: string) => {
-      if (activeWorkSession && activeWorkSession.taskId === taskId) {
-        if (activeWorkSession.isPaused) {
-          await resumeWork();
-        }
-        return;
-      }
-
-      if (activeWorkSession) {
-        await stopWork();
-      }
-
-      const sessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      const startedAt = new Date().toISOString();
-
-      await logActivityEvent('WORK_STARTED', taskId, {
-        entityText: taskText,
-        projectId,
-        projectName,
-        metadata: { sessionId },
-      });
-
-      const newSession: ActiveWorkSession = {
-        sessionId,
-        taskId,
-        taskText,
-        projectId,
-        projectName,
-        startedAt,
-        accumulatedSecondsBeforeResume: 0,
-        isPaused: false,
-      };
-
-      setActiveWorkSession(newSession);
-      try {
-        localStorage.setItem('graphdule_active_work_session', JSON.stringify(newSession));
-      } catch {
-        // ignore
-      }
-      await updatePreferences({ activeWorkSession: newSession });
-    },
-    [activeWorkSession, resumeWork, stopWork, logActivityEvent, updatePreferences]
-  );
-
   const updateTaskEstimate = useCallback(
     async (taskId: string, estimatedAU: number | undefined, projectIdOrIsNode?: string | boolean) => {
       const isExplicitNode = projectIdOrIsNode === true || (typeof projectIdOrIsNode === 'string' && projectIdOrIsNode !== 'standalone');
@@ -1639,20 +1594,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (prevNode) {
         if (prevNode.dueDate !== updatedNode.dueDate) {
-          logActivityEvent('date_moved', updatedNode.id, {
-            entityText: updatedNode.text,
-            projectId: activeProjectDoc.project.id,
-            projectName: activeProjectDoc.project.name,
-            oldDueDate: prevNode.dueDate,
-            newDueDate: updatedNode.dueDate,
-          }).catch(() => {});
-          logActivityEvent('TASK_DEFERRED', updatedNode.id, {
-            entityText: updatedNode.text,
-            projectId: activeProjectDoc.project.id,
-            projectName: activeProjectDoc.project.name,
-            oldDueDate: prevNode.dueDate,
-            newDueDate: updatedNode.dueDate,
-          }).catch(() => {});
+          // Avoid considering initial date assignment or immediate schedule adjustment of freshly created tasks as procrastination/deferral
+          const isFreshlyCreated = !!(prevNode.createdAt && Date.now() - new Date(prevNode.createdAt).getTime() < 60_000);
+          if (prevNode.dueDate && !isFreshlyCreated) {
+            logActivityEvent('date_moved', updatedNode.id, {
+              entityText: updatedNode.text,
+              projectId: activeProjectDoc.project.id,
+              projectName: activeProjectDoc.project.name,
+              oldDueDate: prevNode.dueDate,
+              newDueDate: updatedNode.dueDate,
+            }).catch(() => {});
+            logActivityEvent('TASK_DEFERRED', updatedNode.id, {
+              entityText: updatedNode.text,
+              projectId: activeProjectDoc.project.id,
+              projectName: activeProjectDoc.project.name,
+              oldDueDate: prevNode.dueDate,
+              newDueDate: updatedNode.dueDate,
+            }).catch(() => {});
+          }
           logActivityEvent('DEADLINE_CHANGED', updatedNode.id, {
             entityText: updatedNode.text,
             projectId: activeProjectDoc.project.id,
@@ -1891,6 +1850,95 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     },
     [activeProjectDoc, updateNode, storage, refreshData, recordActiveNode]
+  );
+
+  const startWork = useCallback(
+    async (taskId: string, taskText: string, projectId?: string, projectName?: string) => {
+      // When task is part of a project (i.e. exists in the graph), make it in_progress and cascade up hierarchy
+      const isProjectTask =
+        (projectId && projectId !== 'standalone') ||
+        (activeProjectDoc && activeProjectDoc.nodes.some((n) => n.id === taskId)) ||
+        allActiveNodes.some((n) => n.id === taskId);
+
+      if (isProjectTask) {
+        const existingNode =
+          activeProjectDoc?.nodes.find((n) => n.id === taskId) ||
+          allActiveNodes.find((n) => n.id === taskId);
+
+        let needsStatusUpdate = true;
+        if (existingNode && existingNode.status === 'in_progress') {
+          // Check if all ancestors are already in_progress
+          const nodesList = activeProjectDoc?.nodes || allActiveNodes;
+          let curr: Node | undefined = existingNode;
+          let allAncestorsInProgress = true;
+          while (curr && curr.parentNodeId) {
+            const parent: Node | undefined = nodesList.find((n) => n.id === curr!.parentNodeId);
+            if (!parent || parent.status !== 'in_progress') {
+              allAncestorsInProgress = false;
+              break;
+            }
+            curr = parent;
+          }
+          if (allAncestorsInProgress) {
+            needsStatusUpdate = false;
+          }
+        }
+
+        if (needsStatusUpdate) {
+          await updateNodeStatus(taskId, 'in_progress');
+        }
+      }
+
+      if (activeWorkSession && activeWorkSession.taskId === taskId) {
+        if (activeWorkSession.isPaused) {
+          await resumeWork();
+        }
+        return;
+      }
+
+      if (activeWorkSession) {
+        await stopWork();
+      }
+
+      const sessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const startedAt = new Date().toISOString();
+
+      await logActivityEvent('WORK_STARTED', taskId, {
+        entityText: taskText,
+        projectId,
+        projectName,
+        metadata: { sessionId },
+      });
+
+      const newSession: ActiveWorkSession = {
+        sessionId,
+        taskId,
+        taskText,
+        projectId,
+        projectName,
+        startedAt,
+        accumulatedSecondsBeforeResume: 0,
+        isPaused: false,
+      };
+
+      setActiveWorkSession(newSession);
+      try {
+        localStorage.setItem('graphdule_active_work_session', JSON.stringify(newSession));
+      } catch {
+        // ignore
+      }
+      await updatePreferences({ activeWorkSession: newSession });
+    },
+    [
+      activeWorkSession,
+      resumeWork,
+      stopWork,
+      logActivityEvent,
+      updatePreferences,
+      updateNodeStatus,
+      activeProjectDoc,
+      allActiveNodes,
+    ]
   );
 
   const moveNodeDate = useCallback(

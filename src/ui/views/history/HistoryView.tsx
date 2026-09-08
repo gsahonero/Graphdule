@@ -55,7 +55,7 @@ export const HistoryView: React.FC = () => {
   };
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 md:p-10 max-w-5xl mx-auto w-full space-y-8">
+    <div className="flex-1 h-full overflow-y-auto p-4 sm:p-6 md:p-10 max-w-5xl mx-auto w-full space-y-8">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-6">
         <div>
@@ -107,7 +107,7 @@ export const HistoryView: React.FC = () => {
       )}
 
       {/* Snapshots & Diff Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
         {/* Left: Snapshot List */}
         <div className="space-y-3 md:col-span-1">
           <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
@@ -119,7 +119,7 @@ export const HistoryView: React.FC = () => {
               No snapshots recorded yet. Click "Save Snapshot" to record a version.
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-2 max-h-[60vh] md:max-h-[calc(100vh-280px)] overflow-y-auto pr-1">
               {projectSnapshots.map((snap) => (
                 <div
                   key={snap.id}

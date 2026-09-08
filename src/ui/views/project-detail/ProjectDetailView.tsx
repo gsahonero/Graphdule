@@ -461,7 +461,7 @@ export const ProjectDetailView: React.FC = () => {
       )}
 
       {/* Main View Area */}
-      <div className="flex-1 overflow-hidden relative">
+      <div className="flex-1 min-h-0 overflow-hidden relative flex flex-col">
         {activeProjectTab === 'graph' && <GraphView />}
         {activeProjectTab === 'timeline' && <TimelineView />}
         {activeProjectTab === 'history' && <HistoryView />}

@@ -12,6 +12,8 @@ interface AttentionUnitInputProps {
   auMinutes?: number;
   className?: string;
   placeholder?: string;
+  align?: 'left' | 'right';
+  onOpenChange?: (open: boolean) => void;
 }
 
 const PRESET_AUS = [0.5, 1, 2, 3, 4];
@@ -25,6 +27,8 @@ export const AttentionUnitInput: React.FC<AttentionUnitInputProps> = ({
   auMinutes,
   className = '',
   placeholder = 'AU',
+  align = 'left',
+  onOpenChange,
 }) => {
   const { attentionUnitMinutes: contextAuMinutes } = useApp();
   const effectiveAuMinutes = auMinutes || contextAuMinutes || 15;
@@ -33,6 +37,20 @@ export const AttentionUnitInput: React.FC<AttentionUnitInputProps> = ({
   const [inputValue, setInputValue] = useState<string>('');
   const containerRef = useRef<HTMLDivElement>(null);
   const numInputRef = useRef<HTMLInputElement>(null);
+
+  const closePopover = () => {
+    setIsOpen(false);
+    onOpenChange?.(false);
+  };
+
+  const togglePopover = () => {
+    if (disabled) return;
+    setIsOpen((prev) => {
+      const next = !prev;
+      onOpenChange?.(next);
+      return next;
+    });
+  };
 
   // Sync internal input string when popover opens or value changes
   useEffect(() => {
@@ -72,7 +90,7 @@ export const AttentionUnitInput: React.FC<AttentionUnitInputProps> = ({
     const handleClickOutside = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         commitValue();
-        setIsOpen(false);
+        closePopover();
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -121,13 +139,13 @@ export const AttentionUnitInput: React.FC<AttentionUnitInputProps> = ({
     if (disabled) return;
     setInputValue('');
     commitValue(0);
-    setIsOpen(false);
+    closePopover();
   };
 
   const handleDone = (e: React.MouseEvent) => {
     e.stopPropagation();
     commitValue();
-    setIsOpen(false);
+    closePopover();
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -139,11 +157,11 @@ export const AttentionUnitInput: React.FC<AttentionUnitInputProps> = ({
       e.preventDefault();
       e.stopPropagation();
       commitValue();
-      setIsOpen(false);
+      closePopover();
     } else if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
-      setIsOpen(false);
+      closePopover();
     }
   };
 
@@ -162,12 +180,10 @@ export const AttentionUnitInput: React.FC<AttentionUnitInputProps> = ({
   const formattedMinutes = previewMinutes > 0 ? AttentionService.formatMinutes(previewMinutes) : null;
 
   return (
-    <div ref={containerRef} className={`relative inline-block ${className}`}>
+    <div ref={containerRef} className={`relative inline-block ${isOpen ? 'z-50' : ''} ${className}`}>
       {/* Trigger button / Input badge */}
       <div
-        onClick={() => {
-          if (!disabled) setIsOpen((prev) => !prev);
-        }}
+        onClick={togglePopover}
         className={`group inline-flex items-center gap-1.5 rounded-lg border transition-all cursor-pointer select-none whitespace-nowrap shrink-0 ${
           disabled
             ? 'opacity-50 cursor-not-allowed border-slate-700/40 bg-slate-800/20 text-slate-500'
@@ -218,7 +234,9 @@ export const AttentionUnitInput: React.FC<AttentionUnitInputProps> = ({
       {/* Popover selector with quick preset pills and direct arbitrary value adjustment */}
       {isOpen && !disabled && (
         <div
-          className="nodrag nowheel nopan absolute z-50 mt-1.5 left-0 min-w-[220px] p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl shadow-black/20 text-xs backdrop-blur-md animate-in fade-in zoom-in-95 duration-150"
+          className={`nodrag nowheel nopan absolute z-50 mt-1.5 ${
+            align === 'right' ? 'right-0' : 'left-0'
+          } min-w-[240px] p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl shadow-black/50 text-xs animate-in fade-in zoom-in-95 duration-150`}
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex items-center justify-between pb-1.5 mb-2 border-b border-slate-100 dark:border-slate-800">

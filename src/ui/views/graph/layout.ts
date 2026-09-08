@@ -2,7 +2,7 @@ import dagre from 'dagre';
 import { Node as RFNode, Edge as RFEdge, MarkerType } from '@xyflow/react';
 import { Node, Edge } from '../../../domain/models/types';
 
-export const NODE_WIDTH = 270;
+export const NODE_WIDTH = 320;
 export const NODE_HEIGHT = 150;
 export const COMPACT_NODE_SIZE = 112;
 
