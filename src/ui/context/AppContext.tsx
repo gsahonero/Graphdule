@@ -94,6 +94,7 @@ interface AppContextType {
   addEdge: (fromNodeId: string, toNodeId: string) => Promise<{ success: boolean; error?: string }>;
   deleteEdge: (edgeId: string) => Promise<void>;
   spliceNodeIntoEdge: (nodeId: string, edgeId: string, newPosition?: { x: number; y: number }) => Promise<{ success: boolean; error?: string }>;
+  nestNode: (sourceNodeId: string, targetParentId: string) => Promise<{ success: boolean; error?: string }>;
   decomposeNode: (parentNodeId: string, subtasks: { text: string; dueDate?: string; estimatedAU?: number }[]) => Promise<void>;
   addNote: (nodeId: string, text: string) => Promise<void>;
   deleteNote: (noteId: string) => Promise<void>;
@@ -2169,6 +2170,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [activeProjectDoc, saveProjectDoc]
   );
 
+  const nestNode = useCallback(
+    async (
+      sourceNodeId: string,
+      targetParentId: string
+    ): Promise<{ success: boolean; error?: string }> => {
+      if (!activeProjectDoc) return { success: false, error: 'No active project' };
+
+      const sourceNode = activeProjectDoc.nodes.find((n) => n.id === sourceNodeId);
+      const targetParent = activeProjectDoc.nodes.find((n) => n.id === targetParentId);
+
+      const result = ProjectService.nestNodeInParent(activeProjectDoc, sourceNodeId, targetParentId);
+      if (!result.success) {
+        return { success: false, error: result.error };
+      }
+
+      await saveProjectDoc(result.document);
+
+      if (sourceNode && targetParent) {
+        await logActivityEvent('NODE_NESTED', sourceNodeId, {
+          entityText: sourceNode.text,
+          projectId: activeProjectDoc.project.id,
+          projectName: activeProjectDoc.project.name,
+          metadata: {
+            targetParentId,
+            targetParentText: targetParent.text,
+          },
+        });
+      }
+
+      debouncedCloudSync();
+      return { success: true };
+    },
+    [activeProjectDoc, saveProjectDoc, logActivityEvent, debouncedCloudSync]
+  );
+
   const decomposeNode = useCallback(
     async (parentNodeId: string, subtasks: { text: string; dueDate?: string; estimatedAU?: number }[]) => {
       if (!activeProjectDoc) return;
@@ -2308,6 +2344,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
       await storage.writeStandaloneTasks(updated);
       setStandaloneTasks(updated);
+      if (activeWorkSession?.taskId === task.id && activeWorkSession.taskText !== task.text) {
+        const updatedSession = { ...activeWorkSession, taskText: task.text };
+        setActiveWorkSession(updatedSession);
+        updatePreferences({ activeWorkSession: updatedSession }).catch(() => {});
+      }
       if (task.dueDate) {
         GCalendarSync.syncTaskDateChange({
           taskId: task.id,
@@ -2320,7 +2361,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       debouncedCloudSync();
     },
-    [standaloneTasks, storage, debouncedCloudSync]
+    [standaloneTasks, storage, debouncedCloudSync, activeWorkSession, updatePreferences]
   );
 
   const updateStandaloneTaskStatus = useCallback(
@@ -2724,6 +2765,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addEdge,
         deleteEdge,
         spliceNodeIntoEdge,
+        nestNode,
         decomposeNode,
         addNote,
         deleteNote,

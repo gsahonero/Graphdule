@@ -31,6 +31,7 @@ export interface GraphNodeData extends Record<string, unknown> {
   nodeScale?: number;
   totalNodesInScope?: number;
   hasInProgressChild?: boolean;
+  isDropTargetParent?: boolean;
   onStatusChange: (status: NodeStatus) => void;
   onTextChange: (newText: string) => void;
   onDateChange: (newDate: string) => void;
@@ -52,6 +53,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
     nodeScale = 1.0,
     totalNodesInScope = 4,
     hasInProgressChild = false,
+    isDropTargetParent = false,
     onStatusChange,
     onTextChange,
     onDateChange,
@@ -178,6 +180,9 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
   };
 
   const getStatusBorder = () => {
+    if (isDropTargetParent) {
+      return 'border-amber-500 ring-4 ring-amber-500/70 shadow-2xl bg-amber-500/15 dark:bg-amber-500/25 scale-[1.03] z-50';
+    }
     if (selected) return 'border-emerald-500 ring-2 ring-emerald-500/40 shadow-emerald-950/20 dark:shadow-emerald-950/80 bg-white dark:bg-slate-900/95';
     if (isEGN) return 'border-emerald-500/80 shadow-md bg-white dark:bg-slate-900/95';
     switch (node.status) {
@@ -207,7 +212,9 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
         }}
         style={{ transform: nodeScale !== 1.0 ? `scale(${nodeScale})` : undefined, transformOrigin: 'center' }}
         className={`relative w-28 h-28 rounded-full flex flex-col items-center justify-center p-2.5 text-center transition-all select-none shadow-md ${
-          selected
+          isDropTargetParent
+            ? 'ring-4 ring-amber-500 bg-amber-500/25 scale-110 z-50 border-2 border-amber-500 shadow-amber-500/40'
+            : selected
             ? 'ring-4 ring-emerald-500 shadow-emerald-500/30'
             : isEGN
             ? 'ring-4 ring-emerald-600/50 dark:ring-emerald-500/40 shadow-emerald-600/20'
@@ -219,7 +226,9 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
             ? 'ring-3 ring-rose-400/60 dark:ring-rose-600/50 opacity-70'
             : 'ring-2 ring-slate-300 dark:ring-slate-700'
         } ${
-          isEGN
+          isDropTargetParent
+            ? 'bg-amber-100 dark:bg-amber-950/60 border-2 border-amber-500 text-amber-900 dark:text-amber-100'
+            : isEGN
             ? 'bg-emerald-50 dark:bg-emerald-950 border-2 border-emerald-500 text-emerald-900 dark:text-emerald-100'
             : node.status === 'completed'
             ? 'bg-emerald-50/90 dark:bg-emerald-950/80 border-2 border-emerald-400 text-emerald-900 dark:text-emerald-100'
@@ -231,6 +240,12 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
         } hover:scale-105 hover:shadow-xl hover:z-50 cursor-pointer`}
         title={isEGN ? undefined : 'Double-click to open internal decomposed tasks'}
       >
+        {/* Drop target badge */}
+        {isDropTargetParent && (
+          <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-amber-500 text-white font-bold text-[9px] shadow-lg flex items-center gap-1 animate-bounce whitespace-nowrap z-50 pointer-events-none">
+            <span>📥 Drop into task</span>
+          </div>
+        )}
         {/* Target handle */}
         <Handle
           type="target"
@@ -622,6 +637,13 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
             : '!-left-[7px] !top-1/2 !-translate-y-1/2'
         } !bg-slate-400 dark:!bg-slate-700 !border-2 !border-white dark:!border-slate-900 hover:!bg-emerald-400 hover:!scale-125 transition-all !cursor-crosshair`}
       />
+
+      {/* Drop target badge */}
+      {isDropTargetParent && (
+        <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-2.5 py-0.5 rounded-full bg-amber-500 text-white font-bold text-[10px] shadow-lg flex items-center gap-1 animate-bounce whitespace-nowrap z-50 pointer-events-none">
+          <span>📥 Drop to nest as child</span>
+        </div>
+      )}
 
       {/* Header: Status Toggle and EGN / Subtasks indicator */}
       <div className="flex items-center justify-between gap-1.5">

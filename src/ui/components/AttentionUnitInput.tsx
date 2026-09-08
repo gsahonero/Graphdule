@@ -30,19 +30,54 @@ export const AttentionUnitInput: React.FC<AttentionUnitInputProps> = ({
   const effectiveAuMinutes = auMinutes || contextAuMinutes || 15;
 
   const [isOpen, setIsOpen] = useState(false);
+  const [inputValue, setInputValue] = useState<string>('');
   const containerRef = useRef<HTMLDivElement>(null);
+  const numInputRef = useRef<HTMLInputElement>(null);
 
-  // Close popover when clicking outside
+  // Sync internal input string when popover opens or value changes
+  useEffect(() => {
+    if (isOpen) {
+      setInputValue(value !== undefined && value > 0 ? String(value) : '');
+      const timer = setTimeout(() => {
+        numInputRef.current?.focus();
+        numInputRef.current?.select();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, value]);
+
+  const commitValue = (overrideValue?: number) => {
+    if (disabled) return;
+    if (overrideValue !== undefined) {
+      onChange(overrideValue > 0 ? Math.round(overrideValue * 100) / 100 : undefined);
+      return;
+    }
+    const trimmed = inputValue.trim();
+    if (trimmed === '') {
+      onChange(undefined);
+      return;
+    }
+    const parsed = parseFloat(trimmed);
+    if (!isNaN(parsed) && parsed > 0) {
+      const rounded = Math.round(parsed * 100) / 100;
+      onChange(rounded);
+    } else {
+      onChange(undefined);
+    }
+  };
+
+  // Close popover when clicking outside and commit current input
   useEffect(() => {
     if (!isOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        commitValue();
         setIsOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isOpen]);
+  }, [isOpen, inputValue]);
 
   // Derived display for parent nodes
   if (isParentDerived) {
@@ -68,30 +103,63 @@ export const AttentionUnitInput: React.FC<AttentionUnitInputProps> = ({
   const handleStep = (delta: number, e: React.MouseEvent) => {
     e.stopPropagation();
     if (disabled) return;
-    const current = value || 0;
-    const next = Math.max(0, Math.round((current + delta) * 10) / 10);
-    if (next === 0) {
-      onChange(undefined);
-    } else {
-      onChange(next);
-    }
+    const parsed = parseFloat(inputValue);
+    const base = !isNaN(parsed) && parsed >= 0 ? parsed : (value || 0);
+    const next = Math.max(0, Math.round((base + delta) * 100) / 100);
+    setInputValue(next > 0 ? String(next) : '');
+    commitValue(next);
   };
 
   const handlePreset = (au: number) => {
     if (disabled) return;
-    onChange(au);
-    setIsOpen(false);
+    setInputValue(String(au));
+    commitValue(au);
   };
 
   const handleClear = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     if (disabled) return;
-    onChange(undefined);
+    setInputValue('');
+    commitValue(0);
     setIsOpen(false);
   };
 
-  const currentMinutes = value !== undefined && value > 0 ? value * effectiveAuMinutes : 0;
-  const formattedMinutes = currentMinutes > 0 ? AttentionService.formatMinutes(currentMinutes) : null;
+  const handleDone = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    commitValue();
+    setIsOpen(false);
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setInputValue(e.target.value);
+  };
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      commitValue();
+      setIsOpen(false);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsOpen(false);
+    }
+  };
+
+  // Preview calculations for display
+  const parsedForPreview = parseFloat(inputValue);
+  const activePreviewAU =
+    isOpen && inputValue.trim() !== ''
+      ? !isNaN(parsedForPreview) && parsedForPreview >= 0
+        ? parsedForPreview
+        : 0
+      : value !== undefined && value > 0
+      ? value
+      : 0;
+
+  const previewMinutes = activePreviewAU > 0 ? activePreviewAU * effectiveAuMinutes : 0;
+  const formattedMinutes = previewMinutes > 0 ? AttentionService.formatMinutes(previewMinutes) : null;
 
   return (
     <div ref={containerRef} className={`relative inline-block ${className}`}>
@@ -147,10 +215,10 @@ export const AttentionUnitInput: React.FC<AttentionUnitInputProps> = ({
         )}
       </div>
 
-      {/* Popover selector with quick preset pills and direct value adjustment */}
+      {/* Popover selector with quick preset pills and direct arbitrary value adjustment */}
       {isOpen && !disabled && (
         <div
-          className="absolute z-50 mt-1.5 left-0 min-w-[210px] p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl shadow-black/20 text-xs backdrop-blur-md animate-in fade-in zoom-in-95 duration-150"
+          className="nodrag nowheel nopan absolute z-50 mt-1.5 left-0 min-w-[220px] p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl shadow-black/20 text-xs backdrop-blur-md animate-in fade-in zoom-in-95 duration-150"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex items-center justify-between pb-1.5 mb-2 border-b border-slate-100 dark:border-slate-800">
@@ -161,32 +229,51 @@ export const AttentionUnitInput: React.FC<AttentionUnitInputProps> = ({
             <span className="text-[10px] text-slate-400">1 AU = {effectiveAuMinutes}m</span>
           </div>
 
-          {/* Stepper display */}
-          <div className="flex items-center justify-between bg-slate-100 dark:bg-slate-800/60 rounded-lg p-1.5 mb-2.5 border border-slate-200/60 dark:border-slate-700/40">
-            <button
-              type="button"
-              onClick={(e) => handleStep(-0.5, e)}
-              className="p-1 rounded bg-white dark:bg-slate-700 hover:bg-amber-500 hover:text-white shadow-sm text-slate-700 dark:text-slate-200 transition-colors"
-              title="-0.5 AU"
-            >
-              <Minus className="w-3.5 h-3.5" />
-            </button>
-            <div className="text-center font-mono">
-              <div className="font-bold text-sm text-slate-900 dark:text-slate-100">
-                {value !== undefined && value > 0 ? `${value} AU` : '0 AU'}
+          {/* Direct arbitrary AU number input + Stepper controls */}
+          <div className="bg-slate-100 dark:bg-slate-800/70 rounded-xl p-2 mb-2.5 border border-slate-200/80 dark:border-slate-700/60">
+            <div className="flex items-center justify-between gap-1.5">
+              <button
+                type="button"
+                onClick={(e) => handleStep(-0.5, e)}
+                className="w-7 h-7 flex items-center justify-center rounded-lg bg-white dark:bg-slate-700 hover:bg-amber-500 hover:text-white shadow-xs text-slate-700 dark:text-slate-200 transition-colors"
+                title="-0.5 AU"
+              >
+                <Minus className="w-3.5 h-3.5" />
+              </button>
+
+              <div className="flex-1 flex items-center justify-center gap-1.5">
+                <input
+                  ref={numInputRef}
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={inputValue}
+                  onChange={handleInputChange}
+                  onKeyDown={handleInputKeyDown}
+                  placeholder="0"
+                  className="w-20 px-2 py-1 text-center font-mono font-bold text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-900 dark:text-slate-100 shadow-inner"
+                />
+                <span className="font-mono text-xs font-semibold text-slate-500 dark:text-slate-400 select-none">
+                  AU
+                </span>
               </div>
-              <div className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
-                {value !== undefined && value > 0 ? formattedMinutes : 'No estimate'}
-              </div>
+
+              <button
+                type="button"
+                onClick={(e) => handleStep(0.5, e)}
+                className="w-7 h-7 flex items-center justify-center rounded-lg bg-white dark:bg-slate-700 hover:bg-emerald-500 hover:text-white shadow-xs text-slate-700 dark:text-slate-200 transition-colors"
+                title="+0.5 AU"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={(e) => handleStep(0.5, e)}
-              className="p-1 rounded bg-white dark:bg-slate-700 hover:bg-emerald-500 hover:text-white shadow-sm text-slate-700 dark:text-slate-200 transition-colors"
-              title="+0.5 AU"
-            >
-              <Plus className="w-3.5 h-3.5" />
-            </button>
+
+            <div className="mt-1.5 text-center">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-mono font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10">
+                <Clock className="w-3 h-3" />
+                <span>{formattedMinutes ? formattedMinutes : 'No estimate'}</span>
+              </span>
+            </div>
           </div>
 
           {/* Preset buttons */}
@@ -196,7 +283,7 @@ export const AttentionUnitInput: React.FC<AttentionUnitInputProps> = ({
           <div className="grid grid-cols-3 gap-1 mb-2.5">
             {PRESET_AUS.map((au) => {
               const mins = AttentionService.formatMinutes(au * effectiveAuMinutes);
-              const isSelected = value === au;
+              const isSelected = activePreviewAU === au;
               return (
                 <button
                   key={au}
@@ -229,8 +316,8 @@ export const AttentionUnitInput: React.FC<AttentionUnitInputProps> = ({
           <div className="flex justify-end pt-1 border-t border-slate-100 dark:border-slate-800">
             <button
               type="button"
-              onClick={() => setIsOpen(false)}
-              className="px-2.5 py-1 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium rounded-md transition-colors"
+              onClick={handleDone}
+              className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium rounded-md transition-colors shadow-xs"
             >
               Done
             </button>

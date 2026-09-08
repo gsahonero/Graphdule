@@ -97,7 +97,7 @@ export class GDriveAuth {
       }
 
       const checkInterval = setInterval(() => {
-        if ((window as any).google?.accounts?.oauth2) {
+        if (typeof window !== 'undefined' && (window as any).google?.accounts?.oauth2) {
           clearInterval(checkInterval);
           resolve(true);
         }
@@ -111,7 +111,7 @@ export class GDriveAuth {
       // Timeout after 3s and fallback
       setTimeout(() => {
         clearInterval(checkInterval);
-        resolve(!!(window as any).google?.accounts?.oauth2);
+        resolve(typeof window !== 'undefined' && !!(window as any).google?.accounts?.oauth2);
       }, 3000);
     });
   }

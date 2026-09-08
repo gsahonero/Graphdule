@@ -13,6 +13,7 @@ import {
 import { getTodayString } from '../utils/date';
 import { GraphService } from './graph-service';
 import { TemporalService } from './temporal-service';
+import { AttentionService } from './attention-service';
 
 export class ProjectService {
   /**
@@ -334,6 +335,165 @@ export class ProjectService {
     }
 
     return { updatedNodes, affectedParentIds };
+  }
+
+  /**
+   * Checks whether candidateId is a descendant of ancestorId in the parent-child hierarchy.
+   */
+  public static isDescendantOf(
+    nodes: readonly Node[],
+    candidateId: string,
+    ancestorId: string
+  ): boolean {
+    if (candidateId === ancestorId) return true;
+    let curr: string | null | undefined = candidateId;
+    const visited = new Set<string>();
+    while (curr && !visited.has(curr)) {
+      visited.add(curr);
+      const node = nodes.find((n) => n.id === curr);
+      if (!node) break;
+      if (node.parentNodeId === ancestorId) return true;
+      curr = node.parentNodeId;
+    }
+    return false;
+  }
+
+  /**
+   * Nests a source node inside a target parent node, making sourceNode a child of targetParent.
+   * If sourceNode has children/subtasks, their hierarchy under sourceNode is preserved recursively.
+   * Edges connecting sourceNode at the previous scope level are gracefully re-routed to targetParent
+   * without creating self-loops or DAG cycles.
+   * Automatically re-synchronizes parent due dates, attention units (AU invariant), and status hierarchy.
+   */
+  public static nestNodeInParent(
+    doc: ProjectDocument,
+    sourceNodeId: string,
+    targetParentId: string
+  ): { success: true; document: ProjectDocument } | { success: false; error: string } {
+    if (!doc) return { success: false, error: 'Document is required' };
+
+    const sourceNode = doc.nodes.find((n) => n.id === sourceNodeId);
+    const targetParent = doc.nodes.find((n) => n.id === targetParentId);
+    if (!sourceNode || !targetParent) {
+      return { success: false, error: 'Source or target node not found.' };
+    }
+
+    if (sourceNodeId === targetParentId) {
+      return { success: false, error: 'Cannot nest a node into itself.' };
+    }
+
+    if (doc.project.endGoalNodeId === sourceNodeId) {
+      return { success: false, error: 'Cannot nest the project Goal node.' };
+    }
+
+    // Cycle prevention: targetParent cannot be a descendant of sourceNode
+    if (ProjectService.isDescendantOf(doc.nodes, targetParentId, sourceNodeId)) {
+      return { success: false, error: 'Cannot nest a node into one of its own subtasks/descendants.' };
+    }
+
+    if (sourceNode.parentNodeId === targetParentId) {
+      return { success: true, document: doc };
+    }
+
+    // Position sourceNode neatly inside targetParent
+    const existingChildren = doc.nodes.filter(
+      (n) => n.parentNodeId === targetParentId && n.id !== sourceNodeId
+    );
+    let newPos: { x: number; y: number };
+    if (existingChildren.length > 0) {
+      const maxY = existingChildren.reduce((max, c) => Math.max(max, c.position?.y ?? 100), 100);
+      newPos = { x: 100, y: maxY + 160 };
+    } else {
+      newPos = { x: 100, y: 100 };
+    }
+
+    const updatedSourceNode: Node = {
+      ...sourceNode,
+      parentNodeId: targetParentId,
+      position: newPos,
+      updatedAt: new Date().toISOString(),
+    };
+
+    // Re-route connecting edges
+    const updatedEdges: Edge[] = [];
+    const existingEdgeKeys = new Set(doc.edges.map((e) => `${e.fromNodeId}->${e.toNodeId}`));
+
+    for (const edge of doc.edges) {
+      // Direct edge between source and targetParent: eliminate it
+      if (
+        (edge.fromNodeId === sourceNodeId && edge.toNodeId === targetParentId) ||
+        (edge.fromNodeId === targetParentId && edge.toNodeId === sourceNodeId)
+      ) {
+        continue;
+      }
+
+      // Outgoing edge from sourceNode: re-route from targetParent
+      if (edge.fromNodeId === sourceNodeId) {
+        if (targetParentId !== edge.toNodeId) {
+          const wouldCycle = GraphService.wouldCreateCycle(
+            targetParentId,
+            edge.toNodeId,
+            doc.edges.filter((e) => e.id !== edge.id)
+          );
+          if (!wouldCycle) {
+            const key = `${targetParentId}->${edge.toNodeId}`;
+            if (!existingEdgeKeys.has(key)) {
+              existingEdgeKeys.add(key);
+              updatedEdges.push({
+                ...edge,
+                fromNodeId: targetParentId,
+              });
+            }
+          }
+        }
+        continue;
+      }
+
+      // Incoming edge to sourceNode: re-route to targetParent
+      if (edge.toNodeId === sourceNodeId) {
+        if (edge.fromNodeId !== targetParentId) {
+          const wouldCycle = GraphService.wouldCreateCycle(
+            edge.fromNodeId,
+            targetParentId,
+            doc.edges.filter((e) => e.id !== edge.id)
+          );
+          if (!wouldCycle) {
+            const key = `${edge.fromNodeId}->${targetParentId}`;
+            if (!existingEdgeKeys.has(key)) {
+              existingEdgeKeys.add(key);
+              updatedEdges.push({
+                ...edge,
+                toNodeId: targetParentId,
+              });
+            }
+          }
+        }
+        continue;
+      }
+
+      updatedEdges.push(edge);
+    }
+
+    let updatedNodes = doc.nodes.map((n) => (n.id === sourceNodeId ? updatedSourceNode : n));
+
+    // Synchronize invariants: due dates, attention units, status hierarchy
+    updatedNodes = TemporalService.syncParentDueDates(updatedNodes);
+    updatedNodes = AttentionService.syncParentEstimatedAU(updatedNodes);
+    const statusSync = ProjectService.syncParentStatusHierarchy(updatedNodes);
+    updatedNodes = statusSync.updatedNodes;
+
+    const updatedDoc: ProjectDocument = {
+      ...doc,
+      nodes: updatedNodes,
+      edges: updatedEdges,
+      exportedAt: new Date().toISOString(),
+      project: {
+        ...doc.project,
+        updatedAt: new Date().toISOString(),
+      },
+    };
+
+    return { success: true, document: updatedDoc };
   }
 
   /**

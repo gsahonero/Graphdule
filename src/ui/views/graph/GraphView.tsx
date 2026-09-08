@@ -23,6 +23,7 @@ import { useApp } from '../../context/AppContext';
 import { GraphNode, GraphNodeData } from './GraphNode';
 import { getLayoutedElements, isValidCoordinate, NODE_WIDTH, NODE_HEIGHT, COMPACT_NODE_SIZE } from './layout';
 import { Node, NodeStatus } from '../../../domain/models/types';
+import { ProjectService } from '../../../domain/services/project-service';
 import { getTodayString, addDays } from '../../../domain/utils/date';
 import {
   Plus,
@@ -104,6 +105,7 @@ const GraphCanvas: React.FC = () => {
     addEdge,
     deleteEdge,
     spliceNodeIntoEdge,
+    nestNode,
     decomposeNode,
     createSnapshot,
     selectedNode,
@@ -121,6 +123,9 @@ const GraphCanvas: React.FC = () => {
 
   // Highlighted edge when dragging node over an existing connection
   const [targetEdgeForDropId, setTargetEdgeForDropId] = useState<string | null>(null);
+
+  // Highlighted parent node when dragging node over another node to nest it
+  const [targetParentForDropId, setTargetParentForDropId] = useState<string | null>(null);
 
   // Recursive Decomposition Scope Navigation (Scope Breadcrumb Stack)
   const [scopeStack, setScopeStack] = useState<Node[]>(() => {
@@ -208,7 +213,8 @@ const GraphCanvas: React.FC = () => {
   const [rfNodes, setRfNodes] = useState<RFNode[]>(initialElements.rfNodes);
   const [rfEdges, setRfEdges] = useState<RFEdge[]>(initialElements.rfEdges);
 
-  // Synchronize React Flow local nodes and edges when scoped items or layout changes
+  // Synchronize React Flow local nodes and edges when scoped items or layout changes,
+  // preserving current in-memory positions for existing nodes so in-place edits never cause shifting.
   React.useEffect(() => {
     const layout = getLayoutedElements(
       scopedNodes,
@@ -218,10 +224,32 @@ const GraphCanvas: React.FC = () => {
       viewDensity === 'compact',
       nodeScale
     );
-    setRfNodes(layout.rfNodes);
+    setRfNodes((prevRfNodes) => {
+      const prevPosMap = new Map(
+        prevRfNodes
+          .filter((n) => n?.position && isValidCoordinate(n.position.x) && isValidCoordinate(n.position.y))
+          .map((n) => [n.id, n.position])
+      );
+      return layout.rfNodes.map((rfNode) => {
+        const existingPos = prevPosMap.get(rfNode.id);
+        if (existingPos) {
+          return {
+            ...rfNode,
+            position: existingPos,
+          };
+        }
+        return rfNode;
+      });
+    });
     setRfEdges(layout.rfEdges);
     scopedNodes.forEach((n) => updateNodeInternals(n.id));
   }, [scopedNodes, scopedEdges, layoutDir, viewDensity, nodeScale, updateNodeInternals]);
+
+  // Keep a ref to nodes to traverse hierarchy without re-triggering fitView when node attributes change
+  const nodesRef = useRef(nodes);
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
 
   // Synchronize scopeStack and focus view when selectedNode changes externally (e.g., from My Day or search)
   React.useEffect(() => {
@@ -240,7 +268,7 @@ const GraphCanvas: React.FC = () => {
       const visited = new Set<string>();
       while (currParentId && !visited.has(currParentId)) {
         visited.add(currParentId);
-        const parent = nodes.find((n) => n.id === currParentId);
+        const parent = nodesRef.current.find((n) => n.id === currParentId);
         if (!parent) break;
         ancestorChain.unshift(parent);
         currParentId = parent.parentNodeId;
@@ -263,7 +291,7 @@ const GraphCanvas: React.FC = () => {
 
       return () => clearTimeout(timer);
     }
-  }, [selectedNode?.id, project.id, nodes, fitView]);
+  }, [selectedNode?.id, project.id, fitView]);
 
   // Determine the optimal node to focus on mobile view:
   // 1. Prioritize active selectedNode if in scope
@@ -513,10 +541,6 @@ const GraphCanvas: React.FC = () => {
         return;
       }
 
-      // Check if dragging directly over an existing connection
-      const candidateEdge = findEdgeUnderNode(activeNode);
-      setTargetEdgeForDropId(candidateEdge ? candidateEdge.id : null);
-
       const isCompact = viewDensity === 'compact';
       const nodeW = Math.round((isCompact ? COMPACT_NODE_SIZE : NODE_WIDTH) * nodeScale);
       const nodeH = Math.round((isCompact ? COMPACT_NODE_SIZE : NODE_HEIGHT) * nodeScale);
@@ -527,6 +551,57 @@ const GraphCanvas: React.FC = () => {
       const activeCenterY = activeY + nodeH / 2;
       const activeRight = activeX + nodeW;
       const activeBottom = activeY + nodeH;
+
+      // 1. Detect if hovering over another node to nest activeNode into it
+      let hoveredNodeForDrop: RFNode | null = null;
+      const canBeNested = activeNode.id !== project.endGoalNodeId;
+
+      if (canBeNested) {
+        for (const other of rfNodes) {
+          if (other.id === activeNode.id) continue;
+          if (
+            !other.position ||
+            !isValidCoordinate(other.position.x) ||
+            !isValidCoordinate(other.position.y)
+          ) {
+            continue;
+          }
+          // Prevent cycles: cannot nest into one of activeNode's descendants
+          if (ProjectService.isDescendantOf(nodes, other.id, activeNode.id)) {
+            continue;
+          }
+
+          const otherW = other.measured?.width ?? nodeW;
+          const otherH = other.measured?.height ?? nodeH;
+          const otherX = other.position.x;
+          const otherY = other.position.y;
+
+          // Check if active node center falls within other node's bounds (with generous 8px margin)
+          if (
+            activeCenterX >= otherX - 8 &&
+            activeCenterX <= otherX + otherW + 8 &&
+            activeCenterY >= otherY - 8 &&
+            activeCenterY <= otherY + otherH + 8
+          ) {
+            hoveredNodeForDrop = other;
+            break;
+          }
+        }
+      }
+
+      if (hoveredNodeForDrop) {
+        setTargetParentForDropId(hoveredNodeForDrop.id);
+        setTargetEdgeForDropId(null);
+        setGuideLines({ horizontal: null, vertical: null });
+        snappedPosRef.current = null;
+        return;
+      } else {
+        setTargetParentForDropId(null);
+      }
+
+      // 2. Check if dragging directly over an existing connection
+      const candidateEdge = findEdgeUnderNode(activeNode);
+      setTargetEdgeForDropId(candidateEdge ? candidateEdge.id : null);
 
       let matchedH: GuideLine | null = null;
       let matchedV: GuideLine | null = null;
@@ -654,10 +729,10 @@ const GraphCanvas: React.FC = () => {
         );
       }
     },
-    [rfNodes, findEdgeUnderNode, viewDensity, nodeScale]
+    [rfNodes, findEdgeUnderNode, viewDensity, nodeScale, project.endGoalNodeId, nodes]
   );
 
-  // Drag Stop: Persist final coordinates (with magnetic snap if aligned), and splice into edge if intentionally dropped on one
+  // Drag Stop: Persist final coordinates (with magnetic snap if aligned), or nest into node / splice into edge if dropped onto one
   const onNodeDragStop = useCallback(
     async (_event: unknown, activeNode: RFNode) => {
       setGuideLines({ horizontal: null, vertical: null });
@@ -667,7 +742,19 @@ const GraphCanvas: React.FC = () => {
         !isValidCoordinate(activeNode.position.y)
       ) {
         setTargetEdgeForDropId(null);
+        setTargetParentForDropId(null);
         snappedPosRef.current = null;
+        return;
+      }
+
+      // 1. If dropped onto another node, nest activeNode into it!
+      const parentDropTargetId = targetParentForDropId;
+      setTargetParentForDropId(null);
+
+      if (parentDropTargetId) {
+        setTargetEdgeForDropId(null);
+        snappedPosRef.current = null;
+        await nestNode(activeNode.id, parentDropTargetId);
         return;
       }
 
@@ -706,7 +793,7 @@ const GraphCanvas: React.FC = () => {
         }
       }
     },
-    [targetEdgeForDropId, rfEdges, nodes, spliceNodeIntoEdge, updateNode]
+    [targetParentForDropId, targetEdgeForDropId, rfEdges, nodes, nestNode, spliceNodeIntoEdge, updateNode]
   );
 
   // Auto Layout Handler - tight minimal distance layout
@@ -966,6 +1053,7 @@ const GraphCanvas: React.FC = () => {
         notesCount: nodeNotesCount,
         subtaskCount,
         hasInProgressChild,
+        isDropTargetParent: targetParentForDropId === nodeObj.id,
         viewDensity,
         layoutDir,
         nodeScale,
@@ -1017,6 +1105,7 @@ const GraphCanvas: React.FC = () => {
     layoutDir,
     nodeScale,
     scopedNodes.length,
+    targetParentForDropId,
     updateNodeStatus,
     updateNode,
     deleteNode,

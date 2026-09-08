@@ -181,7 +181,9 @@ export type ActivityEventType =
   | 'WEEKLY_GOAL_SET'
   | 'weekly_goal_set'
   | 'WEEKLY_REVIEW_TRIGGERED'
-  | 'weekly_review_triggered';
+  | 'weekly_review_triggered'
+  | 'NODE_NESTED'
+  | 'node_nested';
 
 export interface ActivityEvent {
   readonly id: string;

@@ -344,6 +344,207 @@ describe('Graphdule Domain Invariants and Services', () => {
     });
   });
 
+  describe('Drag-and-Drop Node Nesting (nestNodeInParent)', () => {
+    it('nests a node A into node B, making A a child of B', () => {
+      const { project, egnNode } = ProjectService.createProject('Test', 'Goal', '2026-12-31');
+      const nodeA = ProjectService.createNode(project.id, 'Task A', '2026-10-10');
+      const nodeB = ProjectService.createNode(project.id, 'Task B', '2026-10-20');
+
+      const doc: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: new Date().toISOString(),
+        project,
+        nodes: [egnNode, nodeA, nodeB],
+        edges: [],
+        notes: [],
+        history: [],
+      };
+
+      const result = ProjectService.nestNodeInParent(doc, nodeA.id, nodeB.id);
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+
+      const updatedA = result.document.nodes.find((n) => n.id === nodeA.id);
+      expect(updatedA?.parentNodeId).toBe(nodeB.id);
+
+      // Node B now has 1 child
+      const childrenOfB = result.document.nodes.filter((n) => n.parentNodeId === nodeB.id);
+      expect(childrenOfB).toHaveLength(1);
+      expect(childrenOfB[0].id).toBe(nodeA.id);
+    });
+
+    it('recursively takes all children and descendant subtasks when nesting node A into node B', () => {
+      const { project, egnNode } = ProjectService.createProject('Test', 'Goal', '2026-12-31');
+      const nodeA = ProjectService.createNode(project.id, 'Task A', '2026-10-10');
+      const nodeB = ProjectService.createNode(project.id, 'Task B', '2026-10-20');
+
+      // Subtasks of A
+      const nodeA1 = ProjectService.createNode(project.id, 'Subtask A1', '2026-10-05', nodeA.id);
+      const nodeA2 = ProjectService.createNode(project.id, 'Subtask A2', '2026-10-08', nodeA.id);
+      // Grandchild of A (child of A1)
+      const nodeA1_1 = ProjectService.createNode(project.id, 'Sub-subtask A1.1', '2026-10-03', nodeA1.id);
+
+      const doc: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: new Date().toISOString(),
+        project,
+        nodes: [egnNode, nodeA, nodeB, nodeA1, nodeA2, nodeA1_1],
+        edges: [],
+        notes: [],
+        history: [],
+      };
+
+      // Nest A into B
+      const result = ProjectService.nestNodeInParent(doc, nodeA.id, nodeB.id);
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+
+      // 1. A is now child of B
+      const updatedA = result.document.nodes.find((n) => n.id === nodeA.id);
+      expect(updatedA?.parentNodeId).toBe(nodeB.id);
+
+      // 2. A1 and A2 are still children of A
+      const updatedA1 = result.document.nodes.find((n) => n.id === nodeA1.id);
+      const updatedA2 = result.document.nodes.find((n) => n.id === nodeA2.id);
+      expect(updatedA1?.parentNodeId).toBe(nodeA.id);
+      expect(updatedA2?.parentNodeId).toBe(nodeA.id);
+
+      // 3. A1_1 is still child of A1
+      const updatedA1_1 = result.document.nodes.find((n) => n.id === nodeA1_1.id);
+      expect(updatedA1_1?.parentNodeId).toBe(nodeA1.id);
+
+      // 4. Verify descendant check
+      expect(ProjectService.isDescendantOf(result.document.nodes, nodeA1_1.id, nodeB.id)).toBe(true);
+      expect(ProjectService.isDescendantOf(result.document.nodes, nodeA1_1.id, nodeA.id)).toBe(true);
+      expect(ProjectService.isDescendantOf(result.document.nodes, nodeA1_1.id, nodeA1.id)).toBe(true);
+    });
+
+    it('works recursively at any hierarchy level (nesting child into another child)', () => {
+      const { project, egnNode } = ProjectService.createProject('Test', 'Goal', '2026-12-31');
+      const nodeP = ProjectService.createNode(project.id, 'Parent Task', '2026-10-20');
+      const child1 = ProjectService.createNode(project.id, 'Child 1', '2026-10-10', nodeP.id);
+      const child2 = ProjectService.createNode(project.id, 'Child 2', '2026-10-15', nodeP.id);
+
+      const doc: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: new Date().toISOString(),
+        project,
+        nodes: [egnNode, nodeP, child1, child2],
+        edges: [],
+        notes: [],
+        history: [],
+      };
+
+      // In the scope of Parent Task, nest child2 into child1
+      const result = ProjectService.nestNodeInParent(doc, child2.id, child1.id);
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+
+      const updatedChild2 = result.document.nodes.find((n) => n.id === child2.id);
+      expect(updatedChild2?.parentNodeId).toBe(child1.id);
+
+      // Direct children of nodeP should now only be child1
+      const pChildren = result.document.nodes.filter((n) => n.parentNodeId === nodeP.id);
+      expect(pChildren).toHaveLength(1);
+      expect(pChildren[0].id).toBe(child1.id);
+
+      // Direct children of child1 should now be child2
+      const c1Children = result.document.nodes.filter((n) => n.parentNodeId === child1.id);
+      expect(c1Children).toHaveLength(1);
+      expect(c1Children[0].id).toBe(child2.id);
+    });
+
+    it('recalculates parent AU (Attention Units) according to the invariant sum', () => {
+      const { project, egnNode } = ProjectService.createProject('Test', 'Goal', '2026-12-31');
+      const nodeA = { ...ProjectService.createNode(project.id, 'Task A', '2026-10-10'), estimatedAU: 2.5 };
+      const nodeB = ProjectService.createNode(project.id, 'Task B', '2026-10-20');
+
+      const doc: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: new Date().toISOString(),
+        project,
+        nodes: [egnNode, nodeA, nodeB],
+        edges: [],
+        notes: [],
+        history: [],
+      };
+
+      const result = ProjectService.nestNodeInParent(doc, nodeA.id, nodeB.id);
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+
+      const updatedB = result.document.nodes.find((n) => n.id === nodeB.id);
+      // Parent node AU must equal sum of children AU (2.5)
+      expect(updatedB?.estimatedAU).toBe(2.5);
+    });
+
+    it('re-routes edges and eliminates direct parent-child edges upon nesting', () => {
+      const { project, egnNode } = ProjectService.createProject('Test', 'Goal', '2026-12-31');
+      const nodeX = ProjectService.createNode(project.id, 'Task X', '2026-10-01');
+      const nodeA = ProjectService.createNode(project.id, 'Task A', '2026-10-10');
+      const nodeB = ProjectService.createNode(project.id, 'Task B', '2026-10-20');
+      const nodeY = ProjectService.createNode(project.id, 'Task Y', '2026-10-30');
+
+      const edgeXA: Edge = { id: 'e_xa', projectId: project.id, fromNodeId: nodeX.id, toNodeId: nodeA.id, createdAt: '' };
+      const edgeAB: Edge = { id: 'e_ab', projectId: project.id, fromNodeId: nodeA.id, toNodeId: nodeB.id, createdAt: '' };
+      const edgeAY: Edge = { id: 'e_ay', projectId: project.id, fromNodeId: nodeA.id, toNodeId: nodeY.id, createdAt: '' };
+
+      const doc: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: new Date().toISOString(),
+        project,
+        nodes: [egnNode, nodeX, nodeA, nodeB, nodeY],
+        edges: [edgeXA, edgeAB, edgeAY],
+        notes: [],
+        history: [],
+      };
+
+      const result = ProjectService.nestNodeInParent(doc, nodeA.id, nodeB.id);
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+
+      // 1. Direct edge e_ab between A and B must be removed
+      const hasEdgeAB = result.document.edges.some((e) => (e.fromNodeId === nodeA.id && e.toNodeId === nodeB.id) || (e.fromNodeId === nodeB.id && e.toNodeId === nodeA.id));
+      expect(hasEdgeAB).toBe(false);
+
+      // 2. Incoming edge X -> A is rerouted to X -> B
+      const reroutedXA = result.document.edges.find((e) => e.fromNodeId === nodeX.id && e.toNodeId === nodeB.id);
+      expect(reroutedXA).toBeDefined();
+
+      // 3. Outgoing edge A -> Y is rerouted to B -> Y
+      const reroutedAY = result.document.edges.find((e) => e.fromNodeId === nodeB.id && e.toNodeId === nodeY.id);
+      expect(reroutedAY).toBeDefined();
+    });
+
+    it('rejects nesting a node into itself, into its own descendant, or nesting the Goal node', () => {
+      const { project, egnNode } = ProjectService.createProject('Test', 'Goal', '2026-12-31');
+      const nodeA = ProjectService.createNode(project.id, 'Task A', '2026-10-10');
+      const nodeA1 = ProjectService.createNode(project.id, 'Task A1', '2026-10-05', nodeA.id);
+
+      const doc: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: new Date().toISOString(),
+        project,
+        nodes: [egnNode, nodeA, nodeA1],
+        edges: [],
+        notes: [],
+        history: [],
+      };
+
+      // Nesting into self
+      const resSelf = ProjectService.nestNodeInParent(doc, nodeA.id, nodeA.id);
+      expect(resSelf.success).toBe(false);
+
+      // Nesting into descendant (cycle)
+      const resCycle = ProjectService.nestNodeInParent(doc, nodeA.id, nodeA1.id);
+      expect(resCycle.success).toBe(false);
+
+      // Nesting Goal node
+      const resGoal = ProjectService.nestNodeInParent(doc, egnNode.id, nodeA.id);
+      expect(resGoal.success).toBe(false);
+    });
+  });
+
   describe('My Day Task Filtering', () => {
     it('returns today incomplete tasks in Today mode', () => {
       const today = '2026-09-03';

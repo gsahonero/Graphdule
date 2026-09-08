@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
 import { MyDayService } from '../../../domain/services/my-day-service';
 import { getTodayString, isBefore, isAfter, daysBetween } from '../../../domain/utils/date';
@@ -24,6 +24,9 @@ import {
   Zap,
   Layers,
   List,
+  Edit2,
+  Check,
+  X,
 } from 'lucide-react';
 import { Node, NodeStatus, ProjectSummary, RecurrenceRule, StandaloneTask } from '../../../domain/models/types';
 import { getProjectColorTheme, ProjectIconDisplay } from '../../utils/project-style';
@@ -97,6 +100,18 @@ export const MyDayView: React.FC = () => {
   const [activeCalendarTaskId, setActiveCalendarTaskId] = useState<string | null>(null);
   const [activeRecurrenceTaskId, setActiveRecurrenceTaskId] = useState<string | null>(null);
   const [isNewRecurrenceOpen, setIsNewRecurrenceOpen] = useState(false);
+
+  // Standalone task inline name editing
+  const [editingStandaloneTaskId, setEditingStandaloneTaskId] = useState<string | null>(null);
+  const [editingStandaloneText, setEditingStandaloneText] = useState('');
+  const editInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editingStandaloneTaskId && editInputRef.current) {
+      editInputRef.current.focus();
+      editInputRef.current.select();
+    }
+  }, [editingStandaloneTaskId]);
 
   // Collapsible & state for Late / Overdue Tasks section
   const [isLateTasksOpen, setIsLateTasksOpen] = useState(false);
@@ -707,6 +722,97 @@ export const MyDayView: React.FC = () => {
     updateStandaloneTaskStatus(taskId, newStatus);
   };
 
+  const handleStartEditStandaloneTask = (task: StandaloneTask) => {
+    setEditingStandaloneTaskId(task.id);
+    setEditingStandaloneText(task.text);
+  };
+
+  const handleCancelEditStandaloneTask = () => {
+    setEditingStandaloneTaskId(null);
+    setEditingStandaloneText('');
+  };
+
+  const handleSaveEditStandaloneTask = async (taskId: string) => {
+    const targetTask = standaloneTasks.find((t) => t.id === taskId);
+    if (!targetTask) {
+      setEditingStandaloneTaskId(null);
+      return;
+    }
+    const trimmed = editingStandaloneText.trim();
+    if (trimmed && trimmed !== targetTask.text) {
+      await updateStandaloneTask({ ...targetTask, text: trimmed });
+    }
+    setEditingStandaloneTaskId(null);
+  };
+
+  const renderStandaloneTaskName = (task: StandaloneTask) => {
+    const isEditing = editingStandaloneTaskId === task.id;
+
+    if (isEditing) {
+      return (
+        <div className="flex items-center space-x-1 sm:space-x-1.5 min-w-0 flex-1">
+          <input
+            ref={editInputRef}
+            type="text"
+            value={editingStandaloneText}
+            onChange={(e) => setEditingStandaloneText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleSaveEditStandaloneTask(task.id);
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                handleCancelEditStandaloneTask();
+              }
+            }}
+            onBlur={() => handleSaveEditStandaloneTask(task.id)}
+            className="w-full text-sm font-medium bg-slate-50 dark:bg-slate-950 border border-emerald-500 rounded-md px-2 py-1 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-emerald-400 shadow-inner"
+          />
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => handleSaveEditStandaloneTask(task.id)}
+            className="p-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer transition-colors shrink-0 shadow-xs"
+            title="Save"
+          >
+            <Check className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={handleCancelEditStandaloneTask}
+            className="p-1 rounded bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 cursor-pointer transition-colors shrink-0"
+            title="Cancel (Esc)"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="min-w-0 flex-1 flex items-center space-x-1.5 group/name">
+        <span
+          onClick={() => handleStartEditStandaloneTask(task)}
+          className={`text-sm font-medium text-slate-800 dark:text-slate-200 truncate cursor-pointer hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline transition-colors ${
+            task.status === 'completed' ? 'line-through text-slate-400 dark:text-slate-500' : ''
+          }`}
+          title={task.text}
+        >
+          {task.text}
+        </span>
+        <button
+          type="button"
+          onClick={() => handleStartEditStandaloneTask(task)}
+          className="opacity-0 group-hover/name:opacity-100 text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 p-0.5 transition-opacity cursor-pointer shrink-0"
+          title="Edit task name"
+        >
+          <Edit2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    );
+  };
+
   const handleModeChange = async (mode: 'today' | 'current_tasks') => {
     await updatePreferences({ myDayMode: mode });
   };
@@ -919,13 +1025,7 @@ export const MyDayView: React.FC = () => {
               <Circle className="w-5 h-5" />
             )}
           </button>
-          <span
-            className={`text-sm font-medium text-slate-800 dark:text-slate-200 truncate ${
-              task.status === 'completed' ? 'line-through text-slate-400 dark:text-slate-500' : ''
-            }`}
-          >
-            {task.text}
-          </span>
+          {renderStandaloneTaskName(task)}
         </div>
 
         <div className="flex items-center space-x-2 shrink-0 ml-8 sm:ml-auto flex-wrap sm:flex-nowrap gap-y-1">
@@ -1185,13 +1285,7 @@ export const MyDayView: React.FC = () => {
               <Circle className="w-5 h-5" />
             )}
           </button>
-          <span
-            className={`text-sm font-medium text-slate-800 dark:text-slate-200 truncate ${
-              task.status === 'completed' ? 'line-through text-slate-400 dark:text-slate-500' : ''
-            }`}
-          >
-            {task.text}
-          </span>
+          {renderStandaloneTaskName(task)}
         </div>
 
         <div className="flex items-center space-x-2 shrink-0 ml-8 sm:ml-auto flex-wrap sm:flex-nowrap gap-y-1">
@@ -2561,13 +2655,19 @@ export const MyDayView: React.FC = () => {
               {myDayData.completedTodayStandaloneTasks.map((task) => (
                 <div
                   key={task.id}
-                  className="bg-slate-100 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl p-3 flex items-center justify-between text-sm"
+                  className="bg-slate-100 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 rounded-xl p-3 flex items-center justify-between text-sm group"
                 >
-                  <div className="flex items-center space-x-3">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                    <span className="text-sm line-through text-slate-400">{task.text}</span>
+                  <div className="flex items-center space-x-3 min-w-0 flex-1 mr-3">
+                    <button
+                      onClick={() => handleToggleStandaloneStatus(task.id, task.status)}
+                      className="text-emerald-500 hover:text-slate-400 transition-colors shrink-0 cursor-pointer"
+                      title="Mark incomplete"
+                    >
+                      <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                    </button>
+                    {renderStandaloneTaskName(task)}
                   </div>
-                  <span className="text-xs text-slate-500 font-mono">Standalone</span>
+                  <span className="text-xs text-slate-500 font-mono shrink-0">Standalone</span>
                 </div>
               ))}
             </div>
