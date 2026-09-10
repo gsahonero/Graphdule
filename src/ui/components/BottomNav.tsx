@@ -1,12 +1,13 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
-import { FolderKanban, Sun, Clock } from 'lucide-react';
+import { FolderKanban, Sun, Clock, CalendarDays } from 'lucide-react';
 
 export const BottomNav: React.FC = () => {
   const { currentView, setCurrentView, activeProjectDoc, activeWorkSession } = useApp();
 
   const isProjectsActive = currentView === 'projects' || currentView === 'project_detail';
   const isMyDayActive = currentView === 'my_day';
+  const isCalendarActive = currentView === 'calendar';
   const isAttentionActive = currentView === 'attention_review';
 
   return (
@@ -45,6 +46,22 @@ export const BottomNav: React.FC = () => {
             <Sun className={`w-5 h-5 transition-transform ${isMyDayActive ? 'scale-110' : ''}`} />
           </div>
           <span className="text-[11px] tracking-tight mt-0.5">My Day</span>
+        </button>
+
+        {/* Calendar Tab */}
+        <button
+          onClick={() => setCurrentView('calendar')}
+          className={`flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-all cursor-pointer min-h-[44px] ${
+            isCalendarActive
+              ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
+              : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+          }`}
+          title="Task Calendar"
+        >
+          <div className="relative">
+            <CalendarDays className={`w-5 h-5 transition-transform ${isCalendarActive ? 'scale-110' : ''}`} />
+          </div>
+          <span className="text-[11px] tracking-tight mt-0.5">Calendar</span>
         </button>
 
         {/* Attention Review Tab */}

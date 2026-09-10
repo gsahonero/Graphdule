@@ -9,6 +9,7 @@ import {
   Upload,
   HelpCircle,
   Calendar,
+  CalendarDays,
   Smartphone,
   MoreVertical,
   Coffee,
@@ -159,6 +160,19 @@ export const Header: React.FC = () => {
         >
           <Sun className="w-3.5 h-3.5 shrink-0" />
           <span>My Day</span>
+        </button>
+
+        <button
+          id="nav-calendar"
+          onClick={() => setCurrentView('calendar')}
+          className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
+            currentView === 'calendar'
+              ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm border border-slate-200 dark:border-transparent'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-900'
+          }`}
+        >
+          <CalendarDays className="w-3.5 h-3.5 shrink-0" />
+          <span>Calendar</span>
         </button>
 
         <button

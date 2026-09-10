@@ -5,6 +5,7 @@ import { StorageWarningBanner } from './ui/components/StorageWarningBanner';
 import { ProjectsView } from './ui/views/projects/ProjectsView';
 import { ProjectDetailView } from './ui/views/project-detail/ProjectDetailView';
 import { MyDayView } from './ui/views/my-day/MyDayView';
+import { TaskCalendarView } from './ui/views/calendar/TaskCalendarView';
 import { AttentionReviewView } from './ui/views/attention/AttentionReviewView';
 import { NotesDrawer } from './ui/components/NotesDrawer';
 import { CascadeModal } from './ui/components/CascadeModal';
@@ -28,6 +29,7 @@ const AppContent: React.FC = () => {
         {currentView === 'projects' && <ProjectsView />}
         {currentView === 'project_detail' && <ProjectDetailView />}
         {currentView === 'my_day' && <MyDayView />}
+        {currentView === 'calendar' && <TaskCalendarView />}
         {currentView === 'attention_review' && <AttentionReviewView />}
       </main>
 

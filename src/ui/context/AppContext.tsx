@@ -56,8 +56,8 @@ import { createDefaultSampleProject, DEFAULT_SAMPLE_PROJECT_ID } from '../../con
 
 interface AppContextType {
   storage: IStorageProvider;
-  currentView: 'projects' | 'project_detail' | 'my_day' | 'attention_review';
-  setCurrentView: (view: 'projects' | 'project_detail' | 'my_day' | 'attention_review') => void;
+  currentView: 'projects' | 'project_detail' | 'my_day' | 'attention_review' | 'calendar';
+  setCurrentView: (view: 'projects' | 'project_detail' | 'my_day' | 'attention_review' | 'calendar') => void;
   activeProjectTab: 'graph' | 'timeline' | 'history';
   setActiveProjectTab: (tab: 'graph' | 'timeline' | 'history') => void;
 
@@ -225,7 +225,9 @@ export const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [storage] = useState<IStorageProvider>(defaultStorageProvider);
-  const [currentView, setCurrentView] = useState<'projects' | 'project_detail' | 'my_day' | 'attention_review'>('projects');
+  const [currentView, setCurrentView] = useState<
+    'projects' | 'project_detail' | 'my_day' | 'attention_review' | 'calendar'
+  >('projects');
   const [activeProjectTab, setActiveProjectTab] = useState<'graph' | 'timeline' | 'history'>('graph');
 
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
