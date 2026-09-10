@@ -218,4 +218,49 @@ describe('CalendarPicker - AU Capacity & Reality Check Integration', () => {
     const consequenceCard = screen.getByTestId('capacity-consequence-card');
     expect(consequenceCard.textContent).toContain('+ This task:5 AU');
   });
+
+  it('places workload panel on the left (right-full) when align="right" to avoid clipping', async () => {
+    render(
+      <AppContext.Provider value={createMockContext() as any}>
+        <CalendarPicker
+          value="2026-09-01"
+          onChange={onChangeMock}
+          onClose={onCloseMock}
+          customTasks={mockTasks}
+          align="right"
+        />
+      </AppContext.Provider>
+    );
+
+    const balloon = screen.getByTestId('task-balloon-2026-09-07');
+    fireEvent.click(balloon);
+
+    const panel = await screen.findByTestId('calendar-workload-preview');
+    expect(panel).toBeDefined();
+    // Verify panel has right-full class so it renders to the left of the popover
+    expect(panel.className).toContain('right-full');
+  });
+
+  it('displays consequence preview for new tasks when taskEstimatedAU is provided without currentTaskId', async () => {
+    render(
+      <AppContext.Provider value={createMockContext() as any}>
+        <CalendarPicker
+          value="2026-09-01"
+          onChange={onChangeMock}
+          onClose={onCloseMock}
+          customTasks={mockTasks} // has 16 AU planned
+          taskEstimatedAU={3} // new task with 3 AU, no currentTaskId yet
+        />
+      </AppContext.Provider>
+    );
+
+    const balloon = screen.getByTestId('task-balloon-2026-09-07');
+    fireEvent.click(balloon);
+
+    const consequenceCard = await screen.findByTestId('capacity-consequence-card');
+    expect(consequenceCard).toBeDefined();
+    expect(consequenceCard.textContent).toContain('+ This task:3 AU');
+    expect(consequenceCard.textContent).toContain('= Total:19 / 20 AU (95%)');
+    expect(consequenceCard.textContent).toContain('Fits Capacity');
+  });
 });

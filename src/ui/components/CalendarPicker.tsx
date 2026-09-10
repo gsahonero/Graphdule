@@ -65,7 +65,9 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
 
   // Workload details panel state (opened on clicking a day balloon)
   const [activePanelDate, setActivePanelDate] = useState<string | null>(null);
-  const [previewPlacement, setPreviewPlacement] = useState<'right' | 'left' | 'bottom'>('right');
+  const [previewPlacement, setPreviewPlacement] = useState<'right' | 'left' | 'bottom'>(
+    align === 'right' ? 'left' : 'right'
+  );
 
   // Inline frictionless daily override state
   const [isEditingOverride, setIsEditingOverride] = useState<boolean>(false);
@@ -199,21 +201,72 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
     };
   }, [onClose]);
 
-  // Viewport-aware smart placement of workload details panel
+  // Viewport- and container-aware smart placement of workload details panel
   useEffect(() => {
     if (!activePanelDate || !popoverRef.current) return;
-    const rect = popoverRef.current.getBoundingClientRect();
-    const screenW = typeof window !== 'undefined' ? window.innerWidth : 1024;
 
-    // Check if 280px preview card fits comfortably to the right
-    if (rect.right + 285 <= screenW) {
-      setPreviewPlacement('right');
-    } else if (rect.left - 285 >= 0) {
-      setPreviewPlacement('left');
-    } else {
-      setPreviewPlacement('bottom');
-    }
-  }, [activePanelDate]);
+    const updatePlacement = () => {
+      if (!popoverRef.current) return;
+      const rect = popoverRef.current.getBoundingClientRect();
+      // In non-rendered or test environments without layout engine, maintain align-based placement
+      if (rect.width === 0 && rect.height === 0) return;
+
+      const screenW = typeof window !== 'undefined' ? window.innerWidth : 1024;
+      const PANEL_WIDTH = 308; // 300px panel + 8px gap
+
+      // Detect nearest clipping or scroll container bounds
+      let clippingRight = screenW;
+      let clippingLeft = 0;
+
+      let el: HTMLElement | null = popoverRef.current.parentElement;
+      while (el && el !== document.body) {
+        const style = window.getComputedStyle(el);
+        const isScrollOrClip =
+          style.overflowX === 'hidden' ||
+          style.overflowX === 'auto' ||
+          style.overflowX === 'scroll' ||
+          style.overflowY === 'hidden' ||
+          style.overflowY === 'auto' ||
+          style.overflowY === 'scroll';
+
+        if (isScrollOrClip) {
+          const parentRect = el.getBoundingClientRect();
+          if (parentRect.width > 0) {
+            clippingRight = Math.min(clippingRight, parentRect.right);
+            clippingLeft = Math.max(clippingLeft, parentRect.left);
+          }
+        }
+        el = el.parentElement;
+      }
+
+      const spaceOnRight = clippingRight - rect.right;
+      const spaceOnLeft = rect.left - clippingLeft;
+
+      if (align === 'right') {
+        // If picker is right-aligned, prefer placing workload panel to the left
+        if (spaceOnLeft >= PANEL_WIDTH) {
+          setPreviewPlacement('left');
+        } else if (spaceOnRight >= PANEL_WIDTH) {
+          setPreviewPlacement('right');
+        } else {
+          setPreviewPlacement('bottom');
+        }
+      } else {
+        // Default (left- or center-aligned picker): prefer right
+        if (spaceOnRight >= PANEL_WIDTH) {
+          setPreviewPlacement('right');
+        } else if (spaceOnLeft >= PANEL_WIDTH) {
+          setPreviewPlacement('left');
+        } else {
+          setPreviewPlacement('bottom');
+        }
+      }
+    };
+
+    updatePlacement();
+    window.addEventListener('resize', updatePlacement);
+    return () => window.removeEventListener('resize', updatePlacement);
+  }, [activePanelDate, align]);
 
   const handlePrevMonth = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -396,14 +449,15 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
   const basePlannedAU = taskAlreadyInPanel
     ? activeTasks.filter((t) => t.id !== currentTaskId).reduce((acc, t) => acc + (t.estimatedAU || 0), 0)
     : pendingAU;
-  const totalWithTaskAU = currentTaskId ? basePlannedAU + resolvedCurrentTaskAU : pendingAU;
-  const remainingAU = Math.round((dailyCapacityAU - (currentTaskId && resolvedCurrentTaskAU > 0 ? totalWithTaskAU : pendingAU)) * 10) / 10;
+  const hasTaskToSchedule = resolvedCurrentTaskAU > 0;
+  const totalWithTaskAU = hasTaskToSchedule ? basePlannedAU + resolvedCurrentTaskAU : pendingAU;
+  const remainingAU = Math.round((dailyCapacityAU - (hasTaskToSchedule ? totalWithTaskAU : pendingAU)) * 10) / 10;
   const committedPercentage = dailyCapacityAU > 0
-    ? Math.round(((currentTaskId && resolvedCurrentTaskAU > 0 ? totalWithTaskAU : pendingAU) / dailyCapacityAU) * 100)
+    ? Math.round(((hasTaskToSchedule ? totalWithTaskAU : pendingAU) / dailyCapacityAU) * 100)
     : 100;
-  const isOverCapacity = (currentTaskId && resolvedCurrentTaskAU > 0 ? totalWithTaskAU : pendingAU) > dailyCapacityAU;
+  const isOverCapacity = (hasTaskToSchedule ? totalWithTaskAU : pendingAU) > dailyCapacityAU;
   const overCapacityDelta = isOverCapacity
-    ? Math.round(((currentTaskId && resolvedCurrentTaskAU > 0 ? totalWithTaskAU : pendingAU) - dailyCapacityAU) * 10) / 10
+    ? Math.round(((hasTaskToSchedule ? totalWithTaskAU : pendingAU) - dailyCapacityAU) * 10) / 10
     : 0;
 
   const handleSaveOverride = async (e: React.MouseEvent) => {
@@ -665,11 +719,11 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
           onClick={(e) => e.stopPropagation()}
           className={`nodrag nowheel nopan absolute ${
             previewPlacement === 'right'
-              ? 'left-full ml-2 top-0'
+              ? 'left-full ml-2 top-0 w-[300px]'
               : previewPlacement === 'left'
-              ? 'right-full mr-2 top-0'
-              : 'top-full mt-2 left-0 right-0'
-          } w-[300px] max-w-[calc(100vw-2rem)] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-3 z-[10000] select-none animate-in fade-in zoom-in-95 duration-100 ring-1 ring-slate-950/10 text-left flex flex-col`}
+              ? 'right-full mr-2 top-0 w-[300px]'
+              : 'top-full mt-2 left-0 right-0 w-full'
+          } max-w-[calc(100vw-2rem)] max-h-[85vh] overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-3 z-[10000] select-none animate-in fade-in zoom-in-95 duration-100 ring-1 ring-slate-950/10 text-left flex flex-col`}
         >
           {/* Header */}
           <div className="flex items-center justify-between pb-2 mb-1.5 border-b border-slate-100 dark:border-slate-800">
@@ -794,7 +848,7 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
           </div>
 
           {/* Consequence Preview Card (when scheduling an estimated task) */}
-          {currentTaskId && resolvedCurrentTaskAU > 0 && (
+          {resolvedCurrentTaskAU > 0 && (
             <div
               data-testid="capacity-consequence-card"
               className={`p-2.5 rounded-xl border mb-2 text-xs transition-all ${

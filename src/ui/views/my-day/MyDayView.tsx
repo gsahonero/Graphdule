@@ -992,6 +992,7 @@ export const MyDayView: React.FC = () => {
                 position="bottom"
                 align="right"
                 currentTaskId={task.id}
+                taskEstimatedAU={task.estimatedAU}
               />
             )}
           </div>
@@ -1093,6 +1094,7 @@ export const MyDayView: React.FC = () => {
                 position="bottom"
                 align="right"
                 currentTaskId={task.id}
+                taskEstimatedAU={task.estimatedAU}
               />
             )}
           </div>
@@ -1259,6 +1261,7 @@ export const MyDayView: React.FC = () => {
                 position="bottom"
                 align="right"
                 currentTaskId={task.id}
+                taskEstimatedAU={task.estimatedAU}
               />
             )}
           </div>
@@ -1353,6 +1356,7 @@ export const MyDayView: React.FC = () => {
                 position="bottom"
                 align="right"
                 currentTaskId={task.id}
+                taskEstimatedAU={task.estimatedAU}
               />
             )}
           </div>
@@ -2222,6 +2226,14 @@ export const MyDayView: React.FC = () => {
             <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono">
               {allDisplayStandaloneTasks.length}
             </span>
+            {preferences.attentionSystemEnabled && (() => {
+              const totalAU = allDisplayStandaloneTasks.reduce((acc, t) => acc + (t.estimatedAU || 0), 0);
+              return totalAU > 0 ? (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 font-mono font-semibold border border-amber-200 dark:border-amber-800/60" title="Total Standalone Tasks Planned Attention Units">
+                  {Math.round(totalAU * 10) / 10} AU
+                </span>
+              ) : null;
+            })()}
           </div>
 
           {/* Grouping Mode Switcher for Standalone Tasks */}
@@ -2335,6 +2347,7 @@ export const MyDayView: React.FC = () => {
                     onClose={() => setIsCalendarOpen(false)}
                     position="bottom"
                     align="right"
+                    taskEstimatedAU={newStandaloneEstimatedAU ? parseFloat(newStandaloneEstimatedAU) : undefined}
                   />
                 )}
               </div>
@@ -2392,6 +2405,7 @@ export const MyDayView: React.FC = () => {
                     onClose={() => setIsCalendarOpen(false)}
                     position="bottom"
                     align="left"
+                    taskEstimatedAU={newStandaloneEstimatedAU ? parseFloat(newStandaloneEstimatedAU) : undefined}
                   />
                 )}
               </div>
@@ -2468,6 +2482,14 @@ export const MyDayView: React.FC = () => {
                           <span className={`text-xs font-mono px-2 py-0.5 rounded-full font-semibold ${sGroup.badgeClass}`}>
                             {sGroup.tasks.length}
                           </span>
+                          {preferences.attentionSystemEnabled && (() => {
+                            const groupAU = sGroup.tasks.reduce((acc, t) => acc + (t.estimatedAU || 0), 0);
+                            return groupAU > 0 ? (
+                              <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60 font-semibold" title="Total Group Planned Attention Units">
+                                {Math.round(groupAU * 10) / 10} AU
+                              </span>
+                            ) : null;
+                          })()}
                         </div>
                       </div>
 
@@ -2513,6 +2535,14 @@ export const MyDayView: React.FC = () => {
                           <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
                             {rGroup.tasks.length}
                           </span>
+                          {preferences.attentionSystemEnabled && (() => {
+                            const groupAU = rGroup.tasks.reduce((acc, t) => acc + (t.estimatedAU || 0), 0);
+                            return groupAU > 0 ? (
+                              <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60 font-semibold" title="Total Group Planned Attention Units">
+                                {Math.round(groupAU * 10) / 10} AU
+                              </span>
+                            ) : null;
+                          })()}
                         </div>
                       </div>
 
