@@ -10,11 +10,12 @@ import {
   IdeaSeed,
   ActivityEvent,
   WeeklyAttentionReviewRecord,
+  DailyCapacitySnapshot,
 } from '../../domain/models/types';
 import { ProjectService } from '../../domain/services/project-service';
 
 const DB_NAME = 'graphdule_db';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 export class IndexedDBProvider implements IStorageProvider {
   private db: IDBPDatabase | null = null;
@@ -54,6 +55,10 @@ export class IndexedDBProvider implements IStorageProvider {
         if (!db.objectStoreNames.contains('attention_reviews')) {
           const reviewStore = db.createObjectStore('attention_reviews', { keyPath: 'id' });
           reviewStore.createIndex('by_week', 'weekStartDate');
+        }
+        if (!db.objectStoreNames.contains('capacity_snapshots')) {
+          const capStore = db.createObjectStore('capacity_snapshots', { keyPath: 'id' });
+          capStore.createIndex('by_date', 'date');
         }
       },
     });
@@ -233,5 +238,31 @@ export class IndexedDBProvider implements IStorageProvider {
   public async deleteAttentionReview(reviewId: string): Promise<void> {
     const db = await this.getDB();
     await db.delete('attention_reviews', reviewId);
+  }
+
+  public async readCapacitySnapshots(): Promise<DailyCapacitySnapshot[]> {
+    const db = await this.getDB();
+    const snapshots: DailyCapacitySnapshot[] = await db.getAll('capacity_snapshots');
+    return snapshots.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  }
+
+  public async writeCapacitySnapshots(snapshots: DailyCapacitySnapshot[]): Promise<void> {
+    const db = await this.getDB();
+    const tx = db.transaction('capacity_snapshots', 'readwrite');
+    await tx.store.clear();
+    for (const snap of snapshots) {
+      await tx.store.put(snap);
+    }
+    await tx.done;
+  }
+
+  public async appendCapacitySnapshots(snapshots: DailyCapacitySnapshot[]): Promise<void> {
+    if (snapshots.length === 0) return;
+    const db = await this.getDB();
+    const tx = db.transaction('capacity_snapshots', 'readwrite');
+    for (const snap of snapshots) {
+      await tx.store.put(snap);
+    }
+    await tx.done;
   }
 }

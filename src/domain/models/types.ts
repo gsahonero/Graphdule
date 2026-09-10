@@ -306,6 +306,7 @@ export interface UserPreferences {
   readonly weeklyPlannedAU?: number;
   readonly activeWorkSession?: ActiveWorkSession | null;
   readonly idleSyncIntervalMinutes?: number;
+  readonly capacityConfig?: DailyCapacityConfig;
 }
 
 export interface ProjectSummary {
@@ -349,4 +350,57 @@ export interface CascadeImpactPreview {
     readonly proposedDueDate: string;
     readonly reason: string;
   }[];
+}
+
+export interface WorkScheduleConfig {
+  readonly startHour: number; // 0-23, e.g. 9 for 09:00
+  readonly startMinute?: number; // 0-59, e.g. 0
+  readonly endHour: number; // 0-23, e.g. 17 for 17:00
+  readonly endMinute?: number; // 0-59, e.g. 0
+  readonly workDays: readonly number[]; // 0 = Sun, 1 = Mon, ..., 6 = Sat
+}
+
+export interface CalendarInferenceConfig {
+  readonly enabled: boolean;
+  readonly minutesPerAU: number; // e.g. 15, 30, 60 minutes per 1 AU
+  readonly workSchedule: WorkScheduleConfig;
+}
+
+export interface DailyCapacityConfig {
+  readonly isConfigured: boolean;
+  readonly weekdayDefaults: Record<number, number>; // day of week (0-6) -> default AU capacity
+  readonly manualOverrides: Record<string, number>; // YYYY-MM-DD -> overridden AU capacity
+  readonly calendarInference: CalendarInferenceConfig;
+  readonly lastWeeklyPromptWeek?: string; // e.g. "2026-W37"
+}
+
+export type CapacitySnapshotSource = 'sync' | 'manual' | 'weekly_plan' | 'default';
+
+export interface DailyCapacitySnapshot {
+  readonly id: string;
+  readonly date: string; // YYYY-MM-DD
+  readonly timestamp: string; // ISO timestamp of snapshot creation
+  readonly calendarAvailabilityAU?: number; // Theoretical available AU from work hours minus calendar events
+  readonly expectedCapacityAU: number; // Baseline or learned expected capacity
+  readonly userOverrideAU?: number; // Manual override if one was set
+  readonly effectiveCapacityAU: number; // Resolved effective capacity
+  readonly plannedAU: number; // Total planned AU due on this date at time of snapshot
+  readonly realizedAU?: number; // Realized / completed AU on this date
+  readonly occupiedMinutes?: number; // Minutes occupied by calendar events during work hours
+  readonly confidence?: number; // 0.0 - 1.0 confidence in learned estimate
+  readonly source: CapacitySnapshotSource;
+}
+
+export interface SchedulingImpactPreview {
+  readonly date: string;
+  readonly currentPlannedAU: number;
+  readonly taskAU: number;
+  readonly totalPlannedAU: number;
+  readonly capacityAU: number;
+  readonly remainingAU: number; // capacityAU - totalPlannedAU
+  readonly percentageUsed: number; // (totalPlannedAU / capacityAU) * 100
+  readonly isOverCapacity: boolean;
+  readonly overCapacityDelta: number; // Math.max(0, totalPlannedAU - capacityAU)
+  readonly calendarAvailabilityAU?: number;
+  readonly isManualOverride: boolean;
 }

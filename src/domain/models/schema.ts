@@ -164,6 +164,7 @@ export const UserPreferencesSchema = z.object({
   weeklyPlannedAU: z.number().nonnegative().optional(),
   activeWorkSession: ActiveWorkSessionSchema.nullable().optional(),
   idleSyncIntervalMinutes: z.number().int().positive().optional().default(15),
+  capacityConfig: z.lazy(() => DailyCapacityConfigSchema).optional(),
 }).passthrough();
 
 export const IdeaSeedSchema = z.object({
@@ -261,5 +262,62 @@ export const WeeklyAttentionReviewRecordSchema = z.object({
   createdAt: z.string().optional(),
   data: z.record(z.unknown()),
   userNotes: z.string().optional(),
+}).passthrough();
+
+export const WorkScheduleConfigSchema = z.object({
+  startHour: z.number().int().min(0).max(23),
+  startMinute: z.number().int().min(0).max(59).optional().default(0),
+  endHour: z.number().int().min(0).max(23),
+  endMinute: z.number().int().min(0).max(59).optional().default(0),
+  workDays: z.array(z.number().int().min(0).max(6)).default([1, 2, 3, 4, 5]),
+}).passthrough();
+
+export const CalendarInferenceConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  minutesPerAU: z.number().int().positive().default(15),
+  workSchedule: WorkScheduleConfigSchema,
+}).passthrough();
+
+export const DailyCapacityConfigSchema = z.object({
+  isConfigured: z.boolean().default(false),
+  weekdayDefaults: z.record(z.coerce.number(), z.number().nonnegative()).default({
+    1: 20,
+    2: 20,
+    3: 20,
+    4: 20,
+    5: 20,
+    6: 8,
+    0: 8,
+  }),
+  manualOverrides: z.record(z.string(), z.number().nonnegative()).default({}),
+  calendarInference: CalendarInferenceConfigSchema.default({
+    enabled: false,
+    minutesPerAU: 15,
+    workSchedule: {
+      startHour: 9,
+      startMinute: 0,
+      endHour: 17,
+      endMinute: 0,
+      workDays: [1, 2, 3, 4, 5],
+    },
+  }),
+  lastWeeklyPromptWeek: z.string().optional(),
+}).passthrough();
+
+export const CapacitySnapshotSourceSchema = z.enum(['sync', 'manual', 'weekly_plan', 'default']);
+
+export const DailyCapacitySnapshotSchema = z.object({
+  id: z.string().min(1),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  timestamp: z.string(),
+  calendarAvailabilityAU: z.number().nonnegative().optional(),
+  expectedCapacityAU: z.number().nonnegative(),
+  userOverrideAU: z.number().nonnegative().optional(),
+  effectiveCapacityAU: z.number().nonnegative(),
+  plannedAU: z.number().nonnegative(),
+  realizedAU: z.number().nonnegative().optional(),
+  occupiedMinutes: z.number().nonnegative().optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  source: CapacitySnapshotSourceSchema,
 }).passthrough();
 

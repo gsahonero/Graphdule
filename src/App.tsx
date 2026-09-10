@@ -12,6 +12,8 @@ import { OnboardingModal } from './ui/components/OnboardingModal';
 import { CloudSyncModal } from './ui/components/CloudSyncModal';
 import { ActiveWorkBar } from './ui/components/ActiveWorkBar';
 import { TaskWorkSessionsModal } from './ui/components/TaskWorkSessionsModal';
+import { CapacityConfigModal } from './ui/components/CapacityConfigModal';
+import { WeeklyCapacityModal } from './ui/components/WeeklyCapacityModal';
 import { BottomNav } from './ui/components/BottomNav';
 
 const AppContent: React.FC = () => {
@@ -39,6 +41,8 @@ const AppContent: React.FC = () => {
       <OnboardingModal />
       <CloudSyncModal />
       <TaskWorkSessionsModal />
+      <CapacityConfigModal />
+      <WeeklyCapacityModal />
     </div>
   );
 };

@@ -109,3 +109,33 @@ export function formatDisplayDate(dateStr: string, format: DateDisplayFormat = '
   return `${dd}/${mm}/${yearStr}`;
 }
 
+/**
+ * Returns the Monday YYYY-MM-DD date string for the week containing the specified date.
+ */
+export function getMondayOfWeek(dateStr?: string): string {
+  const d = dateStr ? parseDate(dateStr) : new Date();
+  const day = d.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+  const diffToMonday = (day + 6) % 7;
+  const monday = new Date(d);
+  monday.setDate(d.getDate() - diffToMonday);
+  return formatDate(monday);
+}
+
+/**
+ * Returns ISO week string format e.g. '2026-W37'.
+ */
+export function getISOWeekString(dateStr?: string): string {
+  const d = dateStr ? parseDate(dateStr) : new Date();
+  const target = new Date(d.valueOf());
+  const dayNr = (d.getDay() + 6) % 7;
+  target.setDate(target.getDate() - dayNr + 3);
+  const firstThursday = target.valueOf();
+  target.setMonth(0, 1);
+  if (target.getDay() !== 4) {
+    target.setMonth(0, 1 + ((4 - target.getDay() + 7) % 7));
+  }
+  const weekNum = 1 + Math.ceil((firstThursday - target.valueOf()) / 604800000);
+  const year = new Date(firstThursday).getFullYear();
+  return `${year}-W${String(weekNum).padStart(2, '0')}`;
+}
+

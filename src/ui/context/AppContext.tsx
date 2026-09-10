@@ -17,6 +17,9 @@ import {
   ActivityEventType,
   ActiveWorkSession,
   WeeklyAttentionReviewRecord,
+  DailyCapacityConfig,
+  DailyCapacitySnapshot,
+  SchedulingImpactPreview,
 } from '../../domain/models/types';
 import { normalizeEventType } from '../../domain/models/schema';
 
@@ -29,6 +32,11 @@ import { MyDayService } from '../../domain/services/my-day-service';
 import { RecurrenceService } from '../../domain/services/recurrence-service';
 import { ActivityLogService } from '../../domain/services/activity-log-service';
 import { AttentionService } from '../../domain/services/attention-service';
+import {
+  CapacityService,
+  DEFAULT_CAPACITY_CONFIG,
+  CalendarEventInterval,
+} from '../../domain/services/capacity-service';
 import {
   defaultStorageProvider,
   IStorageProvider,
@@ -43,7 +51,7 @@ import {
   GCalendarItem,
 } from '../../storage';
 import { JsonFileProvider } from '../../storage/file/json-file-provider';
-import { formatDisplayDate, DateDisplayFormat, isAfter } from '../../domain/utils/date';
+import { formatDisplayDate, DateDisplayFormat, isAfter, getTodayString, addDays, getMondayOfWeek, getISOWeekString, parseDate } from '../../domain/utils/date';
 import { createDefaultSampleProject, DEFAULT_SAMPLE_PROJECT_ID } from '../../config/sample-project';
 
 interface AppContextType {
@@ -198,6 +206,19 @@ interface AppContextType {
   attentionReviews: WeeklyAttentionReviewRecord[];
   triggerWeeklyReview: (weekStartDate: string, weekEndDate: string, userNotes?: string) => Promise<WeeklyAttentionReviewRecord>;
   deleteAttentionReview: (reviewId: string) => Promise<void>;
+
+  // Daily AU Capacity & Reality Check
+  capacityConfig: DailyCapacityConfig;
+  capacitySnapshots: DailyCapacitySnapshot[];
+  isCapacityConfigModalOpen: boolean;
+  setIsCapacityConfigModalOpen: (open: boolean) => void;
+  isWeeklyCapacityModalOpen: boolean;
+  setIsWeeklyCapacityModalOpen: (open: boolean) => void;
+  updateCapacityConfig: (partial: Partial<DailyCapacityConfig>) => Promise<void>;
+  setDailyCapacityOverride: (dateStr: string, capacityAU: number | undefined) => Promise<void>;
+  recordCapacitySnapshot: (snapshot: DailyCapacitySnapshot) => Promise<void>;
+  getSchedulingImpact: (dateStr: string, taskAU: number) => SchedulingImpactPreview;
+  fillWeekFromCalendar: (weekStartDate?: string) => Promise<number>;
 }
 
 export const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -247,6 +268,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
   const [activeWorkElapsedSeconds, setActiveWorkElapsedSeconds] = useState<number>(0);
   const [attentionReviews, setAttentionReviews] = useState<WeeklyAttentionReviewRecord[]>([]);
+
+  // Daily AU Capacity & Reality Check states
+  const [capacitySnapshots, setCapacitySnapshots] = useState<DailyCapacitySnapshot[]>([]);
+  const [isCapacityConfigModalOpen, setIsCapacityConfigModalOpen] = useState(false);
+  const [isWeeklyCapacityModalOpen, setIsWeeklyCapacityModalOpen] = useState(false);
 
   const activeWorkSessionRef = useRef<ActiveWorkSession | null>(activeWorkSession);
   useEffect(() => {
@@ -561,6 +587,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (!prefs.onboardingCompleted && projList.length === 0) {
       setIsOnboardingOpen(true);
+    }
+
+    // Load capacity snapshots
+    if (storage.readCapacitySnapshots) {
+      const snaps = await storage.readCapacitySnapshots();
+      setCapacitySnapshots(snaps);
+    }
+
+    // Capacity checks: First setup & Every Monday popup
+    const capConfig = prefs.capacityConfig || DEFAULT_CAPACITY_CONFIG;
+    const today = getTodayString();
+    const todayDate = parseDate(today);
+    const isMonday = todayDate.getDay() === 1;
+    const currentWeek = getISOWeekString(today);
+
+    if (capConfig.isConfigured) {
+      if (isMonday && capConfig.lastWeeklyPromptWeek !== currentWeek) {
+        setIsWeeklyCapacityModalOpen(true);
+      }
     }
   }, [storage]);
 
@@ -2679,6 +2724,200 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [activeWorkSession, stopWork, standaloneTasks, updateStandaloneTaskStatus, updateNodeStatus]);
 
+  const capacityConfig: DailyCapacityConfig = useMemo(
+    () => preferences.capacityConfig || DEFAULT_CAPACITY_CONFIG,
+    [preferences.capacityConfig]
+  );
+
+  const updateCapacityConfig = useCallback(
+    async (partial: Partial<DailyCapacityConfig>) => {
+      const current = preferences.capacityConfig || DEFAULT_CAPACITY_CONFIG;
+      const updated: DailyCapacityConfig = {
+        ...current,
+        ...partial,
+        isConfigured: partial.isConfigured !== undefined ? partial.isConfigured : true,
+        weekdayDefaults: partial.weekdayDefaults
+          ? { ...current.weekdayDefaults, ...partial.weekdayDefaults }
+          : current.weekdayDefaults,
+        manualOverrides: partial.manualOverrides
+          ? { ...current.manualOverrides, ...partial.manualOverrides }
+          : current.manualOverrides,
+        calendarInference: partial.calendarInference
+          ? { ...current.calendarInference, ...partial.calendarInference }
+          : current.calendarInference,
+      };
+      await updatePreferences({ capacityConfig: updated });
+    },
+    [preferences.capacityConfig, updatePreferences]
+  );
+
+  const recordCapacitySnapshot = useCallback(
+    async (snapshot: DailyCapacitySnapshot) => {
+      setCapacitySnapshots((prev) => [...prev, snapshot]);
+      if (storage.appendCapacitySnapshots) {
+        await storage.appendCapacitySnapshots([snapshot]);
+      }
+    },
+    [storage]
+  );
+
+  const setDailyCapacityOverride = useCallback(
+    async (dateStr: string, capacityAU: number | undefined) => {
+      const current = preferences.capacityConfig || DEFAULT_CAPACITY_CONFIG;
+      const nextOverrides = { ...current.manualOverrides };
+      if (capacityAU === undefined) {
+        delete nextOverrides[dateStr];
+      } else {
+        nextOverrides[dateStr] = Math.max(0, capacityAU);
+      }
+      const updated: DailyCapacityConfig = {
+        ...current,
+        manualOverrides: nextOverrides,
+      };
+      await updatePreferences({ capacityConfig: updated });
+
+      // Record a snapshot of this manual override change
+      const allTasks = [
+        ...allActiveNodes.map((n) => ({ dueDate: n.dueDate, status: n.status, estimatedAU: n.estimatedAU })),
+        ...standaloneTasks.map((t) => ({ dueDate: t.dueDate, status: t.status, estimatedAU: t.estimatedAU })),
+      ];
+      const plannedAU = CapacityService.calculatePlannedAU(allTasks, dateStr);
+      const realizedAU = CapacityService.calculateRealizedAU(allTasks, dateStr);
+      const resolved = CapacityService.resolveDailyCapacity(dateStr, updated, {
+        historicalSnapshots: capacitySnapshots,
+      });
+
+      const snapshot = CapacityService.createCapacitySnapshot({
+        date: dateStr,
+        expectedCapacityAU: resolved.expectedCapacityAU,
+        effectiveCapacityAU: resolved.effectiveCapacityAU,
+        plannedAU,
+        realizedAU: realizedAU > 0 ? realizedAU : undefined,
+        userOverrideAU: capacityAU,
+        confidence: 1.0,
+        source: 'manual',
+      });
+      await recordCapacitySnapshot(snapshot);
+    },
+    [preferences.capacityConfig, updatePreferences, allActiveNodes, standaloneTasks, capacitySnapshots, recordCapacitySnapshot]
+  );
+
+  const getSchedulingImpact = useCallback(
+    (dateStr: string, taskAU: number): SchedulingImpactPreview => {
+      const allTasks = [
+        ...allActiveNodes.map((n) => ({ id: n.id, dueDate: n.dueDate, status: n.status, estimatedAU: n.estimatedAU })),
+        ...standaloneTasks.map((t) => ({ id: t.id, dueDate: t.dueDate, status: t.status, estimatedAU: t.estimatedAU })),
+      ];
+      const currentPlannedAU = CapacityService.calculatePlannedAU(allTasks, dateStr);
+      const resolved = CapacityService.resolveDailyCapacity(dateStr, capacityConfig, {
+        historicalSnapshots: capacitySnapshots,
+      });
+
+      return CapacityService.evaluateTaskAssignmentImpact(
+        currentPlannedAU,
+        taskAU,
+        resolved.effectiveCapacityAU,
+        dateStr,
+        resolved.isManualOverride,
+        resolved.calendarAvailabilityAU
+      );
+    },
+    [allActiveNodes, standaloneTasks, capacityConfig, capacitySnapshots]
+  );
+
+  const fillWeekFromCalendar = useCallback(
+    async (weekStartDate?: string): Promise<number> => {
+      const mondayDate = weekStartDate || getMondayOfWeek();
+      const capConfig = preferences.capacityConfig || DEFAULT_CAPACITY_CONFIG;
+      const daysToProcess: string[] = [];
+      for (let i = 0; i < 7; i++) {
+        daysToProcess.push(addDays(mondayDate, i));
+      }
+
+      // Fetch calendar events if possible
+      let calendarEvents: CalendarEventInterval[] = [];
+      try {
+        if (GDriveAuth.isAuthenticated()) {
+          const { calendarId } = await GCalendarSync.resolveEffectiveCalendarId();
+          const isDedicated =
+            gcalendarSyncConfig.targetCalendarId === 'dedicated' || !gcalendarSyncConfig.targetCalendarId;
+          const rawEvents = await GCalendarClient.listGraphduleEvents(calendarId, isDedicated);
+          calendarEvents = rawEvents
+            .filter((ev) => ev.start && (ev.start.dateTime || ev.start.date))
+            .map((ev) => ({
+              start: ev.start?.dateTime || ev.start?.date || '',
+              end: ev.end?.dateTime || ev.end?.date || ev.start?.dateTime || ev.start?.date || '',
+              allDay: !ev.start?.dateTime,
+            }));
+        }
+      } catch (err) {
+        console.warn('[Capacity] Could not fetch calendar events for fillWeek:', err);
+      }
+
+      const newOverrides: Record<string, number> = { ...capConfig.manualOverrides };
+      const newSnapshots: DailyCapacitySnapshot[] = [];
+      const allTasks = [
+        ...allActiveNodes.map((n) => ({ dueDate: n.dueDate, status: n.status, estimatedAU: n.estimatedAU })),
+        ...standaloneTasks.map((t) => ({ dueDate: t.dueDate, status: t.status, estimatedAU: t.estimatedAU })),
+      ];
+
+      let daysUpdated = 0;
+      for (const dayStr of daysToProcess) {
+        const avail = CapacityService.calculateCalendarAvailability(
+          calendarEvents,
+          capConfig.calendarInference.workSchedule,
+          capConfig.calendarInference.minutesPerAU,
+          dayStr
+        );
+
+        const plannedAU = CapacityService.calculatePlannedAU(allTasks, dayStr);
+        const realizedAU = CapacityService.calculateRealizedAU(allTasks, dayStr);
+
+        // If calendar availability was computed, set as daily capacity override for the week
+        const effectiveAU =
+          avail.availableAU > 0
+            ? avail.availableAU
+            : (capConfig.weekdayDefaults[parseDate(dayStr).getDay()] ?? 20);
+
+        newOverrides[dayStr] = effectiveAU;
+        daysUpdated++;
+
+        newSnapshots.push(
+          CapacityService.createCapacitySnapshot({
+            date: dayStr,
+            expectedCapacityAU: capConfig.weekdayDefaults[parseDate(dayStr).getDay()] ?? 20,
+            effectiveCapacityAU: effectiveAU,
+            plannedAU,
+            realizedAU: realizedAU > 0 ? realizedAU : undefined,
+            calendarAvailabilityAU: avail.availableAU,
+            userOverrideAU: effectiveAU,
+            occupiedMinutes: avail.occupiedMinutes,
+            confidence: 0.9,
+            source: 'weekly_plan',
+          })
+        );
+      }
+
+      const currentWeek = getISOWeekString(mondayDate);
+      await updatePreferences({
+        capacityConfig: {
+          ...capConfig,
+          isConfigured: true,
+          manualOverrides: newOverrides,
+          lastWeeklyPromptWeek: currentWeek,
+        },
+      });
+
+      if (storage.appendCapacitySnapshots && newSnapshots.length > 0) {
+        await storage.appendCapacitySnapshots(newSnapshots);
+        setCapacitySnapshots((prev) => [...prev, ...newSnapshots]);
+      }
+
+      return daysUpdated;
+    },
+    [preferences.capacityConfig, updatePreferences, gcalendarSyncConfig, allActiveNodes, standaloneTasks, storage]
+  );
+
   const exportActiveProject = useCallback(() => {
     if (activeProjectDoc) {
       JsonFileProvider.exportProjectToFile(activeProjectDoc);
@@ -2697,6 +2936,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const seeds = storage.readIdeaSeeds ? await storage.readIdeaSeeds() : [];
     const log = storage.readActivityLog ? await storage.readActivityLog() : [];
     const reviews = storage.readAttentionReviews ? await storage.readAttentionReviews() : [];
+    const capSnaps = storage.readCapacitySnapshots ? await storage.readCapacitySnapshots() : [];
 
     JsonFileProvider.exportFullWorkspaceBackup({
       projects: allDocs,
@@ -2705,6 +2945,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ideaSeeds: seeds,
       activityLog: log,
       attentionReviews: reviews,
+      capacitySnapshots: capSnaps,
     });
   }, [storage]);
 
@@ -2719,10 +2960,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // When importing projects from a file, remove the initial default sample project if present
       const existingProjects = await storage.listProjects();
-      const hasSampleProject = existingProjects.some((p) => p.id === DEFAULT_SAMPLE_PROJECT_ID);
+      const hasSampleProject = existingProjects.some((p: ProjectSummary) => p.id === DEFAULT_SAMPLE_PROJECT_ID);
       const importingSampleDirectly =
         (payload.type === 'project' && payload.document.project.id === DEFAULT_SAMPLE_PROJECT_ID) ||
-        (payload.type !== 'project' && payload.projects.some((p) => p.project.id === DEFAULT_SAMPLE_PROJECT_ID));
+        (payload.type !== 'project' && payload.projects.some((p: ProjectDocument) => p.project.id === DEFAULT_SAMPLE_PROJECT_ID));
 
       if (hasSampleProject && !importingSampleDirectly) {
         await storage.deleteProject(DEFAULT_SAMPLE_PROJECT_ID);
@@ -2741,8 +2982,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         if (payload.standaloneTasks && payload.standaloneTasks.length > 0) {
           const currentStandalones = await storage.readStandaloneTasks();
-          const mergedIds = new Set(payload.standaloneTasks.map((t) => t.id));
-          const existingFiltered = currentStandalones.filter((t) => !mergedIds.has(t.id));
+          const mergedIds = new Set(payload.standaloneTasks.map((t: StandaloneTask) => t.id));
+          const existingFiltered = currentStandalones.filter((t: StandaloneTask) => !mergedIds.has(t.id));
           const combined = [...existingFiltered, ...payload.standaloneTasks];
           await storage.writeStandaloneTasks(combined);
           setStandaloneTasks(combined);
@@ -2750,8 +2991,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         if (payload.ideaSeeds && payload.ideaSeeds.length > 0 && storage.writeIdeaSeeds) {
           const currentSeeds = storage.readIdeaSeeds ? await storage.readIdeaSeeds() : [];
-          const mergedIds = new Set(payload.ideaSeeds.map((s) => s.id));
-          const existingFiltered = currentSeeds.filter((s) => !mergedIds.has(s.id));
+          const mergedIds = new Set(payload.ideaSeeds.map((s: IdeaSeed) => s.id));
+          const existingFiltered = currentSeeds.filter((s: IdeaSeed) => !mergedIds.has(s.id));
           const combined = [...existingFiltered, ...payload.ideaSeeds];
           await storage.writeIdeaSeeds(combined);
           setIdeaSeeds(combined);
@@ -2759,8 +3000,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         if (payload.activityLog && payload.activityLog.length > 0 && storage.appendActivityEvents) {
           const currentLog = storage.readActivityLog ? await storage.readActivityLog() : [];
-          const currentLogIds = new Set(currentLog.map((e) => e.id));
-          const newEvents = payload.activityLog.filter((e) => !currentLogIds.has(e.id));
+          const currentLogIds = new Set(currentLog.map((e: ActivityEvent) => e.id));
+          const newEvents = payload.activityLog.filter((e: ActivityEvent) => !currentLogIds.has(e.id));
           if (newEvents.length > 0) {
             await storage.appendActivityEvents(newEvents);
             setActivityLog((prev) => ActivityLogService.deduplicateEvents([...prev, ...newEvents]));
@@ -2769,12 +3010,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         if (payload.attentionReviews && payload.attentionReviews.length > 0 && storage.writeAttentionReviews) {
           const currentReviews = storage.readAttentionReviews ? await storage.readAttentionReviews() : [];
-          const currentReviewIds = new Set(currentReviews.map((r) => r.id));
-          const newReviews = payload.attentionReviews.filter((r) => !currentReviewIds.has(r.id));
+          const currentReviewIds = new Set(currentReviews.map((r: WeeklyAttentionReviewRecord) => r.id));
+          const newReviews = payload.attentionReviews.filter((r: WeeklyAttentionReviewRecord) => !currentReviewIds.has(r.id));
           if (newReviews.length > 0) {
             const combined = [...newReviews, ...currentReviews];
             await storage.writeAttentionReviews(combined);
             setAttentionReviews(combined);
+          }
+        }
+
+        if (payload.capacitySnapshots && payload.capacitySnapshots.length > 0 && storage.writeCapacitySnapshots) {
+          const currentSnaps = storage.readCapacitySnapshots ? await storage.readCapacitySnapshots() : [];
+          const currentSnapIds = new Set(currentSnaps.map((s: DailyCapacitySnapshot) => s.id));
+          const newSnaps = payload.capacitySnapshots.filter((s: DailyCapacitySnapshot) => !currentSnapIds.has(s.id));
+          if (newSnaps.length > 0) {
+            const combined = [...currentSnaps, ...newSnaps];
+            await storage.writeCapacitySnapshots(combined);
+            setCapacitySnapshots(combined);
           }
         }
 
@@ -3040,6 +3292,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         attentionReviews,
         triggerWeeklyReview,
         deleteAttentionReview,
+        capacityConfig,
+        capacitySnapshots,
+        isCapacityConfigModalOpen,
+        setIsCapacityConfigModalOpen,
+        isWeeklyCapacityModalOpen,
+        setIsWeeklyCapacityModalOpen,
+        updateCapacityConfig,
+        setDailyCapacityOverride,
+        recordCapacitySnapshot,
+        getSchedulingImpact,
+        fillWeekFromCalendar,
       }}
     >
       {children}

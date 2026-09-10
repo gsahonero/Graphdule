@@ -60,6 +60,7 @@ export class JsonFileProvider {
     ideaSeeds?: unknown[];
     activityLog?: unknown[];
     attentionReviews?: unknown[];
+    capacitySnapshots?: unknown[];
   }): void {
     const dateStr = new Date().toISOString().split('T')[0];
     const filename = `graphdule-backup-${dateStr}.json`;

@@ -5,6 +5,7 @@ import {
   IdeaSeedSchema,
   ActivityEventSchema,
   WeeklyAttentionReviewRecordSchema,
+  DailyCapacitySnapshotSchema,
 } from '../models/schema';
 import {
   ProjectDocument,
@@ -13,6 +14,7 @@ import {
   IdeaSeed,
   ActivityEvent,
   WeeklyAttentionReviewRecord,
+  DailyCapacitySnapshot,
 } from '../models/types';
 import { ActivityLogService } from './activity-log-service';
 
@@ -26,6 +28,7 @@ export type ParsedImportPayload =
       ideaSeeds?: IdeaSeed[];
       activityLog?: ActivityEvent[];
       attentionReviews?: WeeklyAttentionReviewRecord[];
+      capacitySnapshots?: DailyCapacitySnapshot[];
     }
   | { type: 'projects_array'; projects: ProjectDocument[] }
   | { type: 'project'; document: ProjectDocument };
@@ -182,6 +185,16 @@ export class MigrationService {
         }
       }
 
+      const validCapacitySnapshots: DailyCapacitySnapshot[] = [];
+      if (Array.isArray(obj.capacitySnapshots)) {
+        for (const snap of obj.capacitySnapshots) {
+          const parsedSnap = DailyCapacitySnapshotSchema.safeParse(snap);
+          if (parsedSnap.success) {
+            validCapacitySnapshots.push(parsedSnap.data as unknown as DailyCapacitySnapshot);
+          }
+        }
+      }
+
       const cleanEvents = ActivityLogService.deduplicateEvents(validEvents);
 
       return {
@@ -194,6 +207,7 @@ export class MigrationService {
           ideaSeeds: validSeeds.length > 0 ? validSeeds : undefined,
           activityLog: cleanEvents.length > 0 ? cleanEvents : undefined,
           attentionReviews: validReviews.length > 0 ? validReviews : undefined,
+          capacitySnapshots: validCapacitySnapshots.length > 0 ? validCapacitySnapshots : undefined,
         },
       };
     }

@@ -8,6 +8,7 @@ import {
   IdeaSeed,
   ActivityEvent,
   WeeklyAttentionReviewRecord,
+  DailyCapacitySnapshot,
 } from '../../domain/models/types';
 
 export type CloudSyncStatus = 'idle' | 'syncing' | 'synced' | 'error' | 'offline';
@@ -61,4 +62,8 @@ export interface IStorageProvider {
   readAttentionReviews?(): Promise<WeeklyAttentionReviewRecord[]>;
   writeAttentionReviews?(reviews: WeeklyAttentionReviewRecord[]): Promise<void>;
   deleteAttentionReview?(reviewId: string): Promise<void>;
+
+  readCapacitySnapshots?(): Promise<DailyCapacitySnapshot[]>;
+  writeCapacitySnapshots?(snapshots: DailyCapacitySnapshot[]): Promise<void>;
+  appendCapacitySnapshots?(snapshots: DailyCapacitySnapshot[]): Promise<void>;
 }

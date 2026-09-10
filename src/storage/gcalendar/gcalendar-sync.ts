@@ -9,8 +9,9 @@ import {
   GCalendarEventResponse,
 } from './gcalendar-client';
 import { IStorageProvider } from '../base/storage-provider';
-import { NodeStatus, ProjectDocument } from '../../domain/models/types';
-import { addDays } from '../../domain/utils/date';
+import { NodeStatus, ProjectDocument, DailyCapacitySnapshot } from '../../domain/models/types';
+import { addDays, getTodayString } from '../../domain/utils/date';
+import { CapacityService, CalendarEventInterval, DEFAULT_CAPACITY_CONFIG } from '../../domain/services/capacity-service';
 import { DEFAULT_SAMPLE_PROJECT_ID } from '../../config/sample-project';
 
 const GCAL_EVENT_MAP_KEY = 'graphdule_gcal_event_map';
@@ -649,6 +650,71 @@ export class GCalendarSync {
       }
       if (modifiedStandalones) {
         await storage.writeStandaloneTasks(updatedStandalonesList);
+      }
+
+      // 6. Recalculate affected daily availability/capacity and record snapshots
+      try {
+        const prefs = storage.readPreferences ? await storage.readPreferences() : null;
+        const capConfig = prefs?.capacityConfig || DEFAULT_CAPACITY_CONFIG;
+        const historicalSnapshots = storage.readCapacitySnapshots ? await storage.readCapacitySnapshots() : [];
+
+        // Collect dates affected by sync (dates of all tasks + today + next 7 days)
+        const affectedDates = new Set<string>();
+        for (const t of allTasks) {
+          if (t.dueDate) affectedDates.add(t.dueDate);
+        }
+        const today = getTodayString();
+        for (let i = 0; i < 7; i++) {
+          affectedDates.add(addDays(today, i));
+        }
+
+        // Map calendar events into interval format
+        const calendarIntervals: CalendarEventInterval[] = gcalEvents
+          .filter((ev) => ev.start && (ev.start.dateTime || ev.start.date))
+          .map((ev) => ({
+            start: ev.start?.dateTime || ev.start?.date || '',
+            end: ev.end?.dateTime || ev.end?.date || ev.start?.dateTime || ev.start?.date || '',
+            allDay: !ev.start?.dateTime,
+          }));
+
+        const newSnapshots: DailyCapacitySnapshot[] = [];
+        for (const dateStr of affectedDates) {
+          const avail = CapacityService.calculateCalendarAvailability(
+            calendarIntervals,
+            capConfig.calendarInference.workSchedule,
+            capConfig.calendarInference.minutesPerAU,
+            dateStr
+          );
+
+          const plannedAU = CapacityService.calculatePlannedAU(allTasks, dateStr);
+          const realizedAU = CapacityService.calculateRealizedAU(allTasks, dateStr);
+
+          const resolved = CapacityService.resolveDailyCapacity(dateStr, capConfig, {
+            calendarAvailabilityAU: avail.availableAU,
+            historicalSnapshots,
+          });
+
+          newSnapshots.push(
+            CapacityService.createCapacitySnapshot({
+              date: dateStr,
+              expectedCapacityAU: resolved.expectedCapacityAU,
+              effectiveCapacityAU: resolved.effectiveCapacityAU,
+              plannedAU,
+              realizedAU: realizedAU > 0 ? realizedAU : undefined,
+              calendarAvailabilityAU: avail.availableAU,
+              userOverrideAU: capConfig.manualOverrides?.[dateStr],
+              occupiedMinutes: avail.occupiedMinutes,
+              confidence: resolved.confidence,
+              source: 'sync',
+            })
+          );
+        }
+
+        if (storage.appendCapacitySnapshots && newSnapshots.length > 0) {
+          await storage.appendCapacitySnapshots(newSnapshots);
+        }
+      } catch (capErr) {
+        console.warn('[GCalendarSync] Capacity snapshot recording warning:', capErr);
       }
 
       this.setConfig({

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo, useContext } from 'react';
-import { ChevronLeft, ChevronRight, CheckCircle2, Clock, Circle, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CheckCircle2, Clock, Circle, X, Edit2, AlertTriangle, Scale } from 'lucide-react';
 import { getTodayString, addDays, parseDate, formatDate, formatDisplayDate } from '../../domain/utils/date';
 import { AppContext } from '../context/AppContext';
 import { NodeStatus } from '../../domain/models/types';
+import { CapacityService } from '../../domain/services/capacity-service';
 
 export interface CalendarDayTask {
   id: string;
@@ -22,7 +23,9 @@ export interface CalendarPickerProps {
   align?: 'left' | 'right' | 'center';
   position?: 'bottom' | 'top';
   currentTaskId?: string;
+  taskEstimatedAU?: number;
   customTasks?: CalendarDayTask[];
+  customCapacity?: number;
 }
 
 const MONTH_NAMES = [
@@ -49,7 +52,9 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
   align = 'left',
   position = 'bottom',
   currentTaskId,
+  taskEstimatedAU,
   customTasks,
+  customCapacity,
 }) => {
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -61,6 +66,10 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
   // Workload details panel state (opened on clicking a day balloon)
   const [activePanelDate, setActivePanelDate] = useState<string | null>(null);
   const [previewPlacement, setPreviewPlacement] = useState<'right' | 'left' | 'bottom'>('right');
+
+  // Inline frictionless daily override state
+  const [isEditingOverride, setIsEditingOverride] = useState<boolean>(false);
+  const [overrideInput, setOverrideInput] = useState<string>('');
 
   // Safely consume AppContext (gracefully null if outside provider)
   const appContext = useContext(AppContext);
@@ -345,6 +354,79 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
   const pendingAU = activeTasks.reduce((acc, t) => acc + (t.estimatedAU || 0), 0);
   const completedAU = completedTasks.reduce((acc, t) => acc + (t.estimatedAU || 0), 0);
 
+  // Capacity & Reality Check Computation for activePanelDate
+  const panelDateObj = activePanelDate ? parseDate(activePanelDate) : null;
+  const panelWeekdayName = panelDateObj
+    ? ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][panelDateObj.getDay()]
+    : '';
+
+  // Current task AU estimation resolution
+  const resolvedCurrentTaskAU = useMemo(() => {
+    if (taskEstimatedAU !== undefined) return taskEstimatedAU;
+    if (!currentTaskId) return 0;
+    const fromPanel = panelTasks.find((t) => t.id === currentTaskId);
+    if (fromPanel?.estimatedAU !== undefined) return fromPanel.estimatedAU;
+    const fromActive = appContext?.allActiveNodes?.find((n) => n.id === currentTaskId);
+    if (fromActive?.estimatedAU !== undefined) return fromActive.estimatedAU;
+    const fromDoc = appContext?.activeProjectDoc?.nodes?.find((n) => n.id === currentTaskId);
+    if (fromDoc?.estimatedAU !== undefined) return fromDoc.estimatedAU;
+    const fromStandalone = appContext?.standaloneTasks?.find((t) => t.id === currentTaskId);
+    if (fromStandalone?.estimatedAU !== undefined) return fromStandalone.estimatedAU;
+    return 0;
+  }, [taskEstimatedAU, currentTaskId, panelTasks, appContext?.allActiveNodes, appContext?.activeProjectDoc?.nodes, appContext?.standaloneTasks]);
+
+  // Capacity resolution for activePanelDate
+  const resolvedCap = useMemo(() => {
+    if (!activePanelDate) return { effectiveCapacityAU: 20, isManualOverride: false, calendarAvailabilityAU: undefined };
+    if (customCapacity !== undefined) {
+      return { effectiveCapacityAU: customCapacity, isManualOverride: false, calendarAvailabilityAU: undefined };
+    }
+    if (appContext?.capacityConfig) {
+      return CapacityService.resolveDailyCapacity(activePanelDate, appContext.capacityConfig, {
+        historicalSnapshots: appContext.capacitySnapshots,
+      });
+    }
+    return { effectiveCapacityAU: 20, isManualOverride: false, calendarAvailabilityAU: undefined };
+  }, [activePanelDate, customCapacity, appContext?.capacityConfig, appContext?.capacitySnapshots]);
+
+  const dailyCapacityAU = resolvedCap.effectiveCapacityAU;
+
+  // Consequence preview calculations
+  const taskAlreadyInPanel = Boolean(currentTaskId && activeTasks.some((t) => t.id === currentTaskId));
+  const basePlannedAU = taskAlreadyInPanel
+    ? activeTasks.filter((t) => t.id !== currentTaskId).reduce((acc, t) => acc + (t.estimatedAU || 0), 0)
+    : pendingAU;
+  const totalWithTaskAU = currentTaskId ? basePlannedAU + resolvedCurrentTaskAU : pendingAU;
+  const remainingAU = Math.round((dailyCapacityAU - (currentTaskId && resolvedCurrentTaskAU > 0 ? totalWithTaskAU : pendingAU)) * 10) / 10;
+  const committedPercentage = dailyCapacityAU > 0
+    ? Math.round(((currentTaskId && resolvedCurrentTaskAU > 0 ? totalWithTaskAU : pendingAU) / dailyCapacityAU) * 100)
+    : 100;
+  const isOverCapacity = (currentTaskId && resolvedCurrentTaskAU > 0 ? totalWithTaskAU : pendingAU) > dailyCapacityAU;
+  const overCapacityDelta = isOverCapacity
+    ? Math.round(((currentTaskId && resolvedCurrentTaskAU > 0 ? totalWithTaskAU : pendingAU) - dailyCapacityAU) * 10) / 10
+    : 0;
+
+  const handleSaveOverride = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!activePanelDate) return;
+    const num = parseFloat(overrideInput);
+    if (!isNaN(num) && num >= 0) {
+      if (appContext?.setDailyCapacityOverride) {
+        await appContext.setDailyCapacityOverride(activePanelDate, num);
+      }
+    }
+    setIsEditingOverride(false);
+  };
+
+  const handleResetOverride = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!activePanelDate) return;
+    if (appContext?.setDailyCapacityOverride) {
+      await appContext.setDailyCapacityOverride(activePanelDate, undefined);
+    }
+    setIsEditingOverride(false);
+  };
+
   const renderTaskRow = (task: CalendarDayTask) => {
     const isCurrent = task.id === currentTaskId;
     const isCompleted = task.status === 'completed';
@@ -497,7 +579,7 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
               </button>
 
               {/* Workload Balloon Badge (Click to open workload panel) */}
-              {taskCount > 0 && (
+              {taskCount > 0 ? (
                 <button
                   type="button"
                   onClick={(e) => {
@@ -527,6 +609,23 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
                   }`}
                 >
                   {taskCount}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  data-testid={`day-capacity-trigger-${cell.dateString}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActivePanelDate((prev) => (prev === cell.dateString ? null : cell.dateString));
+                  }}
+                  title="Inspect AU capacity and workload"
+                  className={`absolute -top-1 -right-0.5 z-20 cursor-pointer select-none rounded-full w-3.5 h-3.5 transition-all flex items-center justify-center ${
+                    isPanelOpen
+                      ? 'scale-125 ring-2 ring-offset-1 ring-slate-800 dark:ring-white bg-slate-300 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
+                      : 'opacity-0 group-hover/day:opacity-100 bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:scale-125'
+                  }`}
+                >
+                  <Scale className="w-2 h-2" />
                 </button>
               )}
             </div>
@@ -560,7 +659,7 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
       </div>
 
       {/* Click-Triggered Workload Details Panel */}
-      {activePanelDate && panelTasks.length > 0 && (
+      {activePanelDate && (
         <div
           data-testid="calendar-workload-preview"
           onClick={(e) => e.stopPropagation()}
@@ -570,27 +669,53 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
               : previewPlacement === 'left'
               ? 'right-full mr-2 top-0'
               : 'top-full mt-2 left-0 right-0'
-          } w-[290px] max-w-[calc(100vw-2rem)] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-3 z-[10000] select-none animate-in fade-in zoom-in-95 duration-100 ring-1 ring-slate-950/10 text-left flex flex-col`}
+          } w-[300px] max-w-[calc(100vw-2rem)] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl p-3 z-[10000] select-none animate-in fade-in zoom-in-95 duration-100 ring-1 ring-slate-950/10 text-left flex flex-col`}
         >
           {/* Header */}
           <div className="flex items-center justify-between pb-2 mb-1.5 border-b border-slate-100 dark:border-slate-800">
             <div className="flex flex-col min-w-0 pr-1">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                Deadline workload
-              </span>
-              <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
+              <div className="flex items-center space-x-1.5">
+                {panelWeekdayName && (
+                  <span className="text-[10.5px] font-bold text-slate-800 dark:text-slate-100 uppercase tracking-wider">
+                    {panelWeekdayName}
+                  </span>
+                )}
+                {resolvedCap.isManualOverride && (
+                  <span className="text-[9px] font-bold px-1 rounded bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300">
+                    Overridden
+                  </span>
+                )}
+              </div>
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400 truncate">
                 {appContext?.formatDateDisplay
                   ? appContext.formatDateDisplay(activePanelDate)
                   : formatDisplayDate(activePanelDate, 'MMM_D_YYYY')}
               </span>
             </div>
-            <div className="flex items-center space-x-1.5 shrink-0">
+            <div className="flex items-center space-x-1 shrink-0">
+              {/* Frictionless Daily Override Toggle */}
+              {!isEditingOverride ? (
+                <button
+                  type="button"
+                  data-testid="edit-capacity-override"
+                  onClick={() => {
+                    setOverrideInput(String(dailyCapacityAU));
+                    setIsEditingOverride(true);
+                  }}
+                  className="px-1.5 py-0.5 rounded text-[10px] font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 flex items-center space-x-0.5 cursor-pointer border border-emerald-500/20"
+                  title="Override AU capacity for this day"
+                >
+                  <Edit2 className="w-2.5 h-2.5" />
+                  <span>{resolvedCap.isManualOverride ? `${dailyCapacityAU} AU` : 'Override'}</span>
+                </button>
+              ) : null}
               <button
                 type="button"
                 data-testid="close-workload-panel"
                 onClick={(e) => {
                   e.stopPropagation();
                   setActivePanelDate(null);
+                  setIsEditingOverride(false);
                 }}
                 className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                 title="Close panel"
@@ -600,12 +725,136 @@ export const CalendarPicker: React.FC<CalendarPickerProps> = ({
             </div>
           </div>
 
-          {/* Subheader Badges */}
+          {/* Inline Frictionless Override Edit Row */}
+          {isEditingOverride && (
+            <div className="p-2 mb-2 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-emerald-300 dark:border-emerald-700/60 flex items-center justify-between text-xs animate-in fade-in duration-100">
+              <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300">Set day capacity:</span>
+              <div className="flex items-center space-x-1">
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={overrideInput}
+                  onChange={(e) => setOverrideInput(e.target.value)}
+                  className="w-14 px-1.5 py-0.5 text-xs rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono"
+                  data-testid="capacity-override-input"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  data-testid="save-capacity-override"
+                  onClick={handleSaveOverride}
+                  className="px-2 py-0.5 text-[10.5px] font-bold rounded bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
+                >
+                  Save
+                </button>
+                {resolvedCap.isManualOverride && (
+                  <button
+                    type="button"
+                    data-testid="reset-capacity-override"
+                    onClick={handleResetOverride}
+                    className="px-1.5 py-0.5 text-[10px] text-slate-500 hover:text-rose-500 cursor-pointer"
+                    title="Reset to weekday default"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Capacity Metrics Summary: Planned / Capacity / Available */}
+          <div className="p-2 mb-2 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-800 space-y-1">
+            <div className="flex items-center justify-between text-xs font-semibold">
+              <span data-testid="capacity-planned-metric" className="text-slate-800 dark:text-slate-100">
+                {Math.round(pendingAU * 10) / 10} / {dailyCapacityAU} AU planned
+              </span>
+              <span
+                data-testid="capacity-percentage-metric"
+                className={`text-[10px] font-bold font-mono px-1.5 py-0.2 rounded ${
+                  isOverCapacity
+                    ? 'bg-rose-100 dark:bg-rose-950 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800'
+                    : 'bg-emerald-100/70 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/60'
+                }`}
+              >
+                {committedPercentage}% capacity
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-[10.5px] text-slate-500 dark:text-slate-400">
+              <span data-testid="capacity-available-metric" className={remainingAU >= 0 ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-rose-600 dark:text-rose-400 font-bold'}>
+                {remainingAU >= 0 ? `${remainingAU} AU available` : `${Math.abs(remainingAU)} AU over capacity`}
+              </span>
+              {resolvedCap.calendarAvailabilityAU !== undefined && (
+                <span className="text-[9.5px] text-slate-400" title="Calendar free time inferred availability">
+                  Cal: {resolvedCap.calendarAvailabilityAU} AU
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Consequence Preview Card (when scheduling an estimated task) */}
+          {currentTaskId && resolvedCurrentTaskAU > 0 && (
+            <div
+              data-testid="capacity-consequence-card"
+              className={`p-2.5 rounded-xl border mb-2 text-xs transition-all ${
+                isOverCapacity
+                  ? 'bg-rose-50/90 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800/70'
+                  : 'bg-emerald-50/70 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800/60'
+              }`}
+            >
+              <div className="font-semibold text-slate-700 dark:text-slate-200 mb-1.5 flex items-center justify-between">
+                <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500 dark:text-slate-400">
+                  Scheduling Consequence
+                </span>
+                {isOverCapacity ? (
+                  <span className="text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-rose-500 text-white animate-pulse">
+                    Over Capacity
+                  </span>
+                ) : (
+                  <span className="text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-emerald-600 text-white">
+                    Fits Capacity
+                  </span>
+                )}
+              </div>
+
+              <div className="space-y-0.5 font-mono text-[11px] text-slate-700 dark:text-slate-200">
+                <div className="flex justify-between">
+                  <span className="text-slate-500 dark:text-slate-400">Current:</span>
+                  <span className="font-semibold">{Math.round(basePlannedAU * 10) / 10} / {dailyCapacityAU} AU</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500 dark:text-slate-400">+ This task:</span>
+                  <span className="font-semibold text-emerald-600 dark:text-emerald-400">{Math.round(resolvedCurrentTaskAU * 10) / 10} AU</span>
+                </div>
+                <div className="flex justify-between pt-1 border-t border-slate-200/80 dark:border-slate-700/80 font-bold">
+                  <span>= Total:</span>
+                  <span className={isOverCapacity ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-white'}>
+                    {Math.round(totalWithTaskAU * 10) / 10} / {dailyCapacityAU} AU ({committedPercentage}%)
+                  </span>
+                </div>
+              </div>
+
+              {isOverCapacity && (
+                <div
+                  data-testid="overcapacity-alert"
+                  className="mt-2 text-[10.5px] text-rose-700 dark:text-rose-300 font-medium flex items-start space-x-1.5 bg-rose-100/60 dark:bg-rose-900/30 p-1.5 rounded-lg border border-rose-200 dark:border-rose-800/60"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-rose-600 dark:text-rose-400 mt-0.5" />
+                  <span>
+                    Overcommitted by {overCapacityDelta} AU ({committedPercentage}%). Reality check: You can still schedule this task.
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Subheader Badges (Kept for backwards compatibility and task counters) */}
           <div className="flex items-center justify-between mb-2 px-0.5">
             <div className="flex items-center space-x-1">
               {activeTasks.length === 0 ? (
                 <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60">
-                  All {completedTasks.length} completed
+                  {completedTasks.length > 0 ? `All ${completedTasks.length} completed` : '0 tasks due'}
                 </span>
               ) : completedTasks.length > 0 ? (
                 <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
