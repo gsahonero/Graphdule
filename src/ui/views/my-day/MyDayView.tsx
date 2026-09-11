@@ -124,6 +124,9 @@ export const MyDayView: React.FC = () => {
   // Attention-only filter for project tasks
   const [attentionOnlyFilter, setAttentionOnlyFilter] = useState(false);
 
+  // Mobile active panel tab ('projects' | 'standalone')
+  const [activeMobileTab, setActiveMobileTab] = useState<'projects' | 'standalone'>('projects');
+
   // Map taskId -> accumulated actual AU from telemetry sessions
   const taskAttentionMap = useMemo(() => {
     if (!preferences.attentionSystemEnabled) return new Map<string, number>();
@@ -706,6 +709,20 @@ export const MyDayView: React.FC = () => {
       },
     ].filter((g) => g.tasks.length > 0);
   }, [allDisplayStandaloneTasks]);
+
+  const hasAttentionProjectTasks = useMemo(() => {
+    return displayProjectTasks.some((t) => t.projectId && projectsMap.get(t.projectId)?.isAttention);
+  }, [displayProjectTasks, projectsMap]);
+
+  const projectTotalAU = useMemo(() => {
+    if (!preferences.attentionSystemEnabled) return 0;
+    return displayProjectTasks.reduce((acc, t) => acc + (t.estimatedAU || 0), 0);
+  }, [displayProjectTasks, preferences.attentionSystemEnabled]);
+
+  const standaloneTotalAU = useMemo(() => {
+    if (!preferences.attentionSystemEnabled) return 0;
+    return allDisplayStandaloneTasks.reduce((acc, t) => acc + (t.estimatedAU || 0), 0);
+  }, [allDisplayStandaloneTasks, preferences.attentionSystemEnabled]);
 
   const handleAddStandalone = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1374,83 +1391,194 @@ export const MyDayView: React.FC = () => {
   };
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-10 max-w-4xl mx-auto w-full space-y-8">
+    <div className="flex-1 overflow-y-auto p-3 sm:p-5 md:p-6 lg:p-8 max-w-[1550px] mx-auto w-full space-y-6">
       {/* View Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-6">
-        <div className="space-y-1">
-          <div className="flex items-center space-x-2.5">
-            <div className="p-2 rounded-lg bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30">
-              <Sun className="w-5 h-5" />
+      <div className="flex flex-col gap-4 border-b border-slate-200 dark:border-slate-800 pb-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center space-x-2.5">
+              <div className="p-2 rounded-lg bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                <Sun className="w-5 h-5" />
+              </div>
+              <h1 className="text-2xl font-bold tracking-tight text-slate-800 dark:text-slate-100 flex items-center gap-2.5">
+                <span>My Day</span>
+                <span className="text-xs font-mono font-medium px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+                  {displayProjectTasks.length + allDisplayStandaloneTasks.length} tasks
+                </span>
+              </h1>
             </div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-800 dark:text-slate-100">
-              My Day
-            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {new Date().toLocaleDateString(undefined, {
+                weekday: 'long',
+                month: 'long',
+                day: 'numeric',
+                year: 'numeric',
+              })}
+            </p>
           </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            {new Date().toLocaleDateString(undefined, {
-              weekday: 'long',
-              month: 'long',
-              day: 'numeric',
-              year: 'numeric',
-            })}
-          </p>
-        </div>
 
-        {/* Right Header Controls: G-Calendar, Force Refresh & Mode Toggle */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Quick Google Calendar Button */}
-          <button
-            onClick={() => setIsSyncModalOpen(true)}
-            className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer shadow-xs ${
-              gcalendarSyncConfig.enabled
-                ? 'bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-800 hover:bg-teal-100'
-                : 'bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800'
-            }`}
-            title="Manage Google Calendar & Cloud Synchronization"
-          >
-            <CalendarDays className={`w-3.5 h-3.5 ${gcalendarSyncConfig.enabled ? 'text-teal-500' : 'text-slate-400'}`} />
-            <span className="hidden xs:inline">{gcalendarSyncConfig.enabled ? 'Calendar Synced' : 'Sync Calendar'}</span>
-            <span className="xs:hidden">{gcalendarSyncConfig.enabled ? 'Synced' : 'Calendar'}</span>
-            {gcalendarSyncConfig.enabled && (
-              <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse" />
-            )}
-          </button>
-
-          <button
-            onClick={handleForceRefresh}
-            disabled={isRefreshing}
-            className="flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-medium bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 transition-all cursor-pointer shadow-xs disabled:opacity-60"
-            title="Force refresh tasks from all projects"
-          >
-            <RotateCw className={`w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 ${isRefreshing ? 'animate-spin' : ''}`} />
-            <span className="hidden xs:inline">{isRefreshing ? 'Updating...' : 'Force Update'}</span>
-            <span className="xs:hidden">{isRefreshing ? '...' : 'Refresh'}</span>
-          </button>
-
-          {/* Mode Toggle */}
-          <div className="flex items-center bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-1 rounded-lg">
+          {/* Right Header Controls: G-Calendar, Force Refresh & Mode Toggle */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Quick Google Calendar Button */}
             <button
-              onClick={() => handleModeChange('today')}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
-                preferences.myDayMode === 'today'
-                  ? 'bg-emerald-600 text-white shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              onClick={() => setIsSyncModalOpen(true)}
+              className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer shadow-xs ${
+                gcalendarSyncConfig.enabled
+                  ? 'bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-800 hover:bg-teal-100'
+                  : 'bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800'
               }`}
+              title="Manage Google Calendar & Cloud Synchronization"
             >
-              Today's Tasks
+              <CalendarDays className={`w-3.5 h-3.5 ${gcalendarSyncConfig.enabled ? 'text-teal-500' : 'text-slate-400'}`} />
+              <span className="hidden xs:inline">{gcalendarSyncConfig.enabled ? 'Calendar Synced' : 'Sync Calendar'}</span>
+              <span className="xs:hidden">{gcalendarSyncConfig.enabled ? 'Synced' : 'Calendar'}</span>
+              {gcalendarSyncConfig.enabled && (
+                <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse" />
+              )}
             </button>
+
             <button
-              onClick={() => handleModeChange('current_tasks')}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
-                preferences.myDayMode === 'current_tasks'
-                  ? 'bg-emerald-600 text-white shadow-sm'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-              }`}
+              onClick={handleForceRefresh}
+              disabled={isRefreshing}
+              className="flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-medium bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 transition-all cursor-pointer shadow-xs disabled:opacity-60"
+              title="Force refresh tasks from all projects"
             >
-              Current Tasks
+              <RotateCw className={`w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <span className="hidden xs:inline">{isRefreshing ? 'Updating...' : 'Force Update'}</span>
+              <span className="xs:hidden">{isRefreshing ? '...' : 'Refresh'}</span>
             </button>
+
+            {/* Mode Toggle */}
+            <div className="flex items-center bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-1 rounded-lg">
+              <button
+                onClick={() => handleModeChange('today')}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                  preferences.myDayMode === 'today'
+                    ? 'bg-emerald-600 text-white shadow-sm font-semibold'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                Today's Tasks
+              </button>
+              <button
+                onClick={() => handleModeChange('current_tasks')}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                  preferences.myDayMode === 'current_tasks'
+                    ? 'bg-emerald-600 text-white shadow-sm font-semibold'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                Current Tasks
+              </button>
+            </div>
           </div>
         </div>
+
+        {/* Quick Workload Summary Badges */}
+        <div className="flex items-center space-x-2 flex-wrap gap-y-1.5 pt-1 text-xs">
+          <span className="text-slate-400 dark:text-slate-500 font-medium text-[11px] uppercase tracking-wider">Plan:</span>
+          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 font-medium">
+            <Folder className="w-3 h-3 text-emerald-500" />
+            <span>{displayProjectTasks.length} Project tasks</span>
+            {projectTotalAU > 0 && <span className="font-mono font-bold">({Math.round(projectTotalAU * 10) / 10} AU)</span>}
+          </span>
+          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-md bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800/60 font-medium">
+            <CheckCircle2 className="w-3 h-3 text-teal-500" />
+            <span>{allDisplayStandaloneTasks.length} Standalone tasks</span>
+            {standaloneTotalAU > 0 && <span className="font-mono font-bold">({Math.round(standaloneTotalAU * 10) / 10} AU)</span>}
+          </span>
+          {(myDayData.completedTodayProjectTasks.length > 0 || myDayData.completedTodayStandaloneTasks.length > 0) && (
+            <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-medium">
+              <Check className="w-3 h-3 text-slate-400" />
+              <span>{myDayData.completedTodayProjectTasks.length + myDayData.completedTodayStandaloneTasks.length} Completed today</span>
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Mobile Segmented View Switcher (< lg) */}
+      <div className="lg:hidden flex items-center bg-slate-200/80 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 p-1 rounded-xl shadow-xs">
+        <button
+          type="button"
+          data-testid="mobile-tab-projects"
+          onClick={() => setActiveMobileTab('projects')}
+          className={`flex-1 flex items-center justify-center space-x-2 py-2 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+            activeMobileTab === 'projects'
+              ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-xs'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+          }`}
+        >
+          <Folder className="w-4 h-4 text-emerald-500 shrink-0" />
+          <span>Projects</span>
+          <span className={`text-[11px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+            activeMobileTab === 'projects'
+              ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300'
+              : 'bg-slate-300/60 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+          }`}>
+            {displayProjectTasks.length}
+          </span>
+          {hasAttentionProjectTasks && (
+            <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0 animate-pulse" title="Attention tasks present" />
+          )}
+        </button>
+        <button
+          type="button"
+          data-testid="mobile-tab-standalone"
+          onClick={() => setActiveMobileTab('standalone')}
+          className={`flex-1 flex items-center justify-center space-x-2 py-2 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+            activeMobileTab === 'standalone'
+              ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-xs'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+          }`}
+        >
+          <CheckCircle2 className="w-4 h-4 text-teal-500 shrink-0" />
+          <span>Standalone</span>
+          <span className={`text-[11px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+            activeMobileTab === 'standalone'
+              ? 'bg-teal-100 dark:bg-teal-950/80 text-teal-700 dark:text-teal-300'
+              : 'bg-slate-300/60 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+          }`}>
+            {allDisplayStandaloneTasks.length}
+          </span>
+        </button>
+      </div>
+
+      {/* Mobile Lateral Quick-Switch Floating Pill (< lg) */}
+      <div className="lg:hidden fixed bottom-20 right-3.5 z-30 pointer-events-auto">
+        <button
+          type="button"
+          data-testid="mobile-lateral-switch"
+          onClick={() => setActiveMobileTab(activeMobileTab === 'projects' ? 'standalone' : 'projects')}
+          className="flex items-center space-x-2 pl-3 pr-3.5 py-2.5 rounded-full bg-slate-900/90 dark:bg-slate-800/95 text-white shadow-2xl backdrop-blur-md border border-slate-700/70 hover:bg-slate-800 dark:hover:bg-slate-700 transition-all active:scale-95 cursor-pointer group"
+          title={activeMobileTab === 'projects' ? 'Switch to Standalone Tasks' : 'Switch to Project Tasks'}
+          aria-label="Switch My Day Panel"
+        >
+          {activeMobileTab === 'projects' ? (
+            <>
+              <div className="p-1 rounded-full bg-teal-500/20 text-teal-400 group-hover:bg-teal-500/30 transition-colors">
+                <CheckCircle2 className="w-3.5 h-3.5 text-teal-400" />
+              </div>
+              <div className="text-left">
+                <div className="text-[11px] font-bold leading-tight flex items-center space-x-1">
+                  <span>Standalone</span>
+                  <span className="text-[10px] text-teal-400 font-mono font-normal">({allDisplayStandaloneTasks.length})</span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="p-1 rounded-full bg-emerald-500/20 text-emerald-400 group-hover:bg-emerald-500/30 transition-colors">
+                <Folder className="w-3.5 h-3.5 text-emerald-400" />
+              </div>
+              <div className="text-left">
+                <div className="text-[11px] font-bold leading-tight flex items-center space-x-1">
+                  <span>Projects</span>
+                  <span className="text-[10px] text-emerald-400 font-mono font-normal">({displayProjectTasks.length})</span>
+                </div>
+              </div>
+            </>
+          )}
+        </button>
       </div>
 
       {/* Fallback Notice for Current Tasks */}
@@ -1924,18 +2052,28 @@ export const MyDayView: React.FC = () => {
         </div>
       )}
 
-      {/* 1. Project Tasks Section */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center space-x-2">
-            <Folder className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
-            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
-              Project Tasks
-            </h2>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono">
-              {displayProjectTasks.length}
-            </span>
-          </div>
+      {/* Execution Surface: Two-Column Layout (Projects left, Standalone right) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start" data-testid="my-day-columns">
+        {/* 1. Project Tasks Column (Left) */}
+        <div
+          className={`space-y-4 ${activeMobileTab === 'projects' ? 'block' : 'hidden lg:block'}`}
+          data-testid="projects-column"
+        >
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center space-x-2">
+              <Folder className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
+              <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+                Project Tasks
+              </h2>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono font-semibold">
+                {displayProjectTasks.length}
+              </span>
+              {projectTotalAU > 0 && (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 font-mono font-semibold border border-amber-200 dark:border-amber-800/60" title="Total Project Tasks Planned Attention Units">
+                  {Math.round(projectTotalAU * 10) / 10} AU
+                </span>
+              )}
+            </div>
 
           <div className="flex items-center space-x-2 flex-wrap gap-y-2">
             {/* Grouping Mode Switcher for Today's Project Tasks */}
@@ -2213,28 +2351,31 @@ export const MyDayView: React.FC = () => {
             )}
           </div>
         )}
-      </div>
+        </div>
 
-      {/* 2. Standalone Tasks Section */}
-      <div className="space-y-3 pt-4 border-t border-slate-200 dark:border-slate-800">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center space-x-2">
-            <CheckCircle2 className="w-4 h-4 text-teal-500 dark:text-teal-400" />
-            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
-              Standalone Tasks
-            </h2>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono">
-              {allDisplayStandaloneTasks.length}
-            </span>
-            {preferences.attentionSystemEnabled && (() => {
-              const totalAU = allDisplayStandaloneTasks.reduce((acc, t) => acc + (t.estimatedAU || 0), 0);
-              return totalAU > 0 ? (
-                <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 font-mono font-semibold border border-amber-200 dark:border-amber-800/60" title="Total Standalone Tasks Planned Attention Units">
-                  {Math.round(totalAU * 10) / 10} AU
-                </span>
-              ) : null;
-            })()}
-          </div>
+        {/* 2. Standalone Tasks Column (Right) */}
+        <div
+          className={`space-y-4 ${activeMobileTab === 'standalone' ? 'block' : 'hidden lg:block'}`}
+          data-testid="standalone-column"
+        >
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center space-x-2">
+              <CheckCircle2 className="w-4 h-4 text-teal-500 dark:text-teal-400" />
+              <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+                Standalone Tasks
+              </h2>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono font-semibold">
+                {allDisplayStandaloneTasks.length}
+              </span>
+              {preferences.attentionSystemEnabled && (() => {
+                const totalAU = allDisplayStandaloneTasks.reduce((acc, t) => acc + (t.estimatedAU || 0), 0);
+                return totalAU > 0 ? (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 font-mono font-semibold border border-amber-200 dark:border-amber-800/60" title="Total Standalone Tasks Planned Attention Units">
+                    {Math.round(totalAU * 10) / 10} AU
+                  </span>
+                ) : null;
+              })()}
+            </div>
 
           {/* Grouping Mode Switcher for Standalone Tasks */}
           <div className="flex items-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-0.5 rounded-lg shadow-2xs">
@@ -2283,40 +2424,22 @@ export const MyDayView: React.FC = () => {
         </div>
 
         {/* Inline Add Standalone Task */}
-        <form onSubmit={handleAddStandalone} className={`flex flex-col sm:flex-row sm:items-center gap-2 ${isCalendarOpen || isNewRecurrenceOpen || isNewAuOpen ? 'relative z-50' : 'relative z-10'}`}>
-          <div className="relative flex-1">
-            <input
-              type="text"
-              placeholder="Add a standalone task (e.g. Call dentist, buy printer paper)..."
-              value={newStandaloneText}
-              onChange={(e) => setNewStandaloneText(e.target.value)}
-              className="w-full text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg py-2.5 pl-3 pr-3 sm:pr-72 text-slate-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500 shadow-sm"
-            />
-            {/* Desktop right controls inside input */}
-            <div className="hidden sm:flex absolute right-1.5 top-1/2 -translate-y-1/2 items-center space-x-1">
-              {/* Estimated AU Input (if attention system enabled) */}
-              {preferences.attentionSystemEnabled && (
-                <AttentionUnitInput
-                  value={newStandaloneEstimatedAU ? parseFloat(newStandaloneEstimatedAU) : undefined}
-                  onChange={(val) => setNewStandaloneEstimatedAU(val !== undefined ? String(val) : '')}
-                  auMinutes={preferences.attentionUnitMinutes}
-                  compact={true}
-                  placeholder="+ AU"
-                  align="right"
-                  onOpenChange={setIsNewAuOpen}
-                />
-              )}
+        <form
+          onSubmit={handleAddStandalone}
+          className={`flex flex-col gap-2 p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 shadow-xs transition-all ${
+            isCalendarOpen || isNewRecurrenceOpen || isNewAuOpen ? 'relative z-50 ring-2 ring-teal-500/20' : 'relative z-10'
+          }`}
+        >
+          <input
+            type="text"
+            placeholder="Add a standalone task (e.g. Call dentist, buy printer paper)..."
+            value={newStandaloneText}
+            onChange={(e) => setNewStandaloneText(e.target.value)}
+            className="w-full text-xs sm:text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg py-2 px-3 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-teal-500 shadow-2xs transition-colors"
+          />
 
-              {/* Recurrence Selector */}
-              <RecurrencePicker
-                value={newStandaloneRecurrence}
-                baseDate={newStandaloneDueDate || getTodayString()}
-                onChange={setNewStandaloneRecurrence}
-                onOpenChange={setIsNewRecurrenceOpen}
-                buttonVariant={newStandaloneRecurrence ? 'badge' : 'icon'}
-                align="right"
-              />
-
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center space-x-1.5 flex-wrap gap-y-1.5">
               {/* Due Date Selector */}
               <div className={`relative ${isCalendarOpen ? 'z-50' : ''}`}>
                 <button
@@ -2327,72 +2450,14 @@ export const MyDayView: React.FC = () => {
                   }}
                   className={`flex items-center space-x-1.5 px-2.5 py-1 text-xs font-mono font-medium rounded-md transition-colors cursor-pointer group/cal border ${
                     newStandaloneDueDate
-                      ? 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 border-slate-200 dark:border-slate-700'
+                      ? 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 hover:text-teal-600 dark:hover:text-teal-400 border-slate-200 dark:border-slate-700'
                       : 'bg-amber-50/70 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 border-dashed border-amber-300 dark:border-amber-600/70'
                   }`}
                   title={newStandaloneDueDate ? 'Click to select due date' : 'Select due date (required)'}
                 >
                   <Calendar className={`w-3.5 h-3.5 shrink-0 transition-colors ${
                     newStandaloneDueDate
-                      ? 'text-slate-400 group-hover/cal:text-emerald-500'
-                      : 'text-amber-500 group-hover/cal:text-amber-600'
-                  }`} />
-                  <span>{newStandaloneDueDate ? formatDateDisplay(newStandaloneDueDate) : 'Pick date'}</span>
-                </button>
-
-                {isCalendarOpen && (
-                  <CalendarPicker
-                    value={newStandaloneDueDate}
-                    onChange={(newDate) => setNewStandaloneDueDate(newDate)}
-                    onClose={() => setIsCalendarOpen(false)}
-                    position="bottom"
-                    align="right"
-                    taskEstimatedAU={newStandaloneEstimatedAU ? parseFloat(newStandaloneEstimatedAU) : undefined}
-                  />
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Mobile-only action row */}
-          <div className="flex sm:hidden items-center justify-between gap-2">
-            <div className="flex items-center space-x-1.5 flex-wrap gap-y-1.5">
-              {preferences.attentionSystemEnabled && (
-                <AttentionUnitInput
-                  value={newStandaloneEstimatedAU ? parseFloat(newStandaloneEstimatedAU) : undefined}
-                  onChange={(val) => setNewStandaloneEstimatedAU(val !== undefined ? String(val) : '')}
-                  auMinutes={preferences.attentionUnitMinutes}
-                  compact={true}
-                  placeholder="+ AU"
-                  onOpenChange={setIsNewAuOpen}
-                />
-              )}
-              <RecurrencePicker
-                value={newStandaloneRecurrence}
-                baseDate={newStandaloneDueDate || getTodayString()}
-                onChange={setNewStandaloneRecurrence}
-                onOpenChange={setIsNewRecurrenceOpen}
-                buttonVariant={newStandaloneRecurrence ? 'badge' : 'icon'}
-                align="left"
-              />
-
-              <div className={`relative ${isCalendarOpen ? 'z-50' : ''}`}>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsCalendarOpen((prev) => !prev);
-                  }}
-                  className={`flex items-center space-x-1.5 px-2.5 py-1.5 text-xs font-mono font-medium rounded-md transition-colors cursor-pointer group/cal border ${
-                    newStandaloneDueDate
-                      ? 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 border-slate-200 dark:border-slate-700'
-                      : 'bg-amber-50/70 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 border-dashed border-amber-300 dark:border-amber-600/70'
-                  }`}
-                  title={newStandaloneDueDate ? 'Click to select due date' : 'Select due date (required)'}
-                >
-                  <Calendar className={`w-3.5 h-3.5 shrink-0 transition-colors ${
-                    newStandaloneDueDate
-                      ? 'text-slate-400 group-hover/cal:text-emerald-500'
+                      ? 'text-slate-400 group-hover/cal:text-teal-500'
                       : 'text-amber-500 group-hover/cal:text-amber-600'
                   }`} />
                   <span>{newStandaloneDueDate ? formatDateDisplay(newStandaloneDueDate) : 'Pick date'}</span>
@@ -2409,6 +2474,29 @@ export const MyDayView: React.FC = () => {
                   />
                 )}
               </div>
+
+              {/* Recurrence Selector */}
+              <RecurrencePicker
+                value={newStandaloneRecurrence}
+                baseDate={newStandaloneDueDate || getTodayString()}
+                onChange={setNewStandaloneRecurrence}
+                onOpenChange={setIsNewRecurrenceOpen}
+                buttonVariant={newStandaloneRecurrence ? 'badge' : 'icon'}
+                align="left"
+              />
+
+              {/* Estimated AU Input (if attention system enabled) */}
+              {preferences.attentionSystemEnabled && (
+                <AttentionUnitInput
+                  value={newStandaloneEstimatedAU ? parseFloat(newStandaloneEstimatedAU) : undefined}
+                  onChange={(val) => setNewStandaloneEstimatedAU(val !== undefined ? String(val) : '')}
+                  auMinutes={preferences.attentionUnitMinutes}
+                  compact={true}
+                  placeholder="+ AU"
+                  align="left"
+                  onOpenChange={setIsNewAuOpen}
+                />
+              )}
             </div>
 
             <button
@@ -2421,28 +2509,12 @@ export const MyDayView: React.FC = () => {
                   ? 'Please select a due date'
                   : 'Add task'
               }
-              className="flex items-center justify-center space-x-1 px-4 py-1.5 rounded-lg text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-colors shrink-0 cursor-pointer shadow-sm disabled:cursor-not-allowed"
+              className="flex items-center space-x-1.5 px-3.5 py-1 rounded-lg text-xs font-semibold bg-teal-600 hover:bg-teal-500 disabled:opacity-50 text-white transition-colors shrink-0 cursor-pointer shadow-xs disabled:cursor-not-allowed ml-auto"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-3.5 h-3.5" />
               <span>Add</span>
             </button>
           </div>
-
-          {/* Desktop-only submit button */}
-          <button
-            type="submit"
-            disabled={!newStandaloneText.trim() || !newStandaloneDueDate}
-            title={
-              !newStandaloneText.trim()
-                ? 'Enter a task description'
-                : !newStandaloneDueDate
-                ? 'Please select a due date'
-                : 'Add task'
-            }
-            className="hidden sm:flex px-4 py-2.5 rounded-lg text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-colors shrink-0 cursor-pointer shadow-sm disabled:cursor-not-allowed"
-          >
-            <Plus className="w-4 h-4" />
-          </button>
         </form>
 
         {allDisplayStandaloneTasks.length === 0 ? (
@@ -2622,6 +2694,7 @@ export const MyDayView: React.FC = () => {
             )}
           </div>
         )}
+        </div>
       </div>
 
       {/* Completed Today Toggle */}
