@@ -161,6 +161,94 @@ export class ProjectService {
   }
 
   /**
+   * Reconnects an existing edge to new endpoints, replacing them deterministically
+   * while preserving the edge's stable ID and creation timestamp.
+   * Enforces graph invariants (DAG, no dangling endpoints, no self-loops, no duplicate edges, chronology).
+   */
+  public static reconnectEdge(
+    doc: ProjectDocument,
+    edgeId: string,
+    newFromNodeId: string,
+    newToNodeId: string
+  ): { success: true; document: ProjectDocument; edge: Edge } | { success: false; error: string } {
+    const existingEdge = doc.edges.find((e) => e.id === edgeId);
+    if (!existingEdge) {
+      return { success: false, error: `Edge ${edgeId} not found.` };
+    }
+
+    if (newFromNodeId === newToNodeId) {
+      return { success: false, error: 'Cannot connect a node to itself.' };
+    }
+
+    const fromNode = doc.nodes.find((n) => n.id === newFromNodeId);
+    const toNode = doc.nodes.find((n) => n.id === newToNodeId);
+    if (!fromNode || !toNode) {
+      return { success: false, error: 'One or both connected nodes do not exist.' };
+    }
+
+    // Check duplicate edge (excluding this edge itself)
+    const isDuplicate = doc.edges.some(
+      (e) => e.id !== edgeId && e.fromNodeId === newFromNodeId && e.toNodeId === newToNodeId
+    );
+    if (isDuplicate) {
+      return { success: false, error: 'Edge already exists between these nodes.' };
+    }
+
+    // Check cycle without old edge
+    const otherEdges = doc.edges.filter((e) => e.id !== edgeId);
+    if (GraphService.wouldCreateCycle(newFromNodeId, newToNodeId, otherEdges)) {
+      return { success: false, error: 'Cannot reconnect edge: would form a circular dependency.' };
+    }
+
+    // Check chronology
+    const chronoCheck = TemporalService.validateEdgeChronology(fromNode, toNode);
+    if (!chronoCheck.isValid) {
+      return { success: false, error: chronoCheck.error || 'Chronological violation.' };
+    }
+
+    const updatedEdge: Edge = {
+      ...existingEdge,
+      fromNodeId: newFromNodeId,
+      toNodeId: newToNodeId,
+    };
+
+    const updatedEdges = doc.edges.map((e) => (e.id === edgeId ? updatedEdge : e));
+    const updatedDocument: ProjectDocument = {
+      ...doc,
+      edges: updatedEdges,
+    };
+
+    return { success: true, document: updatedDocument, edge: updatedEdge };
+  }
+
+  /**
+   * Deterministically removes an edge from the authoritative project document.
+   */
+  public static deleteEdgeFromProject(
+    doc: ProjectDocument,
+    edgeId: string
+  ): ProjectDocument {
+    return {
+      ...doc,
+      edges: doc.edges.filter((e) => e.id !== edgeId),
+    };
+  }
+
+  /**
+   * Deterministically removes multiple edges from the authoritative project document.
+   */
+  public static deleteEdgesFromProject(
+    doc: ProjectDocument,
+    edgeIds: readonly string[]
+  ): ProjectDocument {
+    const idSet = new Set(edgeIds);
+    return {
+      ...doc,
+      edges: doc.edges.filter((e) => !idSet.has(e.id)),
+    };
+  }
+
+  /**
    * Decomposes a parent node into subtask children.
    */
   public static decomposeNode(

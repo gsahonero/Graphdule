@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Handle, Position, NodeProps, useViewport } from '@xyflow/react';
-import { Node, NodeStatus } from '../../../domain/models/types';
+import { Node, NodeStatus, TaskEnvironment } from '../../../domain/models/types';
 import { useApp } from '../../context/AppContext';
 import { CalendarPicker } from '../../components/CalendarPicker';
 import {
@@ -35,6 +35,7 @@ export interface GraphNodeData extends Record<string, unknown> {
   onStatusChange: (status: NodeStatus) => void;
   onTextChange: (newText: string) => void;
   onDateChange: (newDate: string) => void;
+  onEnvironmentChange?: (env: TaskEnvironment) => void;
   onOpenNotes: () => void;
   onOpenDecompose?: () => void;
   onDeleteNode?: () => void;
@@ -50,6 +51,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
     activeWorkSession,
     activeWorkElapsedSeconds,
     openWorkSessionsModal,
+    updateNode,
   } = useApp();
   const {
     node,
@@ -65,6 +67,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
     onStatusChange,
     onTextChange,
     onDateChange,
+    onEnvironmentChange,
     onOpenNotes,
     onOpenDecompose,
     onDeleteNode,
@@ -197,6 +200,29 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
     }
   };
 
+  const currentEnvironment: TaskEnvironment = node.environment || 'computer';
+
+  const cycleEnvironment = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const nextEnv: TaskEnvironment =
+      currentEnvironment === 'computer'
+        ? 'physical'
+        : currentEnvironment === 'physical'
+        ? 'mixed'
+        : 'computer';
+
+    if (onEnvironmentChange) {
+      onEnvironmentChange(nextEnv);
+    }
+    if (updateNode) {
+      updateNode({
+        ...node,
+        environment: nextEnv,
+      }).catch(() => {});
+    }
+  };
+
   const getStatusBorder = () => {
     if (isDropTargetParent) {
       return 'border-amber-500 ring-4 ring-amber-500/70 shadow-2xl bg-amber-500/15 dark:bg-amber-500/25 scale-[1.03] z-50';
@@ -319,15 +345,20 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
           </span>
         )}
 
-        {/* Environment badge */}
-        {node.environment && (
-          <span
-            className="absolute -top-1 -left-1 bg-slate-800 text-white text-[10px] px-1 py-0.5 rounded-full shadow-sm flex items-center border border-white dark:border-slate-900 z-10"
-            title={`Environment: ${node.environment}`}
-          >
-            <span>{node.environment === 'computer' ? '💻' : node.environment === 'physical' ? '🏃' : '🔄'}</span>
+        {/* Environment Toggle Button on Node (Always visible & interactive) */}
+        <button
+          type="button"
+          onClick={cycleEnvironment}
+          onDoubleClick={(e) => e.stopPropagation()}
+          className="nodrag nowheel nopan absolute -top-1.5 -left-1.5 z-20 w-6 h-6 rounded-full bg-slate-800/95 dark:bg-slate-800/95 hover:bg-slate-700 active:scale-95 text-white text-xs flex items-center justify-center border-2 border-white dark:border-slate-900 shadow-md transition-all hover:scale-125 cursor-pointer"
+          title={`Task Environment: ${currentEnvironment} (Click to toggle: Computer 💻 → Physical 🏃 → Mixed 🔄)`}
+          data-testid="graph-node-environment-toggle"
+          aria-label={`Toggle environment for ${node.text}. Current: ${currentEnvironment}`}
+        >
+          <span className="select-none leading-none pointer-events-none">
+            {currentEnvironment === 'computer' ? '💻' : currentEnvironment === 'physical' ? '🏃' : '🔄'}
           </span>
-        )}
+        </button>
 
         {/* Status / Goal Icon (Direct Click to Cycle Status) */}
         <button
@@ -467,12 +498,25 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
                 )}
               </div>
 
-              {/* Goal or Subtask count tag */}
-              {isEGN ? (
-                <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold tracking-wide uppercase border border-emerald-500/30 shrink-0">
-                  <Target className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                  <span>Goal</span>
-                </span>
+              {/* Popover Header Right: Environment Toggle & Goal/Subtask tag */}
+              <div className="flex items-center space-x-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={cycleEnvironment}
+                  onDoubleClick={(e) => e.stopPropagation()}
+                  className="nodrag nowheel nopan flex items-center space-x-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium border transition-colors cursor-pointer bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 shadow-2xs"
+                  title={`Task Environment: ${currentEnvironment} (Click to toggle: Computer 💻 → Physical 🏃 → Mixed 🔄)`}
+                  data-testid="graph-popover-environment-toggle"
+                >
+                  <span>{currentEnvironment === 'computer' ? '💻' : currentEnvironment === 'physical' ? '🏃' : '🔄'}</span>
+                  <span className="capitalize">{currentEnvironment}</span>
+                </button>
+
+                {isEGN ? (
+                  <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold tracking-wide uppercase border border-emerald-500/30 shrink-0">
+                    <Target className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                    <span>Goal</span>
+                  </span>
               ) : subtaskCount > 0 ? (
                 <button
                   type="button"
@@ -488,8 +532,9 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
                 </button>
               ) : null}
             </div>
+          </div>
 
-            {/* Popover Task Title - Inline Canvas Editable */}
+          {/* Popover Task Title - Inline Canvas Editable */}
             <div className="font-semibold text-slate-800 dark:text-slate-100 text-xs leading-snug">
               {isEditing ? (
                 <input
@@ -889,14 +934,18 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
 
         {/* EGN or Subtask count tag */}
         <div className="flex items-center space-x-1 shrink-0">
-          {node.environment && (
-            <span
-              className="flex items-center space-x-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 shrink-0"
-              title={`Environment: ${node.environment}`}
-            >
-              <span>{node.environment === 'computer' ? '💻' : node.environment === 'physical' ? '🏃' : '🔄'}</span>
-            </span>
-          )}
+          {/* Environment Toggle Button (Always visible & interactive) */}
+          <button
+            type="button"
+            onClick={cycleEnvironment}
+            onDoubleClick={(e) => e.stopPropagation()}
+            className="nodrag nowheel nopan flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 shrink-0 transition-colors cursor-pointer"
+            title={`Task Environment: ${currentEnvironment} (Click to toggle: Computer 💻 → Physical 🏃 → Mixed 🔄)`}
+            data-testid="graph-node-environment-toggle-full"
+          >
+            <span>{currentEnvironment === 'computer' ? '💻' : currentEnvironment === 'physical' ? '🏃' : '🔄'}</span>
+            <span className="capitalize">{currentEnvironment}</span>
+          </button>
           {isEGN ? (
             <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold tracking-wide uppercase border border-emerald-500/30 shrink-0">
               <Target className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />

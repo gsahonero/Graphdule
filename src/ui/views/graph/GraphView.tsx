@@ -21,8 +21,16 @@ import '@xyflow/react/dist/style.css';
 
 import { useApp } from '../../context/AppContext';
 import { GraphNode, GraphNodeData } from './GraphNode';
-import { getLayoutedElements, isValidCoordinate, NODE_WIDTH, NODE_HEIGHT, COMPACT_NODE_SIZE } from './layout';
-import { Node, NodeStatus } from '../../../domain/models/types';
+import {
+  getLayoutedElements,
+  isValidCoordinate,
+  NODE_WIDTH,
+  NODE_HEIGHT,
+  COMPACT_NODE_SIZE,
+  LayoutDirection,
+  LayoutMode,
+} from './layout';
+import { Node, NodeStatus, TaskEnvironment } from '../../../domain/models/types';
 import { ProjectService } from '../../../domain/services/project-service';
 import { addDays } from '../../../domain/utils/date';
 import {
@@ -99,11 +107,12 @@ const GraphCanvas: React.FC = () => {
     addNode,
     updateNode,
     deleteNode,
-    updateNodePositions,
     updateNodeStatus,
     moveNodeDate,
     addEdge,
     deleteEdge,
+    deleteEdges,
+    reconnectEdge,
     spliceNodeIntoEdge,
     nestNode,
     decomposeNode,
@@ -152,9 +161,11 @@ const GraphCanvas: React.FC = () => {
   // Node scale adjustment: 0.85 (Small), 1.0 (Medium), 1.2 (Large)
   const [nodeScale, setNodeScale] = useState<number>(1.0);
 
-  // Layout orientation: 'LR' (Left to Right) vs 'TB' (Top to Bottom)
-  // On mobile portrait (< 768px and height >= width), default to 'TB' (Top to Bottom)
-  const [layoutDir, setLayoutDir] = useState<'LR' | 'TB'>(() => {
+  // Layout mode: 'auto' | 'LR' | 'TB'
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>('auto');
+
+  // Resolved layout orientation: 'LR' (Left to Right) vs 'TB' (Top to Bottom)
+  const [layoutDir, setLayoutDir] = useState<LayoutDirection>(() => {
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
       return window.innerHeight >= window.innerWidth ? 'TB' : 'LR';
     }
@@ -205,15 +216,17 @@ const GraphCanvas: React.FC = () => {
 
   // Build React Flow nodes for active scope
   const initialElements = useMemo(() => {
+    const vp = typeof window !== 'undefined' ? { width: window.innerWidth, height: window.innerHeight } : undefined;
     return getLayoutedElements(
       scopedNodes,
       scopedEdges,
-      layoutDir,
+      layoutMode,
       false,
       viewDensity === 'compact',
-      nodeScale
+      nodeScale,
+      vp
     );
-  }, [scopedNodes, scopedEdges, layoutDir, viewDensity, nodeScale]);
+  }, [scopedNodes, scopedEdges, layoutMode, viewDensity, nodeScale]);
 
   const [rfNodes, setRfNodes] = useState<RFNode[]>(initialElements.rfNodes);
   const [rfEdges, setRfEdges] = useState<RFEdge[]>(initialElements.rfEdges);
@@ -221,14 +234,17 @@ const GraphCanvas: React.FC = () => {
   // Synchronize React Flow local nodes and edges when scoped items or layout changes,
   // preserving current in-memory positions for existing nodes so in-place edits never cause shifting.
   React.useEffect(() => {
+    const vp = typeof window !== 'undefined' ? { width: window.innerWidth, height: window.innerHeight } : undefined;
     const layout = getLayoutedElements(
       scopedNodes,
       scopedEdges,
-      layoutDir,
+      layoutMode,
       false,
       viewDensity === 'compact',
-      nodeScale
+      nodeScale,
+      vp
     );
+    setLayoutDir(layout.direction);
     setRfNodes((prevRfNodes) => {
       const prevPosMap = new Map(
         prevRfNodes
@@ -248,7 +264,7 @@ const GraphCanvas: React.FC = () => {
     });
     setRfEdges(layout.rfEdges);
     scopedNodes.forEach((n) => updateNodeInternals(n.id));
-  }, [scopedNodes, scopedEdges, layoutDir, viewDensity, nodeScale, updateNodeInternals]);
+  }, [scopedNodes, scopedEdges, layoutMode, viewDensity, nodeScale, updateNodeInternals]);
 
   // Keep a ref to nodes to traverse hierarchy without re-triggering fitView when node attributes change
   const nodesRef = useRef(nodes);
@@ -474,6 +490,17 @@ const GraphCanvas: React.FC = () => {
       }
     },
     [addEdge]
+  );
+
+  const onReconnect = useCallback(
+    async (oldEdge: RFEdge, newConnection: Connection) => {
+      if (!newConnection.source || !newConnection.target) return;
+      const res = await reconnectEdge(oldEdge.id, newConnection.source, newConnection.target);
+      if (!res.success) {
+        alert(`Cannot reconnect dependency: ${res.error}`);
+      }
+    },
+    [reconnectEdge]
   );
 
   // Helper to find edge under dragged node for drop-to-connect
@@ -801,26 +828,23 @@ const GraphCanvas: React.FC = () => {
     [targetParentForDropId, targetEdgeForDropId, rfEdges, nodes, nestNode, spliceNodeIntoEdge, updateNode]
   );
 
-  // Auto Layout Handler - tight minimal distance layout
+  // Auto Layout Handler - unified layered layout without mutating underlying graph
   const handleAutoLayout = useCallback(
-    (direction: 'LR' | 'TB' = layoutDir) => {
+    (mode: LayoutMode = layoutMode) => {
       const isCompact = viewDensity === 'compact';
+      const vp = typeof window !== 'undefined' ? { width: window.innerWidth, height: window.innerHeight } : undefined;
       const layout = getLayoutedElements(
         scopedNodes,
         scopedEdges,
-        direction,
-        true,
+        mode,
+        true, // forceLayout: true recomputes clean layered positions
         isCompact,
-        nodeScale
+        nodeScale,
+        vp
       );
       setRfNodes(layout.rfNodes);
       setRfEdges(layout.rfEdges);
-
-      const positionsToUpdate = layout.rfNodes.map((rfN) => ({
-        id: rfN.id,
-        position: rfN.position,
-      }));
-      updateNodePositions(positionsToUpdate);
+      setLayoutDir(layout.direction);
 
       // Force React Flow to recalculate handle coordinates immediately and after transition
       scopedNodes.forEach((n) => updateNodeInternals(n.id));
@@ -830,29 +854,26 @@ const GraphCanvas: React.FC = () => {
         focusSmartView(scopedNodes);
       }, 80);
     },
-    [scopedNodes, scopedEdges, layoutDir, viewDensity, nodeScale, updateNodePositions, updateNodeInternals, focusSmartView]
+    [scopedNodes, scopedEdges, layoutMode, viewDensity, nodeScale, updateNodeInternals, focusSmartView]
   );
 
   const handleScaleChange = useCallback(
     (newScale: number) => {
       setNodeScale(newScale);
       const isCompact = viewDensity === 'compact';
+      const vp = typeof window !== 'undefined' ? { width: window.innerWidth, height: window.innerHeight } : undefined;
       const layout = getLayoutedElements(
         scopedNodes,
         scopedEdges,
-        layoutDir,
-        true,
+        layoutMode,
+        false,
         isCompact,
-        newScale
+        newScale,
+        vp
       );
       setRfNodes(layout.rfNodes);
       setRfEdges(layout.rfEdges);
-
-      const positionsToUpdate = layout.rfNodes.map((rfN) => ({
-        id: rfN.id,
-        position: rfN.position,
-      }));
-      updateNodePositions(positionsToUpdate);
+      setLayoutDir(layout.direction);
 
       scopedNodes.forEach((n) => updateNodeInternals(n.id));
 
@@ -861,29 +882,26 @@ const GraphCanvas: React.FC = () => {
         focusSmartView(scopedNodes);
       }, 80);
     },
-    [viewDensity, scopedNodes, scopedEdges, layoutDir, updateNodePositions, updateNodeInternals, focusSmartView]
+    [viewDensity, scopedNodes, scopedEdges, layoutMode, updateNodeInternals, focusSmartView]
   );
 
   const handleDensityChange = useCallback(
     (newDensity: 'auto' | 'compact' | 'full') => {
       setViewDensity(newDensity);
       const isCompact = newDensity === 'compact';
+      const vp = typeof window !== 'undefined' ? { width: window.innerWidth, height: window.innerHeight } : undefined;
       const layout = getLayoutedElements(
         scopedNodes,
         scopedEdges,
-        layoutDir,
-        true,
+        layoutMode,
+        false,
         isCompact,
-        nodeScale
+        nodeScale,
+        vp
       );
       setRfNodes(layout.rfNodes);
       setRfEdges(layout.rfEdges);
-
-      const positionsToUpdate = layout.rfNodes.map((rfN) => ({
-        id: rfN.id,
-        position: rfN.position,
-      }));
-      updateNodePositions(positionsToUpdate);
+      setLayoutDir(layout.direction);
 
       scopedNodes.forEach((n) => updateNodeInternals(n.id));
 
@@ -892,19 +910,21 @@ const GraphCanvas: React.FC = () => {
         focusSmartView(scopedNodes);
       }, 80);
     },
-    [nodeScale, scopedNodes, scopedEdges, layoutDir, updateNodePositions, updateNodeInternals, focusSmartView]
+    [nodeScale, scopedNodes, scopedEdges, layoutMode, updateNodeInternals, focusSmartView]
   );
 
   const handleFitScreen = useCallback(() => {
     fitView({ padding: 0.2, duration: 300, maxZoom: 1.15, minZoom: 0.2 });
   }, [fitView]);
 
-  const handleToggleLayoutDirection = () => {
-    userManualDirRef.current = true;
-    const newDir = layoutDir === 'LR' ? 'TB' : 'LR';
-    setLayoutDir(newDir);
-    handleAutoLayout(newDir);
-  };
+  const handleSelectLayoutMode = useCallback(
+    (newMode: LayoutMode) => {
+      userManualDirRef.current = true;
+      setLayoutMode(newMode);
+      handleAutoLayout(newMode);
+    },
+    [handleAutoLayout]
+  );
 
   // Dynamic Orientation Detection: On mobile, auto-switch between TB (portrait) and LR (landscape)
   useEffect(() => {
@@ -917,7 +937,7 @@ const GraphCanvas: React.FC = () => {
       if (!isMobile) return;
 
       const isPortrait = window.innerHeight >= window.innerWidth;
-      const desiredDir: 'LR' | 'TB' = isPortrait ? 'TB' : 'LR';
+      const desiredDir: LayoutDirection = isPortrait ? 'TB' : 'LR';
 
       setLayoutDir((curr) => {
         if (curr !== desiredDir) {
@@ -942,19 +962,11 @@ const GraphCanvas: React.FC = () => {
     if (scopedNodes.length === 0) return;
     isInitialFocusDoneRef.current = true;
 
-    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-    const isPortrait = typeof window !== 'undefined' && window.innerHeight >= window.innerWidth;
-
-    if (isMobile && isPortrait) {
-      // Auto-arrange to TB on mobile portrait mount so nodes stack down cleanly
-      handleAutoLayout('TB');
-    } else {
-      const timer = setTimeout(() => {
-        focusSmartView(scopedNodes);
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-  }, [scopedNodes, handleAutoLayout, focusSmartView]);
+    const timer = setTimeout(() => {
+      focusSmartView(scopedNodes);
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [scopedNodes, focusSmartView]);
 
   // Direct In-Canvas Node Creation (Toolbar button)
   const handleQuickAddNode = async () => {
@@ -1066,6 +1078,7 @@ const GraphCanvas: React.FC = () => {
         onStatusChange: (status: NodeStatus) => updateNodeStatus(nodeObj.id, status),
         onTextChange: (newText: string) => updateNode({ ...nodeObj, text: newText }),
         onDateChange: (newDate: string) => moveNodeDate(nodeObj.id, newDate),
+        onEnvironmentChange: (env: TaskEnvironment) => updateNode({ ...nodeObj, environment: env }),
         onOpenNotes: () => {
           setSelectedNode(nodeObj);
           setIsNotesDrawerOpen(true);
@@ -1258,32 +1271,45 @@ const GraphCanvas: React.FC = () => {
           </button>
         </div>
 
-        <button
-          onClick={() => handleAutoLayout()}
-          className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 transition-colors cursor-pointer shadow-xs"
-          title="Auto-align topological DAG with minimal node distance"
-        >
-          <Workflow className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-          <span>Auto Layout</span>
-        </button>
-
-        <button
-          onClick={handleToggleLayoutDirection}
-          className="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 transition-colors cursor-pointer shadow-xs"
-          title={`Switch graph orientation (${layoutDir === 'LR' ? 'Horizontal Left-to-Right' : 'Vertical Top-to-Bottom'})`}
-        >
-          {layoutDir === 'LR' ? (
-            <>
-              <ArrowRightLeft className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              <span>L→R</span>
-            </>
-          ) : (
-            <>
-              <ArrowDownUp className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              <span>T↓B</span>
-            </>
-          )}
-        </button>
+        {/* Unified Layout Mode Controls (Auto, L→R, T→B) */}
+        <div className="flex items-center space-x-0.5 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs">
+          <button
+            onClick={() => handleSelectLayoutMode('auto')}
+            className={`px-2 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer flex items-center space-x-1 ${
+              layoutMode === 'auto'
+                ? 'bg-white dark:bg-slate-700 text-teal-600 dark:text-teal-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
+            title="Auto Layout: Evaluates graph structure and canvas aspect ratio"
+          >
+            <Workflow className="w-3 h-3" />
+            <span>Auto</span>
+          </button>
+          <button
+            onClick={() => handleSelectLayoutMode('LR')}
+            className={`px-2 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer flex items-center space-x-1 ${
+              layoutMode === 'LR'
+                ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
+            title="Horizontal Left-to-Right layout"
+          >
+            <ArrowRightLeft className="w-3 h-3" />
+            <span>L→R</span>
+          </button>
+          <button
+            onClick={() => handleSelectLayoutMode('TB')}
+            className={`px-2 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer flex items-center space-x-1 ${
+              layoutMode === 'TB'
+                ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
+            title="Vertical Top-to-Bottom layout"
+          >
+            <ArrowDownUp className="w-3 h-3" />
+            <span>T↓B</span>
+          </button>
+        </div>
 
         {/* View Density / LOD Semantic Zoom Switcher */}
         <div className="flex items-center space-x-0.5 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs">
@@ -1460,9 +1486,10 @@ const GraphCanvas: React.FC = () => {
             if (nObj) handleDrillDown(nObj);
           }}
           onConnect={onConnect}
+          onReconnect={onReconnect}
           onPaneContextMenu={handlePaneContextMenu}
           onEdgeClick={(_, edge) => setSelectedEdgeId(edge.id)}
-          onDelete={({ nodes: deletedNodes, edges: deletedEdges }) => {
+          onDelete={async ({ nodes: deletedNodes, edges: deletedEdges }) => {
             const deletedNodeIds = new Set(deletedNodes.map((n) => n.id));
             const deletedEdgeIds = new Set(deletedEdges.map((e) => e.id));
 
@@ -1475,12 +1502,20 @@ const GraphCanvas: React.FC = () => {
                   !deletedNodeIds.has(e.target)
               )
             );
-            deletedEdges.forEach((e) => deleteEdge(e.id));
             setSelectedEdgeId(null);
 
             // 2. Erase nodes next
             setRfNodes((nds) => nds.filter((n) => !deletedNodeIds.has(n.id)));
-            deletedNodes.forEach((n) => deleteNode(n.id));
+
+            // 3. Atomically persist edge deletions in batch
+            if (deletedEdges.length > 0) {
+              await deleteEdges(deletedEdges.map((e) => e.id));
+            }
+
+            // 4. Persist node deletions sequentially
+            for (const n of deletedNodes) {
+              await deleteNode(n.id);
+            }
           }}
           deleteKeyCode={['Backspace', 'Delete']}
           zoomOnDoubleClick={false}

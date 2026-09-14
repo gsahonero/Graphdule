@@ -74,6 +74,7 @@ export const MyDayView: React.FC = () => {
     preferences,
     updatePreferences,
     openProject,
+    updateNode,
     updateNodeStatus,
     moveNodeDate,
     addStandaloneTask,
@@ -958,6 +959,21 @@ export const MyDayView: React.FC = () => {
 
         <div className="flex items-center space-x-2 shrink-0 ml-8 sm:ml-auto flex-wrap sm:flex-nowrap gap-y-1">
           {renderAUControls(task, true)}
+          {/* Environment Toggle Button */}
+          <button
+            type="button"
+            onClick={() => {
+              const curEnv = task.environment || 'computer';
+              const nextEnv: TaskEnvironment = curEnv === 'computer' ? 'physical' : curEnv === 'physical' ? 'mixed' : 'computer';
+              updateNode({ ...task, environment: nextEnv });
+            }}
+            className="inline-flex items-center space-x-1 text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
+            title={`Task Environment: ${task.environment || 'computer'} (Click to switch: Computer 💻 → Physical 🏃 → Mixed 🔄)`}
+            data-testid="myday-task-environment-toggle"
+          >
+            <span>{(task.environment || 'computer') === 'computer' ? '💻' : task.environment === 'physical' ? '🏃' : '🔄'}</span>
+            <span className="capitalize hidden sm:inline">{task.environment || 'computer'}</span>
+          </button>
           {/* Project Badge if not hidden */}
           {!options?.hideProjectBadge && task.projectId && (
             <button
@@ -1083,15 +1099,21 @@ export const MyDayView: React.FC = () => {
             </span>
           )}
 
-          {task.environment && (
-            <span
-              className="inline-flex items-center space-x-1 text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
-              title={`Environment: ${task.environment}`}
-            >
-              <span>{task.environment === 'computer' ? '💻' : task.environment === 'physical' ? '🏃' : '🔄'}</span>
-              <span className="capitalize hidden sm:inline">{task.environment}</span>
-            </span>
-          )}
+          {/* Environment Toggle Button */}
+          <button
+            type="button"
+            onClick={() => {
+              const curEnv = task.environment || 'computer';
+              const nextEnv: TaskEnvironment = curEnv === 'computer' ? 'physical' : curEnv === 'physical' ? 'mixed' : 'computer';
+              updateStandaloneTask({ ...task, environment: nextEnv });
+            }}
+            className="inline-flex items-center space-x-1 text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
+            title={`Task Environment: ${task.environment || 'computer'} (Click to switch: Computer 💻 → Physical 🏃 → Mixed 🔄)`}
+            data-testid="myday-standalone-environment-toggle"
+          >
+            <span>{(task.environment || 'computer') === 'computer' ? '💻' : task.environment === 'physical' ? '🏃' : '🔄'}</span>
+            <span className="capitalize hidden sm:inline">{task.environment || 'computer'}</span>
+          </button>
 
           {/* Overdue Badge */}
           <span
@@ -1256,6 +1278,21 @@ export const MyDayView: React.FC = () => {
 
         <div className="flex items-center space-x-2 shrink-0 ml-8 sm:ml-auto flex-wrap sm:flex-nowrap gap-y-1">
           {renderAUControls(task, true)}
+          {/* Environment Toggle Button */}
+          <button
+            type="button"
+            onClick={() => {
+              const curEnv = task.environment || 'computer';
+              const nextEnv: TaskEnvironment = curEnv === 'computer' ? 'physical' : curEnv === 'physical' ? 'mixed' : 'computer';
+              updateNode({ ...task, environment: nextEnv });
+            }}
+            className="inline-flex items-center space-x-1 text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
+            title={`Task Environment: ${task.environment || 'computer'} (Click to switch: Computer 💻 → Physical 🏃 → Mixed 🔄)`}
+            data-testid="myday-task-environment-toggle"
+          >
+            <span>{(task.environment || 'computer') === 'computer' ? '💻' : task.environment === 'physical' ? '🏃' : '🔄'}</span>
+            <span className="capitalize hidden sm:inline">{task.environment || 'computer'}</span>
+          </button>
           {/* Project Badge if not hidden */}
           {!options?.hideProjectBadge && task.projectId && (
             <button
@@ -1355,15 +1392,21 @@ export const MyDayView: React.FC = () => {
 
         <div className="flex items-center space-x-2 shrink-0 ml-8 sm:ml-auto flex-wrap sm:flex-nowrap gap-y-1">
           {renderAUControls(task, false)}
-          {task.environment && (
-            <span
-              className="inline-flex items-center space-x-1 text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
-              title={`Environment: ${task.environment}`}
-            >
-              <span>{task.environment === 'computer' ? '💻' : task.environment === 'physical' ? '🏃' : '🔄'}</span>
-              <span className="capitalize hidden sm:inline">{task.environment}</span>
-            </span>
-          )}
+          {/* Environment Toggle Button */}
+          <button
+            type="button"
+            onClick={() => {
+              const curEnv = task.environment || 'computer';
+              const nextEnv: TaskEnvironment = curEnv === 'computer' ? 'physical' : curEnv === 'physical' ? 'mixed' : 'computer';
+              updateStandaloneTask({ ...task, environment: nextEnv });
+            }}
+            className="inline-flex items-center space-x-1 text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
+            title={`Task Environment: ${task.environment || 'computer'} (Click to switch: Computer 💻 → Physical 🏃 → Mixed 🔄)`}
+            data-testid="myday-standalone-environment-toggle"
+          >
+            <span>{(task.environment || 'computer') === 'computer' ? '💻' : task.environment === 'physical' ? '🏃' : '🔄'}</span>
+            <span className="capitalize hidden sm:inline">{task.environment || 'computer'}</span>
+          </button>
           {/* Recurrence Badge / Picker */}
           <RecurrencePicker
             value={task.recurrence}

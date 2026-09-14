@@ -112,6 +112,8 @@ interface AppContextType {
   applyPendingCascade: () => Promise<void>;
   addEdge: (fromNodeId: string, toNodeId: string) => Promise<{ success: boolean; error?: string }>;
   deleteEdge: (edgeId: string) => Promise<void>;
+  deleteEdges: (edgeIds: string[]) => Promise<void>;
+  reconnectEdge: (edgeId: string, newFromNodeId: string, newToNodeId: string) => Promise<{ success: boolean; error?: string }>;
   spliceNodeIntoEdge: (nodeId: string, edgeId: string, newPosition?: { x: number; y: number }) => Promise<{ success: boolean; error?: string }>;
   nestNode: (sourceNodeId: string, targetParentId: string) => Promise<{ success: boolean; error?: string }>;
   decomposeNode: (parentNodeId: string, subtasks: { text: string; dueDate?: string; estimatedAU?: number }[]) => Promise<void>;
@@ -2052,19 +2054,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteNode = useCallback(
     async (nodeId: string) => {
-      if (!activeProjectDoc) return;
+      const currentDoc = activeProjectDocRef.current || activeProjectDoc;
+      if (!currentDoc) return;
 
       // If active work session is on this node or one of its descendants, stop work immediately!
       const session = activeWorkSessionRef.current || activeWorkSession;
       if (
         session &&
         (session.taskId === nodeId ||
-          ProjectService.isDescendantOf(activeProjectDoc.nodes, session.taskId, nodeId))
+          ProjectService.isDescendantOf(currentDoc.nodes, session.taskId, nodeId))
       ) {
         await stopWork();
       }
 
-      const res = ProjectService.deleteNodeFromProject(activeProjectDoc, nodeId);
+      const res = ProjectService.deleteNodeFromProject(currentDoc, nodeId);
       if (!res.success) {
         alert(res.error);
         return;
@@ -2421,14 +2424,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const addEdge = useCallback(
     async (fromNodeId: string, toNodeId: string): Promise<{ success: boolean; error?: string }> => {
-      if (!activeProjectDoc) return { success: false, error: 'No active project' };
+      const currentDoc = activeProjectDocRef.current || activeProjectDoc;
+      if (!currentDoc) return { success: false, error: 'No active project' };
 
       const result = ProjectService.createEdge(
-        activeProjectDoc.project.id,
+        currentDoc.project.id,
         fromNodeId,
         toNodeId,
-        activeProjectDoc.nodes,
-        activeProjectDoc.edges
+        currentDoc.nodes,
+        currentDoc.edges
       );
 
       if (!result.success) {
@@ -2436,8 +2440,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       await saveProjectDoc({
-        ...activeProjectDoc,
-        edges: [...activeProjectDoc.edges, result.edge],
+        ...currentDoc,
+        edges: [...currentDoc.edges, result.edge],
       });
 
       return { success: true };
@@ -2447,12 +2451,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteEdge = useCallback(
     async (edgeId: string) => {
-      if (!activeProjectDoc) return;
-      const updatedEdges = activeProjectDoc.edges.filter((e) => e.id !== edgeId);
-      await saveProjectDoc({
-        ...activeProjectDoc,
-        edges: updatedEdges,
-      });
+      const currentDoc = activeProjectDocRef.current || activeProjectDoc;
+      if (!currentDoc) return;
+      const updatedDoc = ProjectService.deleteEdgeFromProject(currentDoc, edgeId);
+      await saveProjectDoc(updatedDoc);
+    },
+    [activeProjectDoc, saveProjectDoc]
+  );
+
+  const deleteEdges = useCallback(
+    async (edgeIds: string[]) => {
+      const currentDoc = activeProjectDocRef.current || activeProjectDoc;
+      if (!currentDoc || edgeIds.length === 0) return;
+      const updatedDoc = ProjectService.deleteEdgesFromProject(currentDoc, edgeIds);
+      await saveProjectDoc(updatedDoc);
+    },
+    [activeProjectDoc, saveProjectDoc]
+  );
+
+  const reconnectEdge = useCallback(
+    async (
+      edgeId: string,
+      newFromNodeId: string,
+      newToNodeId: string
+    ): Promise<{ success: boolean; error?: string }> => {
+      const currentDoc = activeProjectDocRef.current || activeProjectDoc;
+      if (!currentDoc) return { success: false, error: 'No active project' };
+
+      const result = ProjectService.reconnectEdge(
+        currentDoc,
+        edgeId,
+        newFromNodeId,
+        newToNodeId
+      );
+
+      if (!result.success) {
+        return { success: false, error: result.error };
+      }
+
+      await saveProjectDoc(result.document);
+      return { success: true };
     },
     [activeProjectDoc, saveProjectDoc]
   );
@@ -3396,6 +3434,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         applyPendingCascade,
         addEdge,
         deleteEdge,
+        deleteEdges,
+        reconnectEdge,
         spliceNodeIntoEdge,
         nestNode,
         decomposeNode,

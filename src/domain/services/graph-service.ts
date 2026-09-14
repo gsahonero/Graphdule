@@ -199,4 +199,114 @@ export class GraphService {
 
     return sorted;
   }
+
+  /**
+   * Validates comprehensive graph invariants:
+   * 1. No dangling edges (source and target nodes must exist)
+   * 2. No self-loops (fromNodeId !== toNodeId)
+   * 3. No duplicate edges (no multiple edges with the same source and target)
+   * 4. DAG acyclicity (no directed cycles)
+   */
+  public static validateGraphInvariants(
+    nodes: readonly Node[],
+    edges: readonly Edge[]
+  ): { isValid: boolean; error?: string } {
+    const nodeIds = new Set(nodes.map((n) => n.id));
+    const seenEdges = new Set<string>();
+
+    for (const edge of edges) {
+      if (!nodeIds.has(edge.fromNodeId)) {
+        return { isValid: false, error: `Edge ${edge.id} references non-existent source node: ${edge.fromNodeId}` };
+      }
+      if (!nodeIds.has(edge.toNodeId)) {
+        return { isValid: false, error: `Edge ${edge.id} references non-existent target node: ${edge.toNodeId}` };
+      }
+      if (edge.fromNodeId === edge.toNodeId) {
+        return { isValid: false, error: `Self-loop detected on node: ${edge.fromNodeId}` };
+      }
+      const pairKey = `${edge.fromNodeId}->${edge.toNodeId}`;
+      if (seenEdges.has(pairKey)) {
+        return { isValid: false, error: `Duplicate edge detected between ${edge.fromNodeId} and ${edge.toNodeId}` };
+      }
+      seenEdges.add(pairKey);
+    }
+
+    return GraphService.validateDAG(nodes, edges);
+  }
+
+  /**
+   * Returns a sanitized, invariant-compliant edge set for the given nodes.
+   * Removes dangling edges, self-loops, and duplicates deterministically.
+   */
+  public static sanitizeEdges(nodes: readonly Node[], edges: readonly Edge[]): Edge[] {
+    const nodeIds = new Set(nodes.map((n) => n.id));
+    const seenEdges = new Set<string>();
+    const sanitized: Edge[] = [];
+
+    for (const edge of edges) {
+      if (!nodeIds.has(edge.fromNodeId) || !nodeIds.has(edge.toNodeId)) continue;
+      if (edge.fromNodeId === edge.toNodeId) continue;
+      const pairKey = `${edge.fromNodeId}->${edge.toNodeId}`;
+      if (seenEdges.has(pairKey)) continue;
+      seenEdges.add(pairKey);
+      sanitized.push(edge);
+    }
+
+    return sanitized;
+  }
+
+  /**
+   * Checks if two line segments (p1-p2 and p3-p4) intersect strictly.
+   */
+  public static segmentsIntersect(
+    p1: { x: number; y: number },
+    p2: { x: number; y: number },
+    p3: { x: number; y: number },
+    p4: { x: number; y: number }
+  ): boolean {
+    const ccw = (a: { x: number; y: number }, b: { x: number; y: number }, c: { x: number; y: number }) => {
+      return (c.y - a.y) * (b.x - a.x) > (b.y - a.y) * (c.x - a.x);
+    };
+    return (
+      ccw(p1, p3, p4) !== ccw(p2, p3, p4) &&
+      ccw(p1, p2, p3) !== ccw(p1, p2, p4)
+    );
+  }
+
+  /**
+   * Counts edge crossings in a graph given node positions.
+   */
+  public static countEdgeCrossings(
+    nodePositions: Map<string, { x: number; y: number }>,
+    edges: readonly Edge[]
+  ): number {
+    let crossings = 0;
+    const n = edges.length;
+    for (let i = 0; i < n; i++) {
+      const e1 = edges[i];
+      const p1 = nodePositions.get(e1.fromNodeId);
+      const p2 = nodePositions.get(e1.toNodeId);
+      if (!p1 || !p2) continue;
+
+      for (let j = i + 1; j < n; j++) {
+        const e2 = edges[j];
+        if (
+          e1.fromNodeId === e2.fromNodeId ||
+          e1.fromNodeId === e2.toNodeId ||
+          e1.toNodeId === e2.fromNodeId ||
+          e1.toNodeId === e2.toNodeId
+        ) {
+          continue;
+        }
+        const p3 = nodePositions.get(e2.fromNodeId);
+        const p4 = nodePositions.get(e2.toNodeId);
+        if (!p3 || !p4) continue;
+
+        if (GraphService.segmentsIntersect(p1, p2, p3, p4)) {
+          crossings++;
+        }
+      }
+    }
+    return crossings;
+  }
 }
