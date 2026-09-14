@@ -11,7 +11,7 @@ import {
   ProjectNote,
   TaskEnvironment,
 } from '../models/types';
-import { getTodayString } from '../utils/date';
+import { getTodayString, isAfter } from '../utils/date';
 import { GraphService } from './graph-service';
 import { TemporalService } from './temporal-service';
 import { AttentionService } from './attention-service';
@@ -245,6 +245,112 @@ export class ProjectService {
     return {
       ...doc,
       edges: doc.edges.filter((e) => !idSet.has(e.id)),
+    };
+  }
+
+  /**
+   * Slices/splices a node between an existing edge (A -> B becomes A -> C -> B).
+   * Permanently removes the existing edge from the project document, connects
+   * the predecessor to the node and the node to the successor, and enforces
+   * all graph invariants (DAG, no duplicate edges, chronological validity).
+   */
+  public static spliceNodeIntoEdge(
+    doc: ProjectDocument,
+    nodeId: string,
+    edgeId: string,
+    newPosition?: { x: number; y: number }
+  ):
+    | {
+        success: true;
+        document: ProjectDocument;
+        createdEdges: [Edge, Edge];
+        deletedEdgeId: string;
+      }
+    | { success: false; error: string } {
+    const edge = doc.edges.find((e) => e.id === edgeId);
+    if (!edge) {
+      return { success: false, error: 'Edge not found.' };
+    }
+
+    const node = doc.nodes.find((n) => n.id === nodeId);
+    const fromNode = doc.nodes.find((n) => n.id === edge.fromNodeId);
+    const toNode = doc.nodes.find((n) => n.id === edge.toNodeId);
+
+    if (!node || !fromNode || !toNode) {
+      return { success: false, error: 'One or more connected nodes do not exist.' };
+    }
+
+    if (node.id === fromNode.id || node.id === toNode.id) {
+      return { success: false, error: 'Cannot insert node into its own edge.' };
+    }
+
+    // Filter out the spliced edge
+    const remainingEdges = doc.edges.filter((e) => Boolean(e && e.id !== edgeId));
+
+    // Check cycles without the old edge
+    if (
+      GraphService.wouldCreateCycle(fromNode.id, node.id, remainingEdges) ||
+      GraphService.wouldCreateCycle(node.id, toNode.id, remainingEdges)
+    ) {
+      return { success: false, error: 'Connecting this node would create a circular dependency.' };
+    }
+
+    // Chronological validity: clamp node.dueDate to [fromNode.dueDate, toNode.dueDate]
+    let updatedNode = node;
+    let newDueDate = node.dueDate;
+    if (isAfter(fromNode.dueDate, newDueDate)) {
+      newDueDate = fromNode.dueDate;
+    }
+    if (isAfter(newDueDate, toNode.dueDate)) {
+      newDueDate = toNode.dueDate;
+    }
+    if (newDueDate !== node.dueDate || newPosition) {
+      updatedNode = {
+        ...node,
+        ...(newPosition ? { position: newPosition } : {}),
+        dueDate: newDueDate,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    const updatedNodes = doc.nodes.map((n) => (n.id === updatedNode.id ? updatedNode : n));
+
+    const edge1Result = ProjectService.createEdge(
+      doc.project.id,
+      fromNode.id,
+      node.id,
+      updatedNodes,
+      remainingEdges
+    );
+    if (!edge1Result.success) {
+      return { success: false, error: edge1Result.error };
+    }
+
+    const edgesWithFirst = [...remainingEdges, edge1Result.edge];
+    const edge2Result = ProjectService.createEdge(
+      doc.project.id,
+      node.id,
+      toNode.id,
+      updatedNodes,
+      edgesWithFirst
+    );
+    if (!edge2Result.success) {
+      return { success: false, error: edge2Result.error };
+    }
+
+    const newEdges = [...edgesWithFirst, edge2Result.edge];
+
+    const updatedDoc: ProjectDocument = {
+      ...doc,
+      nodes: updatedNodes,
+      edges: newEdges,
+    };
+
+    return {
+      success: true,
+      document: updatedDoc,
+      createdEdges: [edge1Result.edge, edge2Result.edge],
+      deletedEdgeId: edgeId,
     };
   }
 

@@ -34,7 +34,6 @@ import { playSound } from '../../domain/health/sound';
 
 import { ProjectService } from '../../domain/services/project-service';
 import { TemporalService } from '../../domain/services/temporal-service';
-import { GraphService } from '../../domain/services/graph-service';
 import { HistoryService } from '../../domain/services/history-service';
 import { UndoRedoManager, MAX_HISTORY_SIZE } from '../../domain/services/undo-redo-service';
 import { MyDayService } from '../../domain/services/my-day-service';
@@ -60,7 +59,7 @@ import {
   GCalendarItem,
 } from '../../storage';
 import { JsonFileProvider } from '../../storage/file/json-file-provider';
-import { formatDisplayDate, DateDisplayFormat, isAfter, getTodayString, addDays, getMondayOfWeek, getISOWeekString, parseDate } from '../../domain/utils/date';
+import { formatDisplayDate, DateDisplayFormat, getTodayString, addDays, getMondayOfWeek, getISOWeekString, parseDate } from '../../domain/utils/date';
 import { createDefaultSampleProject, DEFAULT_SAMPLE_PROJECT_ID } from '../../config/sample-project';
 
 interface AppContextType {
@@ -928,6 +927,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           updatedAt: now,
         },
       };
+      activeProjectDocRef.current = docWithTimestamp;
       await storage.writeProject(docWithTimestamp);
       setActiveProjectDoc(docWithTimestamp);
 
@@ -2073,6 +2073,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return;
       }
 
+      SyncCoordinator.recordNodeDeletion(nodeId);
+      const connectedEdges = currentDoc.edges.filter(
+        (e) => e.fromNodeId === nodeId || e.toNodeId === nodeId
+      );
+      if (connectedEdges.length > 0) {
+        SyncCoordinator.recordEdgeDeletions(connectedEdges.map((e) => e.id));
+      }
+
       await saveProjectDoc(res.document);
       GCalendarSync.syncTaskDelete(nodeId).catch(() => {});
 
@@ -2453,6 +2461,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     async (edgeId: string) => {
       const currentDoc = activeProjectDocRef.current || activeProjectDoc;
       if (!currentDoc) return;
+      SyncCoordinator.recordEdgeDeletion(edgeId);
       const updatedDoc = ProjectService.deleteEdgeFromProject(currentDoc, edgeId);
       await saveProjectDoc(updatedDoc);
     },
@@ -2463,6 +2472,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     async (edgeIds: string[]) => {
       const currentDoc = activeProjectDocRef.current || activeProjectDoc;
       if (!currentDoc || edgeIds.length === 0) return;
+      SyncCoordinator.recordEdgeDeletions(edgeIds);
       const updatedDoc = ProjectService.deleteEdgesFromProject(currentDoc, edgeIds);
       await saveProjectDoc(updatedDoc);
     },
@@ -2501,92 +2511,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       edgeId: string,
       newPosition?: { x: number; y: number }
     ): Promise<{ success: boolean; error?: string }> => {
-      if (!activeProjectDoc) return { success: false, error: 'No active project' };
+      const currentDoc = activeProjectDocRef.current || activeProjectDoc;
+      if (!currentDoc) return { success: false, error: 'No active project' };
 
-      const edge = activeProjectDoc.edges.find((e) => e.id === edgeId);
-      if (!edge) return { success: false, error: 'Edge not found' };
-
-      const node = activeProjectDoc.nodes.find((n) => n.id === nodeId);
-      const fromNode = activeProjectDoc.nodes.find((n) => n.id === edge.fromNodeId);
-      const toNode = activeProjectDoc.nodes.find((n) => n.id === edge.toNodeId);
-      if (!node || !fromNode || !toNode) {
-        return { success: false, error: 'One or more connected nodes do not exist.' };
+      const origNode = currentDoc.nodes.find((n) => n.id === nodeId);
+      const result = ProjectService.spliceNodeIntoEdge(currentDoc, nodeId, edgeId, newPosition);
+      if (!result.success) {
+        return { success: false, error: result.error };
       }
 
-      if (node.id === fromNode.id || node.id === toNode.id) {
-        return { success: false, error: 'Cannot insert node into its own edge.' };
-      }
+      // Record tombstone for deleted edge so cloud sync never resurrects it
+      SyncCoordinator.recordEdgeDeletion(result.deletedEdgeId);
 
-      // Check cycles without the old edge
-      const remainingEdges = activeProjectDoc.edges.filter((e) => e.id !== edgeId);
-      if (
-        GraphService.wouldCreateCycle(fromNode.id, node.id, remainingEdges) ||
-        GraphService.wouldCreateCycle(node.id, toNode.id, remainingEdges)
-      ) {
-        return { success: false, error: 'Connecting this node would create a circular dependency.' };
-      }
+      await saveProjectDoc(result.document);
 
-      // Ensure chronological validity: clamp node.dueDate to [fromNode.dueDate, toNode.dueDate]
-      let updatedNode = node;
-      let newDueDate = node.dueDate;
-      if (isAfter(fromNode.dueDate, newDueDate)) {
-        newDueDate = fromNode.dueDate;
-      }
-      if (isAfter(newDueDate, toNode.dueDate)) {
-        newDueDate = toNode.dueDate;
-      }
-      if (newDueDate !== node.dueDate || newPosition) {
-        updatedNode = {
-          ...node,
-          ...(newPosition ? { position: newPosition } : {}),
-          dueDate: newDueDate,
-          updatedAt: new Date().toISOString(),
-        };
-      }
-
-      const updatedNodes = activeProjectDoc.nodes.map((n) =>
-        n.id === updatedNode.id ? updatedNode : n
-      );
-
-      const edge1Result = ProjectService.createEdge(
-        activeProjectDoc.project.id,
-        fromNode.id,
-        node.id,
-        updatedNodes,
-        remainingEdges
-      );
-      if (!edge1Result.success) {
-        return { success: false, error: edge1Result.error };
-      }
-
-      const edgesWithFirst = [...remainingEdges, edge1Result.edge];
-      const edge2Result = ProjectService.createEdge(
-        activeProjectDoc.project.id,
-        node.id,
-        toNode.id,
-        updatedNodes,
-        edgesWithFirst
-      );
-      if (!edge2Result.success) {
-        return { success: false, error: edge2Result.error };
-      }
-
-      const newEdges = [...edgesWithFirst, edge2Result.edge];
-
-      await saveProjectDoc({
-        ...activeProjectDoc,
-        nodes: updatedNodes,
-        edges: newEdges,
-      });
-
-      if (newDueDate !== node.dueDate) {
+      const updatedNode = result.document.nodes.find((n) => n.id === nodeId);
+      if (origNode && updatedNode && origNode.dueDate !== updatedNode.dueDate) {
         GCalendarSync.syncTaskDateChange({
-          taskId: node.id,
-          newDueDate,
-          taskText: node.text,
-          status: node.status,
-          projectId: activeProjectDoc.project.id,
-          projectName: activeProjectDoc.project.name,
+          taskId: updatedNode.id,
+          newDueDate: updatedNode.dueDate,
+          taskText: updatedNode.text,
+          status: updatedNode.status,
+          projectId: currentDoc.project.id,
+          projectName: currentDoc.project.name,
         }).catch((err) => console.warn('[AppContext] Calendar sync on spliceNodeIntoEdge failed:', err));
       }
 

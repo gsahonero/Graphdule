@@ -1531,4 +1531,128 @@ describe('Graphdule Domain Invariants and Services', () => {
       expect(parentPresentation?.status).toBe('completed');
     });
   });
+
+  describe('ProjectService.spliceNodeIntoEdge', () => {
+    it('splices a node between an existing edge (A -> B becomes A -> C -> B) and removes the old edge', () => {
+      const nodeA = ProjectService.createNode('p1', 'Task A', '2026-10-01');
+      const nodeB = ProjectService.createNode('p1', 'Task B', '2026-10-10');
+      const nodeC = ProjectService.createNode('p1', 'Task C', '2026-10-05');
+
+      const edgeABResult = ProjectService.createEdge('p1', nodeA.id, nodeB.id, [nodeA, nodeB], []);
+      expect(edgeABResult.success).toBe(true);
+      const edgeAB = (edgeABResult as any).edge;
+
+      const initialDoc: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: '2026-10-01T10:00:00Z',
+        project: {
+          id: 'p1',
+          name: 'Test Project',
+          endGoalNodeId: nodeB.id,
+          createdAt: '2026-10-01T10:00:00Z',
+          updatedAt: '2026-10-01T10:00:00Z',
+        },
+        nodes: [nodeA, nodeB, nodeC],
+        edges: [edgeAB],
+        notes: [],
+      };
+
+      const spliceResult = ProjectService.spliceNodeIntoEdge(
+        initialDoc,
+        nodeC.id,
+        edgeAB.id,
+        { x: 200, y: 150 }
+      );
+
+      expect(spliceResult.success).toBe(true);
+      if (!spliceResult.success) return;
+
+      expect(spliceResult.deletedEdgeId).toBe(edgeAB.id);
+      expect(spliceResult.document.edges).toHaveLength(2);
+
+      // The original A -> B edge MUST be deleted
+      expect(spliceResult.document.edges.some((e) => e.id === edgeAB.id)).toBe(false);
+      expect(spliceResult.document.edges.some((e) => e.fromNodeId === nodeA.id && e.toNodeId === nodeB.id)).toBe(false);
+
+      // New edges A -> C and C -> B must exist
+      const edgeAC = spliceResult.document.edges.find((e) => e.fromNodeId === nodeA.id && e.toNodeId === nodeC.id);
+      const edgeCB = spliceResult.document.edges.find((e) => e.fromNodeId === nodeC.id && e.toNodeId === nodeB.id);
+      expect(edgeAC).toBeDefined();
+      expect(edgeCB).toBeDefined();
+
+      // Node C position updated
+      const updatedC = spliceResult.document.nodes.find((n) => n.id === nodeC.id);
+      expect(updatedC?.position).toEqual({ x: 200, y: 150 });
+    });
+
+    it('enforces chronological clamping of spliced node dueDate', () => {
+      const nodeA = ProjectService.createNode('p1', 'Task A', '2026-10-05');
+      const nodeB = ProjectService.createNode('p1', 'Task B', '2026-10-15');
+      // Node C originally scheduled after node B
+      const nodeC = ProjectService.createNode('p1', 'Task C', '2026-10-25');
+
+      const edgeABResult = ProjectService.createEdge('p1', nodeA.id, nodeB.id, [nodeA, nodeB], []);
+      const edgeAB = (edgeABResult as any).edge;
+
+      const doc: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: '2026-10-01T10:00:00Z',
+        project: { id: 'p1', name: 'Test', endGoalNodeId: 'node_goal', createdAt: '', updatedAt: '' },
+        nodes: [nodeA, nodeB, nodeC],
+        edges: [edgeAB],
+        notes: [],
+      };
+
+      const result = ProjectService.spliceNodeIntoEdge(doc, nodeC.id, edgeAB.id);
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+
+      const updatedC = result.document.nodes.find((n) => n.id === nodeC.id);
+      // Clamped to node B's due date
+      expect(updatedC?.dueDate).toBe('2026-10-15');
+    });
+
+    it('prevents self-insertion of an edge endpoint into its own edge', () => {
+      const nodeA = ProjectService.createNode('p1', 'Task A', '2026-10-01');
+      const nodeB = ProjectService.createNode('p1', 'Task B', '2026-10-10');
+      const edgeAB = (ProjectService.createEdge('p1', nodeA.id, nodeB.id, [nodeA, nodeB], []) as any).edge;
+
+      const doc: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: '',
+        project: { id: 'p1', name: 'Test', endGoalNodeId: 'node_goal', createdAt: '', updatedAt: '' },
+        nodes: [nodeA, nodeB],
+        edges: [edgeAB],
+        notes: [],
+      };
+
+      const result = ProjectService.spliceNodeIntoEdge(doc, nodeA.id, edgeAB.id);
+      expect(result.success).toBe(false);
+      expect((result as any).error).toContain('Cannot insert node into its own edge');
+    });
+
+    it('prevents cycle creation during splicing', () => {
+      const nodeA = ProjectService.createNode('p1', 'Task A', '2026-10-01');
+      const nodeB = ProjectService.createNode('p1', 'Task B', '2026-10-10');
+      const nodeC = ProjectService.createNode('p1', 'Task C', '2026-10-15');
+
+      const edgeAB = (ProjectService.createEdge('p1', nodeA.id, nodeB.id, [nodeA, nodeB], []) as any).edge;
+      // Existing cycle constraint: B -> C
+      const edgeBC = (ProjectService.createEdge('p1', nodeB.id, nodeC.id, [nodeA, nodeB, nodeC], [edgeAB]) as any).edge;
+
+      const doc: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: '',
+        project: { id: 'p1', name: 'Test', endGoalNodeId: 'node_goal', createdAt: '', updatedAt: '' },
+        nodes: [nodeA, nodeB, nodeC],
+        edges: [edgeAB, edgeBC],
+        notes: [],
+      };
+
+      // Splicing C into A -> B would create: A -> C and C -> B, but B -> C already exists! (cycle!)
+      const result = ProjectService.spliceNodeIntoEdge(doc, nodeC.id, edgeAB.id);
+      expect(result.success).toBe(false);
+      expect((result as any).error).toContain('circular dependency');
+    });
+  });
 });

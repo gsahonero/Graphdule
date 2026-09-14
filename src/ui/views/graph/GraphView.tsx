@@ -811,7 +811,10 @@ const GraphCanvas: React.FC = () => {
 
       // If dropped onto an existing connection, splice node in between with updated position atomically!
       if (candidateEdge) {
-        await spliceNodeIntoEdge(activeNode.id, candidateEdge.id, { x: finalX, y: finalY });
+        const res = await spliceNodeIntoEdge(activeNode.id, candidateEdge.id, { x: finalX, y: finalY });
+        if (!res.success) {
+          alert(`Cannot connect node into dependency: ${res.error}`);
+        }
       } else {
         const targetNode = nodes.find((n) => n.id === activeNode.id);
         if (targetNode) {

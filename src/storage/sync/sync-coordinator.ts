@@ -16,11 +16,14 @@ import { OneDriveAuth } from '../onedrive/onedrive-auth';
 import { OneDriveClient } from '../onedrive/onedrive-client';
 import { DEFAULT_SAMPLE_PROJECT_ID } from '../../config/sample-project';
 import { HistoryService } from '../../domain/services/history-service';
+import { GraphService } from '../../domain/services/graph-service';
 
 const LAST_SYNC_KEY = 'graphdule_last_sync_time';
 const ACTIVE_CLOUD_PROVIDER_KEY = 'graphdule_active_cloud_provider';
 const TOMBSTONES_PROJECTS_KEY = 'graphdule_tombstones_projects';
 const TOMBSTONES_TASKS_KEY = 'graphdule_tombstones_tasks';
+const TOMBSTONES_EDGES_KEY = 'graphdule_tombstones_edges';
+const TOMBSTONES_NODES_KEY = 'graphdule_tombstones_nodes';
 
 export type ActiveCloudProvider = 'none' | 'google_drive' | 'onedrive';
 
@@ -150,6 +153,100 @@ export class SyncCoordinator {
         const map: Record<string, string> = JSON.parse(raw);
         delete map[taskId];
         localStorage.setItem(TOMBSTONES_TASKS_KEY, JSON.stringify(map));
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  public static recordEdgeDeletion(edgeId: string): void {
+    try {
+      const raw = localStorage.getItem(TOMBSTONES_EDGES_KEY);
+      const map: Record<string, string> = raw ? JSON.parse(raw) : {};
+      map[edgeId] = new Date().toISOString();
+      localStorage.setItem(TOMBSTONES_EDGES_KEY, JSON.stringify(map));
+    } catch {
+      // ignore
+    }
+  }
+
+  public static recordEdgeDeletions(edgeIds: readonly string[] | string[]): void {
+    try {
+      const raw = localStorage.getItem(TOMBSTONES_EDGES_KEY);
+      const map: Record<string, string> = raw ? JSON.parse(raw) : {};
+      const now = new Date().toISOString();
+      for (const id of edgeIds) {
+        map[id] = now;
+      }
+      localStorage.setItem(TOMBSTONES_EDGES_KEY, JSON.stringify(map));
+    } catch {
+      // ignore
+    }
+  }
+
+  public static getEdgeTombstones(): Record<string, string> {
+    try {
+      const raw = localStorage.getItem(TOMBSTONES_EDGES_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  public static clearEdgeTombstone(edgeId: string): void {
+    try {
+      const raw = localStorage.getItem(TOMBSTONES_EDGES_KEY);
+      if (raw) {
+        const map: Record<string, string> = JSON.parse(raw);
+        delete map[edgeId];
+        localStorage.setItem(TOMBSTONES_EDGES_KEY, JSON.stringify(map));
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  public static recordNodeDeletion(nodeId: string): void {
+    try {
+      const raw = localStorage.getItem(TOMBSTONES_NODES_KEY);
+      const map: Record<string, string> = raw ? JSON.parse(raw) : {};
+      map[nodeId] = new Date().toISOString();
+      localStorage.setItem(TOMBSTONES_NODES_KEY, JSON.stringify(map));
+    } catch {
+      // ignore
+    }
+  }
+
+  public static recordNodeDeletions(nodeIds: readonly string[] | string[]): void {
+    try {
+      const raw = localStorage.getItem(TOMBSTONES_NODES_KEY);
+      const map: Record<string, string> = raw ? JSON.parse(raw) : {};
+      const now = new Date().toISOString();
+      for (const id of nodeIds) {
+        map[id] = now;
+      }
+      localStorage.setItem(TOMBSTONES_NODES_KEY, JSON.stringify(map));
+    } catch {
+      // ignore
+    }
+  }
+
+  public static getNodeTombstones(): Record<string, string> {
+    try {
+      const raw = localStorage.getItem(TOMBSTONES_NODES_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  public static clearNodeTombstone(nodeId: string): void {
+    try {
+      const raw = localStorage.getItem(TOMBSTONES_NODES_KEY);
+      if (raw) {
+        const map: Record<string, string> = JSON.parse(raw);
+        delete map[nodeId];
+        localStorage.setItem(TOMBSTONES_NODES_KEY, JSON.stringify(map));
       }
     } catch {
       // ignore
@@ -287,9 +384,17 @@ export class SyncCoordinator {
         await localProvider.writeProject(cloudDoc);
       } else {
         const localTime = new Date(localDoc.project.updatedAt || localDoc.exportedAt || 0).getTime();
+        const lastSyncStr = this.state.lastSyncedAt;
+        const lastSyncTime = lastSyncStr ? new Date(lastSyncStr).getTime() : 0;
 
         if (localTime === cloudTime) {
           // Both in sync
+        } else if (lastSyncTime > 0 && cloudTime <= lastSyncTime && localTime > lastSyncTime) {
+          // Only local changed since last sync: directly upload authoritative local document
+          await GDriveClient.uploadJson(cf.name, localDoc, folderId);
+        } else if (lastSyncTime > 0 && localTime <= lastSyncTime && cloudTime > lastSyncTime) {
+          // Only cloud changed since last sync: download authoritative cloud document
+          await localProvider.writeProject(cloudDoc);
         } else {
           // Merge documents semantically without losing nodes/edges/notes
           const mergedDoc = await this.mergeProjectDocuments(localDoc, cloudDoc, localProvider);
@@ -471,9 +576,17 @@ export class SyncCoordinator {
         await localProvider.writeProject(cloudDoc);
       } else {
         const localTime = new Date(localDoc.project.updatedAt || localDoc.exportedAt || 0).getTime();
+        const lastSyncStr = this.state.lastSyncedAt;
+        const lastSyncTime = lastSyncStr ? new Date(lastSyncStr).getTime() : 0;
 
         if (localTime === cloudTime) {
           // in sync
+        } else if (lastSyncTime > 0 && cloudTime <= lastSyncTime && localTime > lastSyncTime) {
+          // Only local changed since last sync: directly upload authoritative local document
+          await OneDriveClient.uploadJson(cf.name, localDoc);
+        } else if (lastSyncTime > 0 && localTime <= lastSyncTime && cloudTime > lastSyncTime) {
+          // Only cloud changed since last sync: download authoritative cloud document
+          await localProvider.writeProject(cloudDoc);
         } else {
           const mergedDoc = await this.mergeProjectDocuments(localDoc, cloudDoc, localProvider);
           if (!this.areEqualJson(localDoc, mergedDoc)) {
@@ -628,15 +741,35 @@ export class SyncCoordinator {
       }
     }
 
-    // 2. Merge Nodes granularly by node ID
+    const nodeTombstones = this.getNodeTombstones();
+    const edgeTombstones = this.getEdgeTombstones();
+
+    // 2. Merge Nodes granularly by node ID with deletion awareness
     const nodeMap = new Map<string, Node>();
     for (const node of localDoc.nodes) {
+      if (nodeTombstones[node.id]) {
+        const delTime = new Date(nodeTombstones[node.id]).getTime();
+        const nodeTime = new Date(node.updatedAt || node.createdAt || 0).getTime();
+        if (delTime >= nodeTime) continue;
+      }
       nodeMap.set(node.id, { ...node });
     }
 
     for (const cloudNode of cloudDoc.nodes) {
+      if (nodeTombstones[cloudNode.id]) {
+        const delTime = new Date(nodeTombstones[cloudNode.id]).getTime();
+        const nodeTime = new Date(cloudNode.updatedAt || cloudNode.createdAt || 0).getTime();
+        if (delTime >= nodeTime) continue;
+      }
+
       const existing = nodeMap.get(cloudNode.id);
       if (!existing) {
+        // If localDoc is newer and cloudNode was created before localDoc was updated,
+        // localDoc intentionally deleted it. Do not resurrect!
+        const cloudNodeTime = new Date(cloudNode.updatedAt || cloudNode.createdAt || 0).getTime();
+        if (localTime >= cloudTime && cloudNodeTime <= localTime) {
+          continue;
+        }
         nodeMap.set(cloudNode.id, { ...cloudNode });
       } else {
         const localNodeTime = new Date((existing as any).updatedAt || localTime).getTime();
@@ -652,16 +785,82 @@ export class SyncCoordinator {
     const mergedNodes = Array.from(nodeMap.values());
     const validNodeIds = new Set(mergedNodes.map((n) => n.id));
 
-    // 3. Merge Edges - keep all valid edges between existing nodes
-    const edgeMap = new Map<string, Edge>();
-    for (const edge of [...localDoc.edges, ...cloudDoc.edges]) {
+    // 3. Merge Edges - reconcile edges without resurrecting deleted edges
+    const localEdgeMap = new Map<string, Edge>();
+    for (const edge of localDoc.edges) {
       const fromId = edge.fromNodeId || (edge as any).source;
       const toId = edge.toNodeId || (edge as any).target;
       if (validNodeIds.has(fromId) && validNodeIds.has(toId)) {
-        edgeMap.set(edge.id, { ...edge });
+        if (edgeTombstones[edge.id]) {
+          const delTime = new Date(edgeTombstones[edge.id]).getTime();
+          const edgeTime = new Date(edge.createdAt || 0).getTime();
+          if (delTime >= edgeTime) continue;
+        }
+        localEdgeMap.set(edge.id, { ...edge, fromNodeId: fromId, toNodeId: toId });
       }
     }
-    const mergedEdges = Array.from(edgeMap.values());
+
+    const cloudEdgeMap = new Map<string, Edge>();
+    for (const edge of cloudDoc.edges) {
+      const fromId = edge.fromNodeId || (edge as any).source;
+      const toId = edge.toNodeId || (edge as any).target;
+      if (validNodeIds.has(fromId) && validNodeIds.has(toId)) {
+        if (edgeTombstones[edge.id]) {
+          const delTime = new Date(edgeTombstones[edge.id]).getTime();
+          const edgeTime = new Date(edge.createdAt || 0).getTime();
+          if (delTime >= edgeTime) continue;
+        }
+        cloudEdgeMap.set(edge.id, { ...edge, fromNodeId: fromId, toNodeId: toId });
+      }
+    }
+
+    const localNodeIds = new Set(localDoc.nodes.map((n) => n.id));
+    const cloudNodeIds = new Set(cloudDoc.nodes.map((n) => n.id));
+
+    const mergedEdgeMap = new Map<string, Edge>();
+
+    // Start with local edges unless cloud is newer and deleted them
+    for (const [id, edge] of localEdgeMap.entries()) {
+      if (!cloudEdgeMap.has(id)) {
+        // In localDoc but not in cloudDoc:
+        // If cloudDoc is strictly newer AND already had both endpoints of this edge,
+        // cloudDoc intentionally deleted this connection.
+        const cloudHadBothNodes = cloudNodeIds.has(edge.fromNodeId) && cloudNodeIds.has(edge.toNodeId);
+        if (cloudTime > localTime && cloudHadBothNodes) {
+          continue;
+        }
+      }
+      mergedEdgeMap.set(id, edge);
+    }
+
+    // Evaluate cloud edges
+    for (const [id, edge] of cloudEdgeMap.entries()) {
+      if (!mergedEdgeMap.has(id)) {
+        // In cloudDoc but not in localDoc:
+        // If localDoc is newer (or same age) AND already had both endpoints of this edge,
+        // localDoc intentionally deleted this connection. Do NOT resurrect!
+        const localHadBothNodes = localNodeIds.has(edge.fromNodeId) && localNodeIds.has(edge.toNodeId);
+        if (localTime >= cloudTime && localHadBothNodes) {
+          continue;
+        }
+        mergedEdgeMap.set(id, edge);
+      }
+    }
+
+    // Enforce Graph Invariants: DAG (no cycles), no self-loops, no duplicate pairs
+    const finalEdges: Edge[] = [];
+    const seenPairs = new Set<string>();
+    for (const edge of mergedEdgeMap.values()) {
+      if (edge.fromNodeId === edge.toNodeId) continue;
+      const pairKey = `${edge.fromNodeId}->${edge.toNodeId}`;
+      if (seenPairs.has(pairKey)) continue;
+      if (GraphService.wouldCreateCycle(edge.fromNodeId, edge.toNodeId, finalEdges)) {
+        continue;
+      }
+      seenPairs.add(pairKey);
+      finalEdges.push(edge);
+    }
+    const mergedEdges = finalEdges;
 
     // 4. Merge Notes
     const noteMap = new Map<string, ProjectNote>();

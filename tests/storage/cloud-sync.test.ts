@@ -626,6 +626,216 @@ describe('Cloud Sync & Multi-Device Coordination', () => {
       expect(merged).toHaveLength(1);
       expect(merged[0].id).toBe('task_resurrected');
     });
+
+    it('records and retrieves edge and node deletion tombstones correctly', () => {
+      SyncCoordinator.recordEdgeDeletion('edge_deleted_1');
+      SyncCoordinator.recordEdgeDeletions(['edge_deleted_2', 'edge_deleted_3']);
+      const edgeTombstones = SyncCoordinator.getEdgeTombstones();
+      expect(edgeTombstones['edge_deleted_1']).toBeDefined();
+      expect(edgeTombstones['edge_deleted_2']).toBeDefined();
+      expect(edgeTombstones['edge_deleted_3']).toBeDefined();
+
+      SyncCoordinator.clearEdgeTombstone('edge_deleted_1');
+      expect(SyncCoordinator.getEdgeTombstones()['edge_deleted_1']).toBeUndefined();
+      expect(SyncCoordinator.getEdgeTombstones()['edge_deleted_2']).toBeDefined();
+
+      SyncCoordinator.recordNodeDeletion('node_del_1');
+      SyncCoordinator.recordNodeDeletions(['node_del_2']);
+      const nodeTombstones = SyncCoordinator.getNodeTombstones();
+      expect(nodeTombstones['node_del_1']).toBeDefined();
+      expect(nodeTombstones['node_del_2']).toBeDefined();
+
+      SyncCoordinator.clearNodeTombstone('node_del_1');
+      expect(SyncCoordinator.getNodeTombstones()['node_del_1']).toBeUndefined();
+    });
+
+    it('prevents deleted edge resurrection in mergeProjectDocuments when node is spliced into edge', async () => {
+      const nodeA = { id: 'node_A', text: 'Task A', status: 'planned', dueDate: '2026-10-01' } as any;
+      const nodeB = { id: 'node_B', text: 'Task B', status: 'planned', dueDate: '2026-10-10' } as any;
+      const nodeC = { id: 'node_C', text: 'Task C', status: 'planned', dueDate: '2026-10-05' } as any;
+
+      const edgeAB = {
+        id: 'edge_AB',
+        projectId: 'p1',
+        fromNodeId: 'node_A',
+        toNodeId: 'node_B',
+        createdAt: '2026-10-01T10:00:00Z',
+      };
+
+      // Cloud document still has the original A -> B edge
+      const cloudDoc: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: '2026-10-01T10:00:00Z',
+        project: { id: 'p1', name: 'Project 1', endGoalNodeId: 'node_B', createdAt: '2026-10-01T10:00:00Z', updatedAt: '2026-10-01T10:00:00Z' },
+        nodes: [nodeA, nodeB],
+        edges: [edgeAB],
+        notes: [],
+      };
+
+      // Local document has spliced C into A -> B, deleting edge_AB and creating A -> C and C -> B
+      const edgeAC = { id: 'edge_AC', projectId: 'p1', fromNodeId: 'node_A', toNodeId: 'node_C', createdAt: '2026-10-02T12:00:00Z' };
+      const edgeCB = { id: 'edge_CB', projectId: 'p1', fromNodeId: 'node_C', toNodeId: 'node_B', createdAt: '2026-10-02T12:00:00Z' };
+
+      const localDoc: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: '2026-10-02T12:00:00Z',
+        project: { id: 'p1', name: 'Project 1', endGoalNodeId: 'node_B', createdAt: '2026-10-01T10:00:00Z', updatedAt: '2026-10-02T12:00:00Z' },
+        nodes: [nodeA, nodeB, nodeC],
+        edges: [edgeAC, edgeCB],
+        notes: [],
+      };
+
+      // Record tombstone for the spliced edge
+      SyncCoordinator.recordEdgeDeletion(edgeAB.id);
+
+      const merged = await SyncCoordinator.mergeProjectDocuments(localDoc, cloudDoc);
+
+      // Edge A -> B MUST NOT reappear
+      expect(merged.edges.some((e) => e.id === 'edge_AB')).toBe(false);
+      expect(merged.edges.some((e) => e.fromNodeId === 'node_A' && e.toNodeId === 'node_B')).toBe(false);
+
+      // Spliced edges A -> C and C -> B must remain
+      expect(merged.edges.some((e) => e.id === 'edge_AC')).toBe(true);
+      expect(merged.edges.some((e) => e.id === 'edge_CB')).toBe(true);
+      expect(merged.edges).toHaveLength(2);
+    });
+
+    it('prevents edge resurrection even if tombstone is absent when local doc is newer and already contains both endpoints', async () => {
+      const nodeA = { id: 'node_A', text: 'Task A', status: 'planned', dueDate: '2026-10-01' } as any;
+      const nodeB = { id: 'node_B', text: 'Task B', status: 'planned', dueDate: '2026-10-10' } as any;
+      const nodeC = { id: 'node_C', text: 'Task C', status: 'planned', dueDate: '2026-10-05' } as any;
+
+      const edgeAB = {
+        id: 'edge_AB',
+        projectId: 'p1',
+        fromNodeId: 'node_A',
+        toNodeId: 'node_B',
+        createdAt: '2026-10-01T10:00:00Z',
+      };
+
+      const cloudDoc: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: '2026-10-01T10:00:00Z',
+        project: { id: 'p1', name: 'Project 1', endGoalNodeId: 'node_B', createdAt: '2026-10-01T10:00:00Z', updatedAt: '2026-10-01T10:00:00Z' },
+        nodes: [nodeA, nodeB],
+        edges: [edgeAB],
+        notes: [],
+      };
+
+      const edgeAC = { id: 'edge_AC', projectId: 'p1', fromNodeId: 'node_A', toNodeId: 'node_C', createdAt: '2026-10-02T12:00:00Z' };
+      const edgeCB = { id: 'edge_CB', projectId: 'p1', fromNodeId: 'node_C', toNodeId: 'node_B', createdAt: '2026-10-02T12:00:00Z' };
+
+      const localDoc: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: '2026-10-02T12:00:00Z',
+        project: { id: 'p1', name: 'Project 1', endGoalNodeId: 'node_B', createdAt: '2026-10-01T10:00:00Z', updatedAt: '2026-10-02T12:00:00Z' },
+        nodes: [nodeA, nodeB, nodeC],
+        edges: [edgeAC, edgeCB],
+        notes: [],
+      };
+
+      // Clear any tombstone to test heuristic: localDoc had both A and B, is newer, and omitted edge_AB
+      localStorage.clear();
+
+      const merged = await SyncCoordinator.mergeProjectDocuments(localDoc, cloudDoc);
+
+      expect(merged.edges.some((e) => e.id === 'edge_AB')).toBe(false);
+      expect(merged.edges.some((e) => e.fromNodeId === 'node_A' && e.toNodeId === 'node_B')).toBe(false);
+      expect(merged.edges).toHaveLength(2);
+    });
+
+    it('persists edge deletion across save and page refresh simulation without resurrecting edge A->B', async () => {
+      const storageMap = new Map<string, ProjectDocument>();
+      const mockStorage: IStorageProvider = {
+        info: { id: 'browser', name: 'Test', isConnected: true, isLocalOnly: true, statusMessage: 'OK' },
+        init: async () => {},
+        listProjects: async () => [],
+        readProject: async (id: string) => storageMap.get(id) || null,
+        writeProject: async (doc: ProjectDocument) => {
+          storageMap.set(doc.project.id, doc);
+        },
+        deleteProject: async (id: string) => {
+          storageMap.delete(id);
+        },
+        readStandaloneTasks: async () => [],
+        writeStandaloneTasks: async () => {},
+        readPreferences: async () => ({} as any),
+        writePreferences: async () => {},
+        listSnapshots: async () => [],
+        readSnapshot: async () => null,
+        writeSnapshot: async () => {},
+      };
+
+      // 1. Initial state: Project with A -> B
+      const nodeA = ProjectService.createNode('proj_splice', 'Task A', '2026-10-01');
+      const nodeB = ProjectService.createNode('proj_splice', 'Task B', '2026-10-10');
+      const edgeAB = (ProjectService.createEdge('proj_splice', nodeA.id, nodeB.id, [nodeA, nodeB], []) as any).edge;
+
+      const initialDoc: ProjectDocument = {
+        schemaVersion: 1,
+        exportedAt: '2026-10-01T10:00:00Z',
+        project: {
+          id: 'proj_splice',
+          name: 'Splice Test',
+          endGoalNodeId: nodeB.id,
+          createdAt: '2026-10-01T10:00:00Z',
+          updatedAt: '2026-10-01T10:00:00Z',
+        },
+        nodes: [nodeA, nodeB],
+        edges: [edgeAB],
+        notes: [],
+      };
+
+      await mockStorage.writeProject(initialDoc);
+
+      // 2. Create node C and place it in between A and B (A -> C -> B)
+      const nodeC = ProjectService.createNode('proj_splice', 'Task C', '2026-10-05');
+      const docWithC: ProjectDocument = {
+        ...initialDoc,
+        nodes: [...initialDoc.nodes, nodeC],
+      };
+
+      const spliceRes = ProjectService.spliceNodeIntoEdge(docWithC, nodeC.id, edgeAB.id, { x: 100, y: 100 });
+      expect(spliceRes.success).toBe(true);
+      if (!spliceRes.success) return;
+
+      SyncCoordinator.recordEdgeDeletion(spliceRes.deletedEdgeId);
+
+      // Save data
+      const savedDoc: ProjectDocument = {
+        ...spliceRes.document,
+        exportedAt: '2026-10-01T10:05:00Z',
+        project: {
+          ...spliceRes.document.project,
+          updatedAt: '2026-10-01T10:05:00Z',
+        },
+      };
+      await mockStorage.writeProject(savedDoc);
+
+      // 3. Simulate page refresh:
+      // Re-read authoritative project document directly from storage
+      const refreshedDoc = await mockStorage.readProject('proj_splice');
+      expect(refreshedDoc).not.toBeNull();
+      if (!refreshedDoc) return;
+
+      // Assert that edge A -> B is NOT in the reloaded project
+      expect(refreshedDoc.edges.some((e) => e.id === edgeAB.id)).toBe(false);
+      expect(refreshedDoc.edges.some((e) => e.fromNodeId === nodeA.id && e.toNodeId === nodeB.id)).toBe(false);
+
+      // Assert that A -> C and C -> B are the only edges
+      expect(refreshedDoc.edges).toHaveLength(2);
+      expect(refreshedDoc.edges.some((e) => e.fromNodeId === nodeA.id && e.toNodeId === nodeC.id)).toBe(true);
+      expect(refreshedDoc.edges.some((e) => e.fromNodeId === nodeC.id && e.toNodeId === nodeB.id)).toBe(true);
+
+      // 4. Also simulate cloud sync reconciling with an older remote copy (which had A -> B)
+      const olderCloudCopy = initialDoc;
+      const reconciled = await SyncCoordinator.mergeProjectDocuments(refreshedDoc, olderCloudCopy, mockStorage);
+
+      // Edge A -> B MUST still NOT be resurrected
+      expect(reconciled.edges.some((e) => e.id === edgeAB.id)).toBe(false);
+      expect(reconciled.edges.some((e) => e.fromNodeId === nodeA.id && e.toNodeId === nodeB.id)).toBe(false);
+      expect(reconciled.edges).toHaveLength(2);
+    });
   });
 
   describe('Attention Reviews Merge Resolution', () => {
