@@ -16,27 +16,46 @@
     touch-action: manipulation;
   }
 
-  /* Custom text selection colors for high contrast and readability */
+  /* Custom text selection & highlight colors for high contrast and readability */
   ::selection {
-    background-color: #a7f3d0; /* Soft emerald-200 mint */
-    color: #064e3b; /* Deep emerald-950 for crisp readability in light mode */
+    background-color: #a7f3d0 !important; /* Soft emerald-200 mint */
+    color: #064e3b !important; /* Deep emerald-950 for crisp readability in light mode */
   }
 
-  .dark ::selection {
-    background-color: #047857; /* Rich emerald-700 in dark mode */
-    color: #ffffff;
+  html.dark ::selection,
+  html.dark *::selection,
+  .dark ::selection,
+  .dark *::selection {
+    background-color: #065f46 !important; /* Rich emerald-800 in dark mode */
+    color: #f0fdf4 !important; /* Crisp high-contrast white-mint for maximum readability in dark mode */
   }
 
   input::selection,
   textarea::selection {
-    background-color: #a7f3d0;
-    color: #064e3b;
+    background-color: #a7f3d0 !important;
+    color: #064e3b !important;
   }
 
+  html.dark input::selection,
+  html.dark textarea::selection,
   .dark input::selection,
   .dark textarea::selection {
-    background-color: #047857;
-    color: #ffffff;
+    background-color: #065f46 !important;
+    color: #f0fdf4 !important;
+  }
+
+  /* HTML <mark> styling */
+  mark {
+    background-color: #fef08a; /* amber-200 */
+    color: #78350f; /* amber-900 */
+    border-radius: 0.25rem;
+    padding: 0.05rem 0.25rem;
+  }
+
+  html.dark mark,
+  .dark mark {
+    background-color: #854d0e; /* amber-800 */
+    color: #fef3c7; /* amber-100 */
   }
 }
 

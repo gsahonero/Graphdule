@@ -408,18 +408,18 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
         {/* Active work timer badge on circle */}
         {isCurrentActive && (
           <div
-            className="nodrag nowheel nopan absolute -bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-900/95 dark:bg-slate-900/95 border border-amber-500/80 text-[10px] font-mono font-semibold text-amber-300 shadow-lg whitespace-nowrap pointer-events-auto"
+            className="nodrag nowheel nopan absolute -bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-50 dark:bg-slate-900/95 border border-amber-400/80 dark:border-amber-500/80 text-[10px] font-mono font-semibold text-amber-900 dark:text-amber-300 shadow-lg whitespace-nowrap pointer-events-auto"
             title={`Active work session: ${formatTimer(activeWorkElapsedSeconds)}`}
           >
             <span className="relative flex h-2 w-2">
               <span
                 className={`absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                  isPaused ? 'bg-amber-400' : 'bg-emerald-400 animate-ping'
+                  isPaused ? 'bg-amber-500 dark:bg-amber-400' : 'bg-emerald-500 dark:bg-emerald-400 animate-ping'
                 }`}
               />
               <span
                 className={`relative inline-flex rounded-full h-2 w-2 ${
-                  isPaused ? 'bg-amber-400' : 'bg-emerald-500'
+                  isPaused ? 'bg-amber-500 dark:bg-amber-400' : 'bg-emerald-600 dark:bg-emerald-500'
                 }`}
               />
             </span>
