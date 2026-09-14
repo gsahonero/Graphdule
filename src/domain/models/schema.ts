@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { ACTIVITY_EVENT_TYPES, ActivityEventType } from './types';
+import { TaskEnvironmentSchema, HealthConfigSchema } from '../health/schema';
+export { TaskEnvironmentSchema, HealthConfigSchema };
 
 export const NodeStatusSchema = z.enum(['planned', 'in_progress', 'completed', 'abandoned']);
 export const ProjectStatusSchema = z.enum(['active', 'parked', 'archived', 'completed', 'abandoned']);
@@ -68,6 +70,7 @@ export const NodeSchema = z.object({
     y: z.number(),
   }).optional(),
   estimatedAU: z.number().nonnegative().optional(),
+  environment: TaskEnvironmentSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 }).passthrough();
@@ -133,6 +136,7 @@ export const StandaloneTaskSchema = z.object({
   recurrenceInstance: z.number().int().positive().optional(),
   parentRecurringTaskId: z.string().optional(),
   estimatedAU: z.number().nonnegative().optional(),
+  environment: TaskEnvironmentSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 }).passthrough();
@@ -165,6 +169,7 @@ export const UserPreferencesSchema = z.object({
   activeWorkSession: ActiveWorkSessionSchema.nullable().optional(),
   idleSyncIntervalMinutes: z.number().int().positive().optional().default(15),
   capacityConfig: z.lazy(() => DailyCapacityConfigSchema).optional(),
+  healthConfig: HealthConfigSchema.optional(),
 }).passthrough();
 
 export const IdeaSeedSchema = z.object({

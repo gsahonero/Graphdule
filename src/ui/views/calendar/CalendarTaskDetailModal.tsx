@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { addDays, getTodayString } from '../../../domain/utils/date';
 import { NodeStatus } from '../../../domain/models/types';
+import { TaskEnvironment } from '../../../domain/health/types';
 import { getProjectColorTheme, ProjectIconDisplay } from '../../utils/project-style';
 
 interface CalendarTaskDetailModalProps {
@@ -40,6 +41,7 @@ export const CalendarTaskDetailModal: React.FC<CalendarTaskDetailModalProps> = (
   const [dueDate, setDueDate] = useState('');
   const [estimatedAU, setEstimatedAU] = useState<number>(1);
   const [status, setStatus] = useState<NodeStatus>('planned');
+  const [environment, setEnvironment] = useState<TaskEnvironment>('computer');
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -48,8 +50,13 @@ export const CalendarTaskDetailModal: React.FC<CalendarTaskDetailModalProps> = (
       setDueDate(task.dueDate || getTodayString());
       setEstimatedAU(task.estimatedAU ?? 1);
       setStatus(task.status);
+
+      const target = task.isStandalone
+        ? standaloneTasks.find((st) => st.id === task.id)
+        : allActiveNodes.find((n) => n.id === task.id);
+      setEnvironment(target?.environment || 'computer');
     }
-  }, [task]);
+  }, [task, standaloneTasks, allActiveNodes]);
 
   if (!task) return null;
 
@@ -70,6 +77,7 @@ export const CalendarTaskDetailModal: React.FC<CalendarTaskDetailModalProps> = (
             dueDate: dueDate || getTodayString(),
             estimatedAU: Number(estimatedAU) || 0,
             status,
+            environment,
             updatedAt: new Date().toISOString(),
           });
         }
@@ -81,6 +89,7 @@ export const CalendarTaskDetailModal: React.FC<CalendarTaskDetailModalProps> = (
             text: text.trim(),
             estimatedAU: Number(estimatedAU) || 0,
             status,
+            environment,
             updatedAt: new Date().toISOString(),
           });
           if (dueDate && dueDate !== existingNode.dueDate) {
@@ -257,6 +266,39 @@ export const CalendarTaskDetailModal: React.FC<CalendarTaskDetailModalProps> = (
                   </button>
                 ))}
               </div>
+            </div>
+          </div>
+
+          {/* Task Environment */}
+          <div>
+            <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider block mb-1.5">
+              Task Environment
+            </label>
+            <div className="grid grid-cols-3 gap-2" data-testid="task-environment-selector">
+              {[
+                { id: 'computer', label: 'Computer', icon: '💻', desc: 'Screen breaks apply' },
+                { id: 'physical', label: 'Physical', icon: '🏃', desc: 'Away from screen' },
+                { id: 'mixed', label: 'Mixed', icon: '🔄', desc: 'Combined work' },
+              ].map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setEnvironment(item.id as TaskEnvironment)}
+                  className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${
+                    environment === item.id
+                      ? 'bg-emerald-500/15 border-emerald-500 text-emerald-700 dark:text-emerald-300 font-semibold shadow-xs'
+                      : 'bg-transparent text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-850'
+                  }`}
+                >
+                  <div className="flex items-center space-x-1 text-xs">
+                    <span>{item.icon}</span>
+                    <span>{item.label}</span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-normal mt-0.5">
+                    {item.desc}
+                  </div>
+                </button>
+              ))}
             </div>
           </div>
 

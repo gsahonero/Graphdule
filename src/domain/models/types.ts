@@ -1,3 +1,8 @@
+import type { HealthConfig } from '../health/types';
+
+export type TaskEnvironment = 'computer' | 'physical' | 'mixed';
+export type { HealthConfig } from '../health/types';
+
 export type NodeStatus = 'planned' | 'in_progress' | 'completed' | 'abandoned';
 export type ProjectStatus = 'active' | 'parked' | 'archived' | 'completed' | 'abandoned';
 
@@ -60,6 +65,7 @@ export interface Node {
   readonly status: NodeStatus;
   readonly position?: { readonly x: number; readonly y: number };
   readonly estimatedAU?: number;
+  readonly environment?: TaskEnvironment;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -135,6 +141,7 @@ export interface StandaloneTask {
   readonly recurrenceInstance?: number;
   readonly parentRecurringTaskId?: string;
   readonly estimatedAU?: number;
+  readonly environment?: TaskEnvironment;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -307,6 +314,7 @@ export interface UserPreferences {
   readonly activeWorkSession?: ActiveWorkSession | null;
   readonly idleSyncIntervalMinutes?: number;
   readonly capacityConfig?: DailyCapacityConfig;
+  readonly healthConfig?: HealthConfig;
 }
 
 export interface ProjectSummary {

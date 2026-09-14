@@ -15,6 +15,7 @@ import { ActiveWorkBar } from './ui/components/ActiveWorkBar';
 import { TaskWorkSessionsModal } from './ui/components/TaskWorkSessionsModal';
 import { CapacityConfigModal } from './ui/components/CapacityConfigModal';
 import { WeeklyCapacityModal } from './ui/components/WeeklyCapacityModal';
+import { HealthConfigModal } from './ui/components/HealthConfigModal';
 import { BottomNav } from './ui/components/BottomNav';
 
 const AppContent: React.FC = () => {
@@ -45,6 +46,7 @@ const AppContent: React.FC = () => {
       <TaskWorkSessionsModal />
       <CapacityConfigModal />
       <WeeklyCapacityModal />
+      <HealthConfigModal />
     </div>
   );
 };

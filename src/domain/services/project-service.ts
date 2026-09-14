@@ -9,6 +9,7 @@ import {
   IdeaSeed,
   Note,
   ProjectNote,
+  TaskEnvironment,
 } from '../models/types';
 import { getTodayString } from '../utils/date';
 import { GraphService } from './graph-service';
@@ -88,7 +89,8 @@ export class ProjectService {
     dueDate: string = '',
     parentNodeId: string | null = null,
     position?: { x: number; y: number },
-    estimatedAU?: number
+    estimatedAU?: number,
+    environment?: TaskEnvironment
   ): Node {
     const now = new Date().toISOString();
     return {
@@ -100,6 +102,7 @@ export class ProjectService {
       status: 'planned',
       position,
       estimatedAU,
+      environment,
       createdAt: now,
       updatedAt: now,
     };

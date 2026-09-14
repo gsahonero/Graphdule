@@ -319,6 +319,16 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
           </span>
         )}
 
+        {/* Environment badge */}
+        {node.environment && (
+          <span
+            className="absolute -top-1 -left-1 bg-slate-800 text-white text-[10px] px-1 py-0.5 rounded-full shadow-sm flex items-center border border-white dark:border-slate-900 z-10"
+            title={`Environment: ${node.environment}`}
+          >
+            <span>{node.environment === 'computer' ? '💻' : node.environment === 'physical' ? '🏃' : '🔄'}</span>
+          </span>
+        )}
+
         {/* Status / Goal Icon (Direct Click to Cycle Status) */}
         <button
           type="button"
@@ -878,28 +888,38 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
         </div>
 
         {/* EGN or Subtask count tag */}
-        {isEGN ? (
-          <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold tracking-wide uppercase border border-emerald-500/30 shrink-0">
-            <Target className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-            <span>Goal</span>
-          </span>
-        ) : subtaskCount > 0 ? (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              if (onDrillDown) onDrillDown();
-            }}
-            onDoubleClick={(e) => {
-              e.stopPropagation();
-              if (onDrillDown) onDrillDown();
-            }}
-            className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-blue-500/10 dark:bg-blue-500/20 hover:bg-blue-500/20 dark:hover:bg-blue-500/30 text-blue-700 dark:text-blue-300 text-[10px] font-medium border border-blue-500/30 shrink-0 transition-colors cursor-pointer"
-            title="Click or double-click to view internal subtasks"
-          >
-            <Layers className="w-3 h-3" />
-            <span>{subtaskCount}</span>
-          </button>
-        ) : null}
+        <div className="flex items-center space-x-1 shrink-0">
+          {node.environment && (
+            <span
+              className="flex items-center space-x-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 shrink-0"
+              title={`Environment: ${node.environment}`}
+            >
+              <span>{node.environment === 'computer' ? '💻' : node.environment === 'physical' ? '🏃' : '🔄'}</span>
+            </span>
+          )}
+          {isEGN ? (
+            <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold tracking-wide uppercase border border-emerald-500/30 shrink-0">
+              <Target className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+              <span>Goal</span>
+            </span>
+          ) : subtaskCount > 0 ? (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onDrillDown) onDrillDown();
+              }}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                if (onDrillDown) onDrillDown();
+              }}
+              className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-blue-500/10 dark:bg-blue-500/20 hover:bg-blue-500/20 dark:hover:bg-blue-500/30 text-blue-700 dark:text-blue-300 text-[10px] font-medium border border-blue-500/30 shrink-0 transition-colors cursor-pointer"
+              title="Click or double-click to view internal subtasks"
+            >
+              <Layers className="w-3 h-3" />
+              <span>{subtaskCount}</span>
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {/* Node Text - Inline Canvas Editable */}

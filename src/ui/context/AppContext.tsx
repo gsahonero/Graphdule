@@ -20,8 +20,17 @@ import {
   DailyCapacityConfig,
   DailyCapacitySnapshot,
   SchedulingImpactPreview,
+  TaskEnvironment,
+  HealthConfig,
 } from '../../domain/models/types';
 import { normalizeEventType } from '../../domain/models/schema';
+import {
+  HealthFocusContext,
+  InterventionRuntimeState,
+  ActiveHealthNotification,
+} from '../../domain/health/types';
+import { HealthService, DEFAULT_HEALTH_CONFIG } from '../../domain/health/health-service';
+import { playSound } from '../../domain/health/sound';
 
 import { ProjectService } from '../../domain/services/project-service';
 import { TemporalService } from '../../domain/services/temporal-service';
@@ -94,7 +103,7 @@ interface AppContextType {
   archiveProject: (projectId: string, reason?: ProjectStatus) => Promise<void>;
   unarchiveProject: (projectId: string) => Promise<void>;
   deleteProject: (projectId: string) => Promise<void>;
-  addNode: (text: string, dueDate?: string, parentNodeId?: string | null, position?: { x: number; y: number }, estimatedAU?: number) => Promise<Node | null>;
+  addNode: (text: string, dueDate?: string, parentNodeId?: string | null, position?: { x: number; y: number }, estimatedAU?: number, environment?: TaskEnvironment) => Promise<Node | null>;
   updateNode: (node: Node) => Promise<void>;
   deleteNode: (nodeId: string) => Promise<void>;
   updateNodePositions: (positions: { id: string; position: { x: number; y: number } }[]) => Promise<void>;
@@ -107,7 +116,7 @@ interface AppContextType {
   nestNode: (sourceNodeId: string, targetParentId: string) => Promise<{ success: boolean; error?: string }>;
   decomposeNode: (parentNodeId: string, subtasks: { text: string; dueDate?: string; estimatedAU?: number }[]) => Promise<void>;
   addNote: (nodeId: string, text: string) => Promise<void>;
-  deleteNote: (noteId: string) => Promise<void>;
+  deleteNote: (nodeId: string) => Promise<void>;
   syncAtomicInheritance: () => Promise<void>;
 
   // History & Snapshots
@@ -122,7 +131,7 @@ interface AppContextType {
   redo: () => Promise<void>;
 
   // Standalone Tasks
-  addStandaloneTask: (text: string, dueDate?: string, recurrence?: RecurrenceRule, estimatedAU?: number) => Promise<void>;
+  addStandaloneTask: (text: string, dueDate?: string, recurrence?: RecurrenceRule, estimatedAU?: number, environment?: TaskEnvironment) => Promise<void>;
   updateStandaloneTask: (task: StandaloneTask) => Promise<void>;
   updateStandaloneTaskStatus: (taskId: string, status: NodeStatus) => Promise<void>;
   deleteStandaloneTask: (taskId: string) => Promise<void>;
@@ -219,6 +228,16 @@ interface AppContextType {
   recordCapacitySnapshot: (snapshot: DailyCapacitySnapshot) => Promise<void>;
   getSchedulingImpact: (dateStr: string, taskAU: number) => SchedulingImpactPreview;
   fillWeekFromCalendar: (weekStartDate?: string) => Promise<number>;
+
+  // Modular Health & Focus Layer
+  healthConfig: HealthConfig;
+  continuousFocusElapsedSeconds: number;
+  activeHealthNotification: ActiveHealthNotification | null;
+  isHealthConfigModalOpen: boolean;
+  setIsHealthConfigModalOpen: (open: boolean) => void;
+  updateHealthConfig: (partial: Partial<HealthConfig>) => Promise<void>;
+  acknowledgeHealthIntervention: (interventionId: string) => void;
+  dismissHealthIntervention: (interventionId: string) => void;
 }
 
 export const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -276,6 +295,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isCapacityConfigModalOpen, setIsCapacityConfigModalOpen] = useState(false);
   const [isWeeklyCapacityModalOpen, setIsWeeklyCapacityModalOpen] = useState(false);
 
+  // Modular Health & Focus states
+  const [healthConfig, setHealthConfig] = useState<HealthConfig>(() => {
+    return preferences.healthConfig || DEFAULT_HEALTH_CONFIG;
+  });
+  const [continuousFocusElapsedSeconds, setContinuousFocusElapsedSeconds] = useState<number>(0);
+  const [activeHealthNotification, setActiveHealthNotification] = useState<ActiveHealthNotification | null>(null);
+  const [isHealthConfigModalOpen, setIsHealthConfigModalOpen] = useState(false);
+
+  const continuousFocusElapsedSecondsRef = useRef<number>(0);
+  const healthRuntimeStatesRef = useRef<Record<string, InterventionRuntimeState>>({});
+  const lastActiveTaskIdRef = useRef<string | null>(null);
+  const healthConfigRef = useRef<HealthConfig>(healthConfig);
+  useEffect(() => {
+    healthConfigRef.current = healthConfig;
+  }, [healthConfig]);
+
+  useEffect(() => {
+    if (preferences.healthConfig) {
+      setHealthConfig(preferences.healthConfig);
+    }
+  }, [preferences.healthConfig]);
+
   const activeWorkSessionRef = useRef<ActiveWorkSession | null>(activeWorkSession);
   useEffect(() => {
     activeWorkSessionRef.current = activeWorkSession;
@@ -283,11 +324,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const isInitialMountRef = useRef<boolean>(true);
 
-  // Live second-by-second ticker for running work clock
+  // Live second-by-second ticker for running work clock and health interventions
   useEffect(() => {
     if (!activeWorkSession) {
       setActiveWorkElapsedSeconds(0);
+      continuousFocusElapsedSecondsRef.current = 0;
+      setContinuousFocusElapsedSeconds(0);
+      setActiveHealthNotification(null);
+      healthRuntimeStatesRef.current = {};
+      lastActiveTaskIdRef.current = null;
       return;
+    }
+
+    // When focus task changes, reset continuous timer and intervention runtime states
+    if (lastActiveTaskIdRef.current !== activeWorkSession.taskId) {
+      lastActiveTaskIdRef.current = activeWorkSession.taskId;
+      continuousFocusElapsedSecondsRef.current = 0;
+      setContinuousFocusElapsedSeconds(0);
+      setActiveHealthNotification(null);
+      healthRuntimeStatesRef.current = {};
     }
 
     const computeElapsed = () => {
@@ -300,13 +355,89 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return Math.floor(baseAccum + running);
     };
 
-    setActiveWorkElapsedSeconds(computeElapsed());
-    const interval = setInterval(() => {
-      setActiveWorkElapsedSeconds(computeElapsed());
-    }, 1000);
+    const tick = () => {
+      const elapsed = computeElapsed();
+      setActiveWorkElapsedSeconds(elapsed);
 
+      // Advance continuous focus timer only when work session is actively running (not paused)
+      if (!activeWorkSession.isPaused) {
+        continuousFocusElapsedSecondsRef.current += 1;
+        setContinuousFocusElapsedSeconds(continuousFocusElapsedSecondsRef.current);
+
+        const currentCfg = healthConfigRef.current;
+        if (currentCfg && currentCfg.enabled) {
+          const task =
+            allActiveNodes.find((n) => n.id === activeWorkSession.taskId) ||
+            standaloneTasks.find((t) => t.id === activeWorkSession.taskId);
+
+          const taskEnv: TaskEnvironment =
+            task?.environment || currentCfg.defaultEnvironment || 'computer';
+
+          const currentContinuous = continuousFocusElapsedSecondsRef.current;
+          const currentAU = AttentionService.durationSecondsToAU(
+            elapsed,
+            preferences.attentionUnitMinutes || 15
+          );
+
+          const focusContext: HealthFocusContext = {
+            taskId: activeWorkSession.taskId,
+            taskText: activeWorkSession.taskText,
+            projectId: activeWorkSession.projectId,
+            projectName: activeWorkSession.projectName,
+            taskEnvironment: taskEnv,
+            continuousDurationSeconds: currentContinuous,
+            sessionElapsedSeconds: elapsed,
+            isPaused: false,
+            currentAU,
+            estimatedAU: task?.estimatedAU,
+          };
+
+          const decisions = HealthService.evaluateAll(
+            currentCfg,
+            focusContext,
+            healthRuntimeStatesRef.current
+          );
+
+          if (decisions.length > 0) {
+            const decision = decisions[0];
+            const intervention = currentCfg.interventions.find(
+              (i) => i.id === decision.interventionId
+            );
+
+            if (intervention) {
+              healthRuntimeStatesRef.current[intervention.id] = {
+                interventionId: intervention.id,
+                lastTriggeredAtSeconds: currentContinuous,
+                status: 'triggered',
+              };
+
+              setActiveHealthNotification({
+                intervention,
+                decision,
+                triggeredAtEpochMs: Date.now(),
+                remainingSeconds: decision.durationSeconds || intervention.duration,
+                taskId: activeWorkSession.taskId,
+                taskText: activeWorkSession.taskText,
+                projectName: activeWorkSession.projectName,
+              });
+
+              if (currentCfg.soundEnabled && intervention.sound?.enabled !== false) {
+                playSound(
+                  intervention.sound,
+                  intervention.sound?.volume ?? currentCfg.globalVolume ?? 0.3,
+                  currentCfg.soundEnabled
+                );
+              }
+            }
+          }
+        }
+      }
+    };
+
+    tick();
+    const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
-  }, [activeWorkSession]);
+  }, [activeWorkSession, allActiveNodes, standaloneTasks, preferences.attentionUnitMinutes]);
 
   // Cloud Sync state
   const [cloudSyncState, setCloudSyncState] = useState<SyncState>(() => SyncCoordinator.getState());
@@ -1116,6 +1247,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     activeWorkSessionRef.current = null;
     setActiveWorkSession(null);
     setActiveWorkElapsedSeconds(0);
+    continuousFocusElapsedSecondsRef.current = 0;
+    setContinuousFocusElapsedSeconds(0);
+    setActiveHealthNotification(null);
+    healthRuntimeStatesRef.current = {};
+    lastActiveTaskIdRef.current = null;
     try {
       localStorage.removeItem('graphdule_active_work_session');
     } catch {
@@ -1714,7 +1850,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       dueDate: string = '',
       parentNodeId?: string | null,
       position?: { x: number; y: number },
-      estimatedAU?: number
+      estimatedAU?: number,
+      environment?: TaskEnvironment
     ): Promise<Node | null> => {
       if (!activeProjectDoc) return null;
       const effectiveDueDate = dueDate ?? '';
@@ -1724,7 +1861,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         effectiveDueDate,
         parentNodeId,
         position,
-        estimatedAU
+        estimatedAU,
+        environment
       );
       const updatedDoc: ProjectDocument = {
         ...activeProjectDoc,
@@ -2550,9 +2688,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const addStandaloneTask = useCallback(
-    async (text: string, dueDate?: string, recurrence?: RecurrenceRule, estimatedAU?: number) => {
+    async (text: string, dueDate?: string, recurrence?: RecurrenceRule, estimatedAU?: number, environment?: TaskEnvironment) => {
       const targetDate = dueDate ?? '';
-      const newTask = MyDayService.createStandaloneTask(text, targetDate, recurrence, estimatedAU);
+      const newTask = MyDayService.createStandaloneTask(text, targetDate, recurrence, undefined, undefined, estimatedAU, environment);
       const updated = [...standaloneTasks, newTask];
       await storage.writeStandaloneTasks(updated);
       setStandaloneTasks(updated);
@@ -2752,6 +2890,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     },
     [preferences.capacityConfig, updatePreferences]
   );
+
+  const updateHealthConfig = useCallback(
+    async (partial: Partial<HealthConfig>) => {
+      const merged: HealthConfig = {
+        ...(healthConfig || DEFAULT_HEALTH_CONFIG),
+        ...partial,
+      };
+      setHealthConfig(merged);
+      await updatePreferences({ healthConfig: merged });
+    },
+    [healthConfig, updatePreferences]
+  );
+
+  const acknowledgeHealthIntervention = useCallback((interventionId: string) => {
+    const current = healthRuntimeStatesRef.current[interventionId];
+    healthRuntimeStatesRef.current[interventionId] = {
+      interventionId,
+      lastTriggeredAtSeconds: current?.lastTriggeredAtSeconds ?? continuousFocusElapsedSecondsRef.current,
+      acknowledgedAtSeconds: continuousFocusElapsedSecondsRef.current,
+      status: 'acknowledged',
+    };
+    // Taking a break/rest resets continuous screen focus duration
+    continuousFocusElapsedSecondsRef.current = 0;
+    setContinuousFocusElapsedSeconds(0);
+    setActiveHealthNotification(null);
+  }, []);
+
+  const dismissHealthIntervention = useCallback((interventionId: string) => {
+    const current = healthRuntimeStatesRef.current[interventionId];
+    healthRuntimeStatesRef.current[interventionId] = {
+      interventionId,
+      lastTriggeredAtSeconds: current?.lastTriggeredAtSeconds ?? continuousFocusElapsedSecondsRef.current,
+      dismissedAtSeconds: continuousFocusElapsedSecondsRef.current,
+      status: 'dismissed',
+    };
+    setActiveHealthNotification(null);
+  }, []);
 
   const recordCapacitySnapshot = useCallback(
     async (snapshot: DailyCapacitySnapshot) => {
@@ -3305,6 +3480,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         recordCapacitySnapshot,
         getSchedulingImpact,
         fillWeekFromCalendar,
+        healthConfig,
+        continuousFocusElapsedSeconds,
+        activeHealthNotification,
+        isHealthConfigModalOpen,
+        setIsHealthConfigModalOpen,
+        updateHealthConfig,
+        acknowledgeHealthIntervention,
+        dismissHealthIntervention,
       }}
     >
       {children}

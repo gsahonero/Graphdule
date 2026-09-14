@@ -11,11 +11,13 @@ import {
   PictureInPicture2,
   Minimize2,
   RotateCcw,
+  Heart,
 } from 'lucide-react';
 import {
   requestPictureInPictureWindow,
   PictureInPicturePortal,
 } from './PictureInPicturePortal';
+import { TaskEnvironment } from '../../domain/health/types';
 
 const STORAGE_KEY_POS = 'graphdule_active_bar_pos';
 
@@ -33,6 +35,10 @@ export const ActiveWorkBar: React.FC = () => {
     allActiveNodes,
     standaloneTasks,
     openWorkSessionsModal,
+    healthConfig,
+    activeHealthNotification,
+    acknowledgeHealthIntervention,
+    dismissHealthIntervention,
   } = useApp();
 
   // Position & Dragging State
@@ -231,6 +237,9 @@ export const ActiveWorkBar: React.FC = () => {
     );
   }, [activeWorkSession, allActiveNodes, standaloneTasks]);
 
+  const taskEnvironment: TaskEnvironment =
+    activeTask?.environment || healthConfig?.defaultEnvironment || 'computer';
+
   if (!activeWorkSession) {
     return null;
   }
@@ -295,6 +304,13 @@ export const ActiveWorkBar: React.FC = () => {
               {activeWorkSession.projectName || 'Standalone'}
             </span>
             <span className="text-slate-600">•</span>
+            <span
+              data-testid="pip-environment-badge"
+              className="px-1 py-0.2 rounded font-mono text-[9px] bg-slate-800 text-slate-300 border border-slate-700 capitalize"
+            >
+              {taskEnvironment === 'physical' ? '🏃 physical' : taskEnvironment === 'mixed' ? '🔄 mixed' : '💻 computer'}
+            </span>
+            <span className="text-slate-600">•</span>
             <span className="font-mono text-slate-300">
               {Math.round(currentAU * 100) / 100} AU
             </span>
@@ -322,6 +338,35 @@ export const ActiveWorkBar: React.FC = () => {
           <span className="text-[11px]">Dock</span>
         </button>
       </div>
+
+      {/* Subtle Health Intervention Banner in PiP */}
+      {activeHealthNotification && activeHealthNotification.taskId === activeWorkSession.taskId && (
+        <div
+          data-testid="pip-health-notification-banner"
+          className="bg-rose-950/90 border border-rose-500/40 rounded-lg px-2.5 py-1.5 my-1 flex items-center justify-between gap-2 text-xs text-rose-100 animate-in fade-in"
+        >
+          <div className="flex items-center gap-1.5 min-w-0 text-[11px]">
+            <Heart className="w-3.5 h-3.5 text-rose-400 fill-rose-400/40 shrink-0 animate-pulse" />
+            <span className="truncate">
+              {activeHealthNotification.decision.message || activeHealthNotification.intervention.message}
+            </span>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={() => acknowledgeHealthIntervention(activeHealthNotification.intervention.id)}
+              className="px-2 py-0.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-[10px] font-semibold transition-colors cursor-pointer"
+            >
+              Rest ({activeHealthNotification.remainingSeconds}s)
+            </button>
+            <button
+              onClick={() => dismissHealthIntervention(activeHealthNotification.intervention.id)}
+              className="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[10px] transition-colors cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Middle row: Large Timer & Progress */}
       <div className="my-2">
@@ -476,14 +521,54 @@ export const ActiveWorkBar: React.FC = () => {
           !position
             ? 'bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))] md:bottom-6 left-3 right-3 md:left-auto md:right-6'
             : ''
-        } z-50 flex items-center justify-between gap-2 sm:gap-3 px-2.5 sm:px-3.5 py-2 sm:py-2.5 bg-slate-900/95 dark:bg-slate-900/95 border ${
-          isDragging
-            ? 'border-amber-400 shadow-amber-500/20 shadow-2xl scale-[1.01]'
-            : 'border-amber-500/40 dark:border-amber-500/40 shadow-2xl shadow-amber-950/20'
-        } backdrop-blur-md rounded-2xl text-slate-100 sm:max-w-md md:max-w-lg lg:max-w-xl transition-shadow duration-150 overflow-hidden ${
+        } z-50 flex flex-col p-0 bg-slate-900/95 dark:bg-slate-900/95 border ${
+          activeHealthNotification && activeHealthNotification.taskId === activeWorkSession.taskId
+            ? 'border-rose-500/60 shadow-rose-950/40'
+            : isDragging
+            ? 'border-amber-400 shadow-amber-500/20 scale-[1.01]'
+            : 'border-amber-500/40 dark:border-amber-500/40 shadow-amber-950/20'
+        } shadow-2xl backdrop-blur-md rounded-2xl text-slate-100 sm:max-w-md md:max-w-lg lg:max-w-xl transition-shadow duration-150 overflow-hidden ${
           isDragging ? 'cursor-grabbing' : ''
         }`}
       >
+        {/* Subtle Health Intervention Notification */}
+        {activeHealthNotification && activeHealthNotification.taskId === activeWorkSession.taskId && (
+          <div
+            data-testid="active-health-notification-banner"
+            className="w-full bg-rose-950/95 border-b border-rose-500/40 px-3 py-1.5 flex items-center justify-between gap-2 text-xs text-rose-100 shadow-md backdrop-blur-md animate-in fade-in slide-in-from-top-1 duration-150"
+          >
+            <div className="flex items-center gap-1.5 min-w-0">
+              <Heart className="w-3.5 h-3.5 text-rose-400 fill-rose-400/40 shrink-0 animate-pulse" />
+              <span className="font-semibold text-rose-300 shrink-0 text-[11px]">
+                {activeHealthNotification.intervention.name}:
+              </span>
+              <span className="truncate text-[11px] text-rose-100">
+                {activeHealthNotification.decision.message || activeHealthNotification.intervention.message}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                onClick={() => acknowledgeHealthIntervention(activeHealthNotification.intervention.id)}
+                data-testid="health-acknowledge-btn"
+                className="px-2 py-0.5 bg-rose-600 hover:bg-rose-500 active:scale-95 text-white rounded font-medium text-[10px] sm:text-[11px] transition-all cursor-pointer shadow-xs"
+                title="Acknowledge rest break and reset continuous screen focus timer"
+              >
+                Rest ({activeHealthNotification.remainingSeconds}s)
+              </button>
+              <button
+                onClick={() => dismissHealthIntervention(activeHealthNotification.intervention.id)}
+                data-testid="health-dismiss-btn"
+                className="px-1.5 py-0.5 bg-slate-800/80 hover:bg-slate-700 active:scale-95 text-slate-300 hover:text-white rounded text-[10px] sm:text-[11px] transition-all cursor-pointer"
+                title="Dismiss reminder without losing focus"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="relative w-full flex items-center justify-between gap-2 sm:gap-3 px-2.5 sm:px-3.5 py-2 sm:py-2.5">
         {/* Visual Attention Progress Track (at bottom edge of the bar) */}
         {clampedProgressWidth !== null && (
           <div
@@ -563,6 +648,24 @@ export const ActiveWorkBar: React.FC = () => {
               ) : (
                 <span className="text-slate-400 shrink-0">Standalone</span>
               )}
+
+              <span className="text-slate-600 shrink-0">•</span>
+
+              {/* Environment Badge */}
+              <span
+                data-testid="workbar-environment-badge"
+                className={`px-1.5 py-0.2 rounded text-[9px] sm:text-[10px] font-medium border shrink-0 flex items-center gap-1 ${
+                  taskEnvironment === 'physical'
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                    : taskEnvironment === 'mixed'
+                    ? 'bg-blue-500/10 border-blue-500/30 text-blue-300'
+                    : 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300'
+                }`}
+                title={`Task Environment: ${taskEnvironment}`}
+              >
+                <span>{taskEnvironment === 'physical' ? '🏃' : taskEnvironment === 'mixed' ? '🔄' : '💻'}</span>
+                <span className="capitalize hidden sm:inline">{taskEnvironment}</span>
+              </span>
 
               <span className="text-slate-600 shrink-0">•</span>
 
@@ -672,7 +775,8 @@ export const ActiveWorkBar: React.FC = () => {
             </button>
           )}
         </div>
-      </aside>
+      </div>
+    </aside>
     </>
   );
 };

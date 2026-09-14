@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "enabled": true,
+  "soundEnabled": true,
+  "globalVolume": 0.3,
+  "defaultSoundType": "subtle_chime",
+  "defaultEnvironment": "computer",
+  "interventions": [
+    {
+      "id": "screen_break_20_20_20",
+      "name": "20-20-20 Screen Break",
+      "description": "Every 20 minutes of continuous screen focus, look away at something 20 feet away for at least 20 seconds.",
+      "enabled": true,
+      "environment": ["computer", "mixed"],
+      "trigger": {
+        "type": "continuous_duration",
+        "thresholdSeconds": 1200
+      },
+      "interval": 1200,
+      "duration": 20,
+      "message": "Look away at something 20 feet (6m) away for at least 20 seconds to relax your eyes.",
+      "notification": {
+        "enabled": true,
+        "style": "subtle",
+        "title": "Eye Rest • 20-20-20"
+      },
+      "sound": {
+        "enabled": true,
+        "type": "subtle_chime",
+        "volume": 0.3
+      }
+    }
+  ]
+}

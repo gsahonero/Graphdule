@@ -16,6 +16,7 @@ import {
   Clock,
   Cloud,
   Scale,
+  Heart,
 } from 'lucide-react';
 import { SyncStatusIndicator } from './SyncStatusIndicator';
 
@@ -35,6 +36,8 @@ export const Header: React.FC = () => {
     cloudSyncState,
     gcalendarSyncConfig,
     setIsCapacityConfigModalOpen,
+    setIsHealthConfigModalOpen,
+    healthConfig,
   } = useApp();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -250,6 +253,17 @@ export const Header: React.FC = () => {
             <span>Capacity</span>
           </button>
 
+          {/* Health & Focus Settings */}
+          <button
+            onClick={() => setIsHealthConfigModalOpen(true)}
+            title="Health & Focus Settings (Screen breaks, posture, ergonomics)"
+            data-testid="header-health-button"
+            className="flex items-center space-x-1.5 px-2 py-1 rounded-md text-[11px] font-mono font-medium text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 bg-slate-100 dark:bg-slate-950/80 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 transition-colors cursor-pointer"
+          >
+            <Heart className="w-3.5 h-3.5 text-rose-500 shrink-0 fill-rose-500/20" />
+            <span>Health</span>
+          </button>
+
           {/* Onboarding Guide */}
           <button
             onClick={() => setIsOnboardingOpen(true)}
@@ -321,6 +335,24 @@ export const Header: React.FC = () => {
                   </span>
                   <span className="text-[10px] font-medium text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-800">
                     Reality Check
+                  </span>
+                </button>
+
+                {/* Health & Focus Settings */}
+                <button
+                  onClick={() => {
+                    setIsHealthConfigModalOpen(true);
+                    setIsMobileMenuOpen(false);
+                  }}
+                  data-testid="mobile-menu-health-button"
+                  className="w-full px-3.5 py-2.5 text-left text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between cursor-pointer border-b border-slate-100 dark:border-slate-800/80 mb-0.5"
+                >
+                  <span className="flex items-center space-x-2">
+                    <Heart className="w-4 h-4 text-rose-500 shrink-0 fill-rose-500/20" />
+                    <span className="font-medium text-slate-800 dark:text-slate-200">Health & Focus</span>
+                  </span>
+                  <span className="text-[10px] font-medium text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/60 px-1.5 py-0.5 rounded border border-rose-200 dark:border-rose-800">
+                    {healthConfig?.enabled ? 'Active' : 'Off'}
                   </span>
                 </button>
 

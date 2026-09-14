@@ -1,6 +1,8 @@
 import appConfigJson from './app.config.json';
 import statusesJson from './statuses.json';
 import onboardingJson from './onboarding.json';
+import healthConfigJson from './health.config.json';
+import type { HealthConfig } from '../domain/health/types';
 
 export interface AppConfig {
   name: string;
@@ -37,3 +39,5 @@ export interface OnboardingConfig {
 export const appConfig: AppConfig = appConfigJson;
 export const statusConfigs: StatusConfig[] = statusesJson.statuses as StatusConfig[];
 export const onboardingConfig: OnboardingConfig = onboardingJson;
+export const defaultHealthConfig: HealthConfig = healthConfigJson as unknown as HealthConfig;
+

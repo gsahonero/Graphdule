@@ -28,7 +28,7 @@ import {
   Check,
   X,
 } from 'lucide-react';
-import { Node, NodeStatus, ProjectSummary, RecurrenceRule, StandaloneTask } from '../../../domain/models/types';
+import { Node, NodeStatus, ProjectSummary, RecurrenceRule, StandaloneTask, TaskEnvironment } from '../../../domain/models/types';
 import { getProjectColorTheme, ProjectIconDisplay } from '../../utils/project-style';
 import { WorkButton } from '../../components/WorkButton';
 import { AttentionUnitInput } from '../../components/AttentionUnitInput';
@@ -93,6 +93,7 @@ export const MyDayView: React.FC = () => {
   const [newStandaloneDueDate, setNewStandaloneDueDate] = useState('');
   const [newStandaloneRecurrence, setNewStandaloneRecurrence] = useState<RecurrenceRule | undefined>(undefined);
   const [newStandaloneEstimatedAU, setNewStandaloneEstimatedAU] = useState<string>('');
+  const [newStandaloneEnvironment, setNewStandaloneEnvironment] = useState<TaskEnvironment>('computer');
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [showCompleted, setShowCompleted] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -728,11 +729,27 @@ export const MyDayView: React.FC = () => {
     e.preventDefault();
     if (!newStandaloneText.trim() || !newStandaloneDueDate) return;
     const estAU = preferences.attentionSystemEnabled && newStandaloneEstimatedAU ? parseFloat(newStandaloneEstimatedAU) : undefined;
-    await addStandaloneTask(newStandaloneText.trim(), newStandaloneDueDate, newStandaloneRecurrence, isNaN(estAU as number) ? undefined : estAU);
+    if (newStandaloneEnvironment !== 'computer') {
+      await addStandaloneTask(
+        newStandaloneText.trim(),
+        newStandaloneDueDate,
+        newStandaloneRecurrence,
+        isNaN(estAU as number) ? undefined : estAU,
+        newStandaloneEnvironment
+      );
+    } else {
+      await addStandaloneTask(
+        newStandaloneText.trim(),
+        newStandaloneDueDate,
+        newStandaloneRecurrence,
+        isNaN(estAU as number) ? undefined : estAU
+      );
+    }
     setNewStandaloneText('');
     setNewStandaloneDueDate('');
     setNewStandaloneEstimatedAU('');
     setNewStandaloneRecurrence(undefined);
+    setNewStandaloneEnvironment('computer');
   };
 
   const handleToggleNodeStatus = async (nodeId: string, currentStatus: NodeStatus) => {
@@ -1066,6 +1083,16 @@ export const MyDayView: React.FC = () => {
             </span>
           )}
 
+          {task.environment && (
+            <span
+              className="inline-flex items-center space-x-1 text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
+              title={`Environment: ${task.environment}`}
+            >
+              <span>{task.environment === 'computer' ? '💻' : task.environment === 'physical' ? '🏃' : '🔄'}</span>
+              <span className="capitalize hidden sm:inline">{task.environment}</span>
+            </span>
+          )}
+
           {/* Overdue Badge */}
           <span
             className="text-xs font-semibold px-2 py-0.5 rounded-md bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/60 flex items-center space-x-1"
@@ -1328,6 +1355,15 @@ export const MyDayView: React.FC = () => {
 
         <div className="flex items-center space-x-2 shrink-0 ml-8 sm:ml-auto flex-wrap sm:flex-nowrap gap-y-1">
           {renderAUControls(task, false)}
+          {task.environment && (
+            <span
+              className="inline-flex items-center space-x-1 text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
+              title={`Environment: ${task.environment}`}
+            >
+              <span>{task.environment === 'computer' ? '💻' : task.environment === 'physical' ? '🏃' : '🔄'}</span>
+              <span className="capitalize hidden sm:inline">{task.environment}</span>
+            </span>
+          )}
           {/* Recurrence Badge / Picker */}
           <RecurrencePicker
             value={task.recurrence}
@@ -2497,6 +2533,26 @@ export const MyDayView: React.FC = () => {
                   onOpenChange={setIsNewAuOpen}
                 />
               )}
+
+              {/* Environment Selector */}
+              <button
+                type="button"
+                onClick={() => {
+                  const nextEnv: TaskEnvironment =
+                    newStandaloneEnvironment === 'computer'
+                      ? 'physical'
+                      : newStandaloneEnvironment === 'physical'
+                      ? 'mixed'
+                      : 'computer';
+                  setNewStandaloneEnvironment(nextEnv);
+                }}
+                className="flex items-center space-x-1 px-2 py-1 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-850 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shadow-2xs cursor-pointer"
+                title={`Task Environment: ${newStandaloneEnvironment} (Click to switch)`}
+                data-testid="standalone-environment-picker"
+              >
+                <span>{newStandaloneEnvironment === 'computer' ? '💻' : newStandaloneEnvironment === 'physical' ? '🏃' : '🔄'}</span>
+                <span className="capitalize">{newStandaloneEnvironment}</span>
+              </button>
             </div>
 
             <button
