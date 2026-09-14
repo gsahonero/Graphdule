@@ -1,4 +1,4 @@
-import { Node as RFNode, Edge as RFEdge, MarkerType, Position } from '@xyflow/react';
+import { Node as RFNode, Edge as RFEdge, MarkerType } from '@xyflow/react';
 import { Node, Edge } from '../../../domain/models/types';
 import { GraphService } from '../../../domain/services/graph-service';
 
@@ -762,8 +762,6 @@ export function getLayoutedElements(
     id: edge.id,
     source: edge.fromNodeId,
     target: edge.toNodeId,
-    sourceHandle: chosenDir === 'TB' ? Position.Bottom : Position.Right,
-    targetHandle: chosenDir === 'TB' ? Position.Top : Position.Left,
     type: 'smoothstep',
     animated: false,
     selectable: true,

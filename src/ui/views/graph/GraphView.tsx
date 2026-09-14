@@ -199,10 +199,10 @@ const GraphCanvas: React.FC = () => {
     return ProjectService.resolveDocumentPresentationNodes(nodes);
   }, [nodes]);
 
-  // Scoped nodes for current hierarchy level (Root level has parentNodeId === null)
+  // Scoped nodes for current hierarchy level (Root level has parentNodeId === null or undefined)
   const scopedNodes = useMemo(() => {
     return presentationNodes.filter(
-      (n) => n.parentNodeId === (currentParentNode ? currentParentNode.id : null)
+      (n) => (n.parentNodeId || null) === (currentParentNode ? currentParentNode.id : null)
     );
   }, [presentationNodes, currentParentNode]);
 
