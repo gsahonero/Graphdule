@@ -18,7 +18,6 @@ import {
   ListTodo,
   CalendarDays,
   AlertCircle,
-  AlertTriangle,
   RotateCw,
   CalendarCheck,
   Zap,
@@ -27,6 +26,7 @@ import {
   Edit2,
   Check,
   X,
+  Columns2,
 } from 'lucide-react';
 import { Node, NodeStatus, ProjectSummary, RecurrenceRule, StandaloneTask, TaskEnvironment } from '../../../domain/models/types';
 import { getProjectColorTheme, ProjectIconDisplay } from '../../utils/project-style';
@@ -128,6 +128,21 @@ export const MyDayView: React.FC = () => {
 
   // Mobile active panel tab ('projects' | 'standalone')
   const [activeMobileTab, setActiveMobileTab] = useState<'projects' | 'standalone'>('projects');
+
+  // View layout switcher: 'bimodal' (default, 2-column) or 'stream' (single-column focus stream)
+  const [viewLayout, setViewLayout] = useState<'stream' | 'bimodal'>(() => {
+    const saved = localStorage.getItem('graphdule_myday_layout');
+    if (saved === 'stream' || saved === 'bimodal') return saved;
+    return preferences.myDayViewLayout || 'bimodal';
+  });
+
+  const handleLayoutChange = (layout: 'stream' | 'bimodal') => {
+    setViewLayout(layout);
+    localStorage.setItem('graphdule_myday_layout', layout);
+    if (updatePreferences) {
+      updatePreferences({ ...preferences, myDayViewLayout: layout });
+    }
+  };
 
   // Map taskId -> accumulated actual AU from telemetry sessions
   const taskAttentionMap = useMemo(() => {
@@ -882,180 +897,190 @@ export const MyDayView: React.FC = () => {
     return (
       <div
         key={task.id}
-        className={`bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-900/60 hover:border-rose-300 dark:hover:border-rose-700 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0 group transition-all shadow-xs ${
+        className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 rounded-xl p-3 flex flex-col gap-2 group transition-all shadow-xs ${
           isElevated ? 'relative z-40' : ''
         }`}
       >
-        <div className="flex items-start sm:items-center space-x-3 min-w-0 flex-1 sm:mr-2">
-          <button
-            onClick={() => handleToggleNodeStatus(task.id, task.status)}
-            disabled={hasInProgressChild}
-            className={`transition-colors shrink-0 mt-0.5 sm:mt-0 ${
-              hasInProgressChild
-                ? 'text-amber-500 cursor-not-allowed opacity-90'
-                : 'text-slate-400 hover:text-emerald-500 cursor-pointer'
-            }`}
-            title={
-              hasInProgressChild
-                ? 'In Progress: subtasks are in progress (status cannot be modified)'
-                : 'Mark complete'
-            }
-          >
-            {hasInProgressChild ? (
-              <Clock className="w-5 h-5 text-amber-500 animate-pulse" />
-            ) : task.status === 'completed' ? (
-              <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-            ) : (
-              <Circle className="w-5 h-5" />
-            )}
-          </button>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center space-x-2">
-              {!options?.hideParentBreadcrumbs && parentNode && (
+        {/* Row 1: Checkbox, Title (full width, wrap/break-words), Move to Today, and Project Link */}
+        <div className="flex items-start justify-between gap-2 min-w-0">
+          <div className="flex items-start space-x-2.5 min-w-0 flex-1">
+            <button
+              onClick={() => handleToggleNodeStatus(task.id, task.status)}
+              disabled={hasInProgressChild}
+              className={`transition-colors shrink-0 mt-0.5 ${
+                hasInProgressChild
+                  ? 'text-amber-500 cursor-not-allowed opacity-90'
+                  : 'text-slate-400 hover:text-emerald-500 cursor-pointer'
+              }`}
+              title={
+                hasInProgressChild
+                  ? 'In Progress: subtasks are in progress (status cannot be modified)'
+                  : 'Mark complete'
+              }
+            >
+              {hasInProgressChild ? (
+                <Clock className="w-5 h-5 text-amber-500 animate-pulse" />
+              ) : task.status === 'completed' ? (
+                <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+              ) : (
+                <Circle className="w-5 h-5" />
+              )}
+            </button>
+
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline space-x-1.5 flex-wrap gap-y-1">
+                {!options?.hideParentBreadcrumbs && parentNode && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenTaskInProject(task)}
+                    className="flex items-center space-x-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/60 px-1.5 py-0.2 rounded shrink-0 shadow-2xs hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors cursor-pointer"
+                    title={`Subtask inside "${parentNode.text}" - Click to open task in project`}
+                  >
+                    <Layers className="w-2.5 h-2.5" />
+                    <span>Subtask</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => handleOpenTaskInProject(task)}
-                  className="flex items-center space-x-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/60 px-2 py-0.5 rounded shrink-0 shadow-2xs hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors cursor-pointer"
-                  title={`Subtask inside "${parentNode.text}" - Click to open task in project`}
+                  className={`text-sm font-semibold text-slate-800 dark:text-slate-100 hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-colors cursor-pointer text-left break-words line-clamp-2 ${
+                    task.status === 'completed' ? 'line-through text-slate-400 dark:text-slate-500' : ''
+                  }`}
+                  title={`Open task "${task.text}" in project`}
                 >
-                  <Layers className="w-3 h-3" />
-                  <span>Subtask</span>
+                  {task.text}
                 </button>
-              )}
-              <button
-                type="button"
-                onClick={() => handleOpenTaskInProject(task)}
-                className={`text-sm font-medium text-slate-800 dark:text-slate-200 truncate hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-colors cursor-pointer text-left ${
-                  task.status === 'completed' ? 'line-through text-slate-400 dark:text-slate-500' : ''
-                }`}
-                title={`Open task "${task.text}" in project`}
-              >
-                {task.text}
-              </button>
-            </div>
-            {!options?.hideParentBreadcrumbs && parentBreadcrumbs.length > 0 && (
-              <div className="flex items-center space-x-1.5 text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
-                <span className="text-slate-400 dark:text-slate-500 font-mono text-xs">↳</span>
-                <span className="text-slate-400 dark:text-slate-500 shrink-0">Inside:</span>
-                <div className="flex items-center space-x-1 truncate">
-                  {parentBreadcrumbs.map((pNode, idx) => (
-                    <React.Fragment key={pNode.id}>
-                      {idx > 0 && <span className="text-slate-400 dark:text-slate-600">→</span>}
-                      <button
-                        type="button"
-                        className="font-medium text-slate-600 dark:text-slate-300 truncate hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-colors cursor-pointer text-left"
-                        onClick={() => handleOpenTaskInProject(task, pNode)}
-                        title={`Go to parent node "${pNode.text}"`}
-                      >
-                        {pNode.text}
-                      </button>
-                    </React.Fragment>
-                  ))}
-                </div>
               </div>
+
+              {!options?.hideParentBreadcrumbs && parentBreadcrumbs.length > 0 && (
+                <div className="flex items-center space-x-1.5 text-xs text-slate-400 dark:text-slate-500 mt-0.5 truncate">
+                  <span className="font-mono text-xs">↳</span>
+                  <span className="shrink-0">Inside:</span>
+                  <div className="flex items-center space-x-1 truncate">
+                    {parentBreadcrumbs.map((pNode, idx) => (
+                      <React.Fragment key={pNode.id}>
+                        {idx > 0 && <span>→</span>}
+                        <button
+                          type="button"
+                          className="font-medium text-slate-600 dark:text-slate-300 truncate hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-colors cursor-pointer text-left"
+                          onClick={() => handleOpenTaskInProject(task, pNode)}
+                          title={`Go to parent node "${pNode.text}"`}
+                        >
+                          {pNode.text}
+                        </button>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-1.5 shrink-0 ml-1" onClick={(e) => e.stopPropagation()}>
+            {/* Quick Move to Today Button */}
+            <button
+              onClick={() => moveNodeDate(task.id, today, true)}
+              className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 transition-colors cursor-pointer"
+              title="Move due date to Today"
+            >
+              <span>Today</span>
+            </button>
+            {task.projectId && (
+              <button
+                onClick={() => handleOpenTaskInProject(task)}
+                className="p-1 rounded text-slate-400 hover:text-emerald-500 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                title="Open Project Graph"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
             )}
           </div>
         </div>
 
-        <div className="flex items-center space-x-2 shrink-0 ml-8 sm:ml-auto flex-wrap sm:flex-nowrap gap-y-1">
-          {renderAUControls(task, true)}
-          {/* Environment Toggle Button */}
-          <button
-            type="button"
-            onClick={() => {
-              const curEnv = task.environment || 'computer';
-              const nextEnv: TaskEnvironment = curEnv === 'computer' ? 'physical' : curEnv === 'physical' ? 'mixed' : 'computer';
-              updateNode({ ...task, environment: nextEnv });
-            }}
-            className="inline-flex items-center space-x-1 text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
-            title={`Task Environment: ${task.environment || 'computer'} (Click to switch: Computer 💻 → Physical 🏃 → Mixed 🔄)`}
-            data-testid="myday-task-environment-toggle"
-          >
-            <span>{(task.environment || 'computer') === 'computer' ? '💻' : task.environment === 'physical' ? '🏃' : '🔄'}</span>
-            <span className="capitalize hidden sm:inline">{task.environment || 'computer'}</span>
-          </button>
-          {/* Project Badge if not hidden */}
-          {!options?.hideProjectBadge && task.projectId && (
-            <button
-              onClick={() => handleOpenTaskInProject(task)}
-              className={`hidden sm:flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-xs font-medium ${projectTheme.badgeBg} hover:opacity-85 transition-all cursor-pointer max-w-[140px] truncate shadow-xs`}
-              title={`Open project "${project?.name || 'Project'}"`}
-            >
-              <ProjectIconDisplay icon={project?.style?.icon} emoji={project?.style?.emoji} className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">{project?.name || 'Project'}</span>
-            </button>
-          )}
-
-          {/* Priority Attention Badge if not hidden */}
-          {!options?.hideProjectBadge && project?.isAttention && (
+        {/* Row 2: Micro-metadata (Overdue badge, Project tag, AU, Environment, Reschedule) */}
+        <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-100 dark:border-slate-800/60 flex-wrap text-xs text-slate-500">
+          <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+            {/* Overdue Badge */}
             <span
-              className="hidden xs:flex items-center space-x-1 px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60 shadow-2xs shrink-0"
-              title="Priority Attention Project"
+              className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60 flex items-center space-x-1"
+              title={`Due date: ${formatDateDisplay(task.dueDate)}`}
             >
-              <Zap className="w-3 h-3 fill-current text-amber-500" />
-              <span>Attention</span>
+              <Clock className="w-3 h-3 text-amber-500" />
+              <span>{overdueDays}d late</span>
             </span>
-          )}
 
-          {/* Overdue Badge */}
-          <span
-            className="text-xs font-semibold px-2 py-0.5 rounded-md bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/60 flex items-center space-x-1"
-            title={`Due date: ${formatDateDisplay(task.dueDate)}`}
-          >
-            <Clock className="w-3.5 h-3.5 text-rose-500" />
-            <span>{overdueDays}d late</span>
-            <span className="hidden sm:inline text-rose-500/80 font-normal">({formatDateDisplay(task.dueDate)})</span>
-          </span>
-
-          {/* Quick Move to Today Button */}
-          <button
-            onClick={() => moveNodeDate(task.id, today, true)}
-            className="px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 transition-colors cursor-pointer"
-            title="Move due date to Today"
-          >
-            <span className="hidden xs:inline">Move to Today</span>
-            <span className="xs:hidden">Today</span>
-          </button>
-
-          {/* Custom Date Picker */}
-          <div className={`relative ${isCalendarOpen ? 'z-50' : ''}`}>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setActiveCalendarLateId((prev) => (prev === task.id ? null : task.id));
-              }}
-              className="p-1 rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-              title="Reschedule to custom date"
-            >
-              <Calendar className="w-3.5 h-3.5" />
-            </button>
-
-            {activeCalendarLateId === task.id && (
-              <CalendarPicker
-                value={task.dueDate}
-                onChange={(newDate) => {
-                  moveNodeDate(task.id, newDate, true);
-                  setActiveCalendarLateId(null);
-                }}
-                onClose={() => setActiveCalendarLateId(null)}
-                position="bottom"
-                align="right"
-                currentTaskId={task.id}
-                taskEstimatedAU={task.estimatedAU}
-              />
+            {!options?.hideProjectBadge && task.projectId && (
+              <button
+                onClick={() => handleOpenTaskInProject(task)}
+                className={`flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium ${projectTheme.badgeBg} hover:opacity-85 transition-all cursor-pointer max-w-[140px] truncate shadow-2xs`}
+                title={`Open project "${project?.name || 'Project'}"`}
+              >
+                <ProjectIconDisplay icon={project?.style?.icon} emoji={project?.style?.emoji} className="w-3 h-3 shrink-0" />
+                <span className="truncate">{project?.name || 'Project'}</span>
+              </button>
             )}
+
+            {!options?.hideProjectBadge && project?.isAttention && (
+              <span
+                className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[11px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60 shadow-2xs shrink-0"
+                title="Priority Attention Project"
+              >
+                <Zap className="w-3 h-3 fill-current text-amber-500" />
+                <span>Attention</span>
+              </span>
+            )}
+
+            {renderAUControls(task, true)}
           </div>
 
-          {task.projectId && (
+          <div className="flex items-center space-x-1.5 ml-auto">
+            {/* Environment Toggle Button */}
             <button
-              onClick={() => handleOpenTaskInProject(task)}
-              className="p-1 rounded text-slate-400 hover:text-emerald-500 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-              title="Open Project Graph"
+              type="button"
+              onClick={() => {
+                const curEnv = task.environment || 'computer';
+                const nextEnv: TaskEnvironment = curEnv === 'computer' ? 'physical' : curEnv === 'physical' ? 'mixed' : 'computer';
+                updateNode({ ...task, environment: nextEnv });
+              }}
+              className="inline-flex items-center space-x-1 text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
+              title={`Task Environment: ${task.environment || 'computer'} (Click to switch: Computer 💻 → Physical 🏃 → Mixed 🔄)`}
+              data-testid="myday-task-environment-toggle"
             >
-              <ChevronRight className="w-4 h-4" />
+              <span>{(task.environment || 'computer') === 'computer' ? '💻' : task.environment === 'physical' ? '🏃' : '🔄'}</span>
+              <span className="capitalize hidden sm:inline">{task.environment || 'computer'}</span>
             </button>
-          )}
+
+            {/* Custom Date Picker */}
+            <div className={`relative ${isCalendarOpen ? 'z-50' : ''}`}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActiveCalendarLateId((prev) => (prev === task.id ? null : task.id));
+                }}
+                className="flex items-center space-x-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-medium border bg-slate-100 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                title="Reschedule to custom date"
+              >
+                <Calendar className="w-3 h-3" />
+                <span>{formatDateDisplay(task.dueDate)}</span>
+              </button>
+
+              {activeCalendarLateId === task.id && (
+                <CalendarPicker
+                  value={task.dueDate}
+                  onChange={(newDate) => {
+                    moveNodeDate(task.id, newDate, true);
+                    setActiveCalendarLateId(null);
+                  }}
+                  onClose={() => setActiveCalendarLateId(null)}
+                  position="bottom"
+                  align="right"
+                  currentTaskId={task.id}
+                  taskEstimatedAU={task.estimatedAU}
+                />
+              )}
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -1063,7 +1088,7 @@ export const MyDayView: React.FC = () => {
 
   const renderLateStandaloneTaskRow = (
     task: StandaloneTask,
-    options?: { hideStandaloneBadge?: boolean }
+    _options?: { hideStandaloneBadge?: boolean }
   ) => {
     const overdueDays = Math.max(1, daysBetween(task.dueDate, today));
     const isCalendarOpen = activeCalendarLateId === task.id;
@@ -1072,106 +1097,109 @@ export const MyDayView: React.FC = () => {
     return (
       <div
         key={task.id}
-        className={`bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-900/60 hover:border-rose-300 dark:hover:border-rose-700 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0 group transition-all shadow-xs ${
+        className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 rounded-xl p-3 flex flex-col gap-2 group transition-all shadow-xs ${
           isElevated ? 'relative z-40' : ''
         }`}
       >
-        <div className="flex items-start sm:items-center space-x-3 min-w-0 flex-1 sm:mr-2">
-          <button
-            onClick={() => handleToggleStandaloneStatus(task.id, task.status)}
-            className="text-slate-400 hover:text-teal-500 transition-colors shrink-0 cursor-pointer mt-0.5 sm:mt-0"
-            title="Mark complete"
-          >
-            {task.status === 'completed' ? (
-              <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-            ) : (
-              <Circle className="w-5 h-5" />
-            )}
-          </button>
-          {renderStandaloneTaskName(task)}
-        </div>
-
-        <div className="flex items-center space-x-2 shrink-0 ml-8 sm:ml-auto flex-wrap sm:flex-nowrap gap-y-1">
-          {renderAUControls(task, false)}
-          {!options?.hideStandaloneBadge && (
-            <span className="hidden sm:inline-block text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
-              Standalone
-            </span>
-          )}
-
-          {/* Environment Toggle Button */}
-          <button
-            type="button"
-            onClick={() => {
-              const curEnv = task.environment || 'computer';
-              const nextEnv: TaskEnvironment = curEnv === 'computer' ? 'physical' : curEnv === 'physical' ? 'mixed' : 'computer';
-              updateStandaloneTask({ ...task, environment: nextEnv });
-            }}
-            className="inline-flex items-center space-x-1 text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
-            title={`Task Environment: ${task.environment || 'computer'} (Click to switch: Computer 💻 → Physical 🏃 → Mixed 🔄)`}
-            data-testid="myday-standalone-environment-toggle"
-          >
-            <span>{(task.environment || 'computer') === 'computer' ? '💻' : task.environment === 'physical' ? '🏃' : '🔄'}</span>
-            <span className="capitalize hidden sm:inline">{task.environment || 'computer'}</span>
-          </button>
-
-          {/* Overdue Badge */}
-          <span
-            className="text-xs font-semibold px-2 py-0.5 rounded-md bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/60 flex items-center space-x-1"
-            title={`Due date: ${formatDateDisplay(task.dueDate)}`}
-          >
-            <Clock className="w-3.5 h-3.5 text-rose-500" />
-            <span>{overdueDays}d late</span>
-            <span className="hidden sm:inline text-rose-500/80 font-normal">({formatDateDisplay(task.dueDate)})</span>
-          </span>
-
-          {/* Quick Move to Today Button */}
-          <button
-            onClick={() => updateStandaloneTask({ ...task, dueDate: today })}
-            className="px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 transition-colors cursor-pointer"
-            title="Move due date to Today"
-          >
-            <span className="hidden xs:inline">Move to Today</span>
-            <span className="xs:hidden">Today</span>
-          </button>
-
-          {/* Custom Date Picker */}
-          <div className={`relative ${isCalendarOpen ? 'z-50' : ''}`}>
+        {/* Row 1: Checkbox, Name, Move to Today & Delete */}
+        <div className="flex items-start justify-between gap-2 min-w-0">
+          <div className="flex items-start space-x-2.5 min-w-0 flex-1">
             <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setActiveCalendarLateId((prev) => (prev === task.id ? null : task.id));
-              }}
-              className="p-1.5 sm:p-1 rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-              title="Reschedule to custom date"
+              onClick={() => handleToggleStandaloneStatus(task.id, task.status)}
+              className="text-slate-400 hover:text-teal-500 transition-colors shrink-0 cursor-pointer mt-0.5"
+              title="Mark complete"
             >
-              <Calendar className="w-3.5 h-3.5" />
+              {task.status === 'completed' ? (
+                <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+              ) : (
+                <Circle className="w-5 h-5" />
+              )}
             </button>
-
-            {activeCalendarLateId === task.id && (
-              <CalendarPicker
-                value={task.dueDate}
-                onChange={(newDate) => {
-                  updateStandaloneTask({ ...task, dueDate: newDate });
-                  setActiveCalendarLateId(null);
-                }}
-                onClose={() => setActiveCalendarLateId(null)}
-                position="bottom"
-                align="right"
-                currentTaskId={task.id}
-                taskEstimatedAU={task.estimatedAU}
-              />
-            )}
+            <div className="min-w-0 flex-1">
+              {renderStandaloneTaskName(task)}
+            </div>
           </div>
 
-          <button
-            onClick={() => deleteStandaloneTask(task.id)}
-            className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 p-1.5 sm:p-1 transition-opacity cursor-pointer"
-            title="Delete standalone task"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
+          <div className="flex items-center space-x-1.5 shrink-0 ml-1" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => updateStandaloneTask({ ...task, dueDate: today })}
+              className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 transition-colors cursor-pointer"
+              title="Move due date to Today"
+            >
+              <span>Today</span>
+            </button>
+            <button
+              onClick={() => deleteStandaloneTask(task.id)}
+              className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 p-1 transition-opacity cursor-pointer"
+              title="Delete standalone task"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Row 2: Micro-metadata (Overdue, AU, Environment, Custom Date Picker) */}
+        <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-100 dark:border-slate-800/60 flex-wrap text-xs text-slate-500">
+          <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+            <span
+              className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60 flex items-center space-x-1"
+              title={`Due date: ${formatDateDisplay(task.dueDate)}`}
+            >
+              <Clock className="w-3 h-3 text-amber-500" />
+              <span>{overdueDays}d late</span>
+            </span>
+
+            {renderAUControls(task, false)}
+          </div>
+
+          <div className="flex items-center space-x-1.5 ml-auto">
+            {/* Environment Toggle Button */}
+            <button
+              type="button"
+              onClick={() => {
+                const curEnv = task.environment || 'computer';
+                const nextEnv: TaskEnvironment = curEnv === 'computer' ? 'physical' : curEnv === 'physical' ? 'mixed' : 'computer';
+                updateStandaloneTask({ ...task, environment: nextEnv });
+              }}
+              className="inline-flex items-center space-x-1 text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
+              title={`Task Environment: ${task.environment || 'computer'} (Click to switch: Computer 💻 → Physical 🏃 → Mixed 🔄)`}
+              data-testid="myday-standalone-environment-toggle"
+            >
+              <span>{(task.environment || 'computer') === 'computer' ? '💻' : task.environment === 'physical' ? '🏃' : '🔄'}</span>
+              <span className="capitalize hidden sm:inline">{task.environment || 'computer'}</span>
+            </button>
+
+            {/* Custom Date Picker */}
+            <div className={`relative ${isCalendarOpen ? 'z-50' : ''}`}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActiveCalendarLateId((prev) => (prev === task.id ? null : task.id));
+                }}
+                className="flex items-center space-x-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-medium border bg-slate-100 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                title="Reschedule to custom date"
+              >
+                <Calendar className="w-3 h-3" />
+                <span>{formatDateDisplay(task.dueDate)}</span>
+              </button>
+
+              {activeCalendarLateId === task.id && (
+                <CalendarPicker
+                  value={task.dueDate}
+                  onChange={(newDate) => {
+                    updateStandaloneTask({ ...task, dueDate: newDate });
+                    setActiveCalendarLateId(null);
+                  }}
+                  onClose={() => setActiveCalendarLateId(null)}
+                  position="bottom"
+                  align="right"
+                  currentTaskId={task.id}
+                  taskEstimatedAU={task.estimatedAU}
+                />
+              )}
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -1197,165 +1225,176 @@ export const MyDayView: React.FC = () => {
     return (
       <div
         key={task.id}
-        className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0 group transition-all shadow-xs ${
+        className={`bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800/90 hover:border-slate-300 dark:hover:border-slate-700 rounded-xl p-3 flex flex-col gap-2 group transition-all shadow-xs ${
           isElevated ? 'relative z-40' : ''
         }`}
       >
-        <div className="flex items-start sm:items-center space-x-3 min-w-0 flex-1 sm:mr-2">
-          <button
-            onClick={() => handleToggleNodeStatus(task.id, task.status)}
-            disabled={hasInProgressChild}
-            className={`transition-colors shrink-0 mt-0.5 sm:mt-0 ${
-              hasInProgressChild
-                ? 'text-amber-500 cursor-not-allowed opacity-90'
-                : 'text-slate-400 hover:text-emerald-500 cursor-pointer'
-            }`}
-            title={
-              hasInProgressChild
-                ? 'In Progress: subtasks are in progress (status cannot be modified)'
-                : task.status === 'completed'
-                ? 'Mark incomplete'
-                : 'Mark complete'
-            }
-          >
-            {hasInProgressChild ? (
-              <Clock className="w-5 h-5 text-amber-500 animate-pulse" />
-            ) : task.status === 'completed' ? (
-              <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-            ) : (
-              <Circle className="w-5 h-5" />
-            )}
-          </button>
+        {/* Row 1: Checkbox, Title (full width, wrap/break-words), and Primary Action (WorkButton + Chevron) */}
+        <div className="flex items-start justify-between gap-2 min-w-0">
+          <div className="flex items-start space-x-2.5 min-w-0 flex-1">
+            <button
+              onClick={() => handleToggleNodeStatus(task.id, task.status)}
+              disabled={hasInProgressChild}
+              className={`transition-colors shrink-0 mt-0.5 ${
+                hasInProgressChild
+                  ? 'text-amber-500 cursor-not-allowed opacity-90'
+                  : 'text-slate-400 hover:text-emerald-500 cursor-pointer'
+              }`}
+              title={
+                hasInProgressChild
+                  ? 'In Progress: subtasks are in progress (status cannot be modified)'
+                  : task.status === 'completed'
+                  ? 'Mark incomplete'
+                  : 'Mark complete'
+              }
+            >
+              {hasInProgressChild ? (
+                <Clock className="w-5 h-5 text-amber-500 animate-pulse" />
+              ) : task.status === 'completed' ? (
+                <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+              ) : (
+                <Circle className="w-5 h-5" />
+              )}
+            </button>
 
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center space-x-2">
-              {!options?.hideParentBreadcrumbs && parentNode && (
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline space-x-1.5 flex-wrap gap-y-1">
+                {!options?.hideParentBreadcrumbs && parentNode && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenTaskInProject(task)}
+                    className="flex items-center space-x-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/60 px-1.5 py-0.2 rounded shrink-0 shadow-2xs hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors cursor-pointer"
+                    title={`Subtask inside "${parentNode.text}" - Click to open task in project`}
+                  >
+                    <Layers className="w-2.5 h-2.5" />
+                    <span>Subtask</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => handleOpenTaskInProject(task)}
-                  className="flex items-center space-x-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/60 px-2 py-0.5 rounded shrink-0 shadow-2xs hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors cursor-pointer"
-                  title={`Subtask inside "${parentNode.text}" - Click to open task in project`}
+                  className={`text-sm font-semibold text-slate-800 dark:text-slate-100 hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-colors cursor-pointer text-left break-words line-clamp-2 ${
+                    task.status === 'completed' ? 'line-through text-slate-400 dark:text-slate-500' : ''
+                  }`}
+                  title={`Open task "${task.text}" in project`}
                 >
-                  <Layers className="w-3 h-3" />
-                  <span>Subtask</span>
+                  {task.text}
                 </button>
-              )}
-              <button
-                type="button"
-                onClick={() => handleOpenTaskInProject(task)}
-                className={`text-sm font-medium text-slate-800 dark:text-slate-200 truncate hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-colors cursor-pointer text-left ${
-                  task.status === 'completed' ? 'line-through text-slate-400 dark:text-slate-500' : ''
-                }`}
-                title={`Open task "${task.text}" in project`}
-              >
-                {task.text}
-              </button>
-            </div>
-
-            {!options?.hideParentBreadcrumbs && parentBreadcrumbs.length > 0 && (
-              <div className="flex items-center space-x-1.5 text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
-                <span className="text-slate-400 dark:text-slate-500 font-mono text-xs">↳</span>
-                <span className="text-slate-400 dark:text-slate-500 shrink-0">Inside:</span>
-                <div className="flex items-center space-x-1 truncate">
-                  {parentBreadcrumbs.map((pNode, idx) => (
-                    <React.Fragment key={pNode.id}>
-                      {idx > 0 && <span className="text-slate-400 dark:text-slate-600">→</span>}
-                      <button
-                        type="button"
-                        className="font-medium text-slate-600 dark:text-slate-300 truncate hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-colors cursor-pointer text-left"
-                        onClick={() => handleOpenTaskInProject(task, pNode)}
-                        title={`Go to parent node "${pNode.text}"`}
-                      >
-                        {pNode.text}
-                      </button>
-                    </React.Fragment>
-                  ))}
-                </div>
               </div>
+
+              {!options?.hideParentBreadcrumbs && parentBreadcrumbs.length > 0 && (
+                <div className="flex items-center space-x-1.5 text-xs text-slate-400 dark:text-slate-500 mt-0.5 truncate">
+                  <span className="font-mono text-xs">↳</span>
+                  <span className="shrink-0">Inside:</span>
+                  <div className="flex items-center space-x-1 truncate">
+                    {parentBreadcrumbs.map((pNode, idx) => (
+                      <React.Fragment key={pNode.id}>
+                        {idx > 0 && <span>→</span>}
+                        <button
+                          type="button"
+                          className="font-medium text-slate-600 dark:text-slate-300 truncate hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-colors cursor-pointer text-left"
+                          onClick={() => handleOpenTaskInProject(task, pNode)}
+                          title={`Go to parent node "${pNode.text}"`}
+                        >
+                          {pNode.text}
+                        </button>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-1 shrink-0 ml-1" onClick={(e) => e.stopPropagation()}>
+            <WorkButton taskId={task.id} taskText={task.text} projectId={task.projectId} />
+            {task.projectId && (
+              <button
+                onClick={() => handleOpenTaskInProject(task)}
+                className="p-1 rounded text-slate-400 hover:text-emerald-500 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                title="Open Project Graph"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
             )}
           </div>
         </div>
 
-        <div className="flex items-center space-x-2 shrink-0 ml-8 sm:ml-auto flex-wrap sm:flex-nowrap gap-y-1">
-          {renderAUControls(task, true)}
-          {/* Environment Toggle Button */}
-          <button
-            type="button"
-            onClick={() => {
-              const curEnv = task.environment || 'computer';
-              const nextEnv: TaskEnvironment = curEnv === 'computer' ? 'physical' : curEnv === 'physical' ? 'mixed' : 'computer';
-              updateNode({ ...task, environment: nextEnv });
-            }}
-            className="inline-flex items-center space-x-1 text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
-            title={`Task Environment: ${task.environment || 'computer'} (Click to switch: Computer 💻 → Physical 🏃 → Mixed 🔄)`}
-            data-testid="myday-task-environment-toggle"
-          >
-            <span>{(task.environment || 'computer') === 'computer' ? '💻' : task.environment === 'physical' ? '🏃' : '🔄'}</span>
-            <span className="capitalize hidden sm:inline">{task.environment || 'computer'}</span>
-          </button>
-          {/* Project Badge if not hidden */}
-          {!options?.hideProjectBadge && task.projectId && (
-            <button
-              onClick={() => handleOpenTaskInProject(task)}
-              className={`hidden sm:flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-xs font-medium ${projectTheme.badgeBg} hover:opacity-85 transition-all cursor-pointer max-w-[140px] truncate shadow-xs`}
-              title={`Open project "${project?.name || 'Project'}"`}
-            >
-              <ProjectIconDisplay icon={project?.style?.icon} emoji={project?.style?.emoji} className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">{project?.name || 'Project'}</span>
-            </button>
-          )}
-
-          {/* Priority Attention Badge if not hidden */}
-          {!options?.hideProjectBadge && project?.isAttention && (
-            <span
-              className="hidden xs:flex items-center space-x-1 px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60 shadow-2xs shrink-0"
-              title="Priority Attention Project"
-            >
-              <Zap className="w-3 h-3 fill-current text-amber-500" />
-              <span>Attention</span>
-            </span>
-          )}
-
-          {/* Reschedule Date Button with CalendarPicker */}
-          <div className={`relative ${isCalendarOpen ? 'z-50' : ''}`}>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setActiveCalendarTodayProjectId((prev) => (prev === task.id ? null : task.id));
-              }}
-              className="flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-xs font-mono font-medium border bg-slate-100 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:bg-slate-200 dark:hover:bg-slate-800 hover:text-emerald-600 dark:hover:text-emerald-400 hover:border-emerald-300 dark:hover:border-emerald-700/60 transition-colors cursor-pointer group/date"
-              title="Reschedule task to a different day"
-            >
-              <Calendar className="w-3.5 h-3.5 opacity-70 group-hover/date:opacity-100 transition-opacity" />
-              <span>{formatDateDisplay(task.dueDate)}</span>
-            </button>
-
-            {activeCalendarTodayProjectId === task.id && (
-              <CalendarPicker
-                value={task.dueDate}
-                onChange={(newDate) => {
-                  moveNodeDate(task.id, newDate, true);
-                  setActiveCalendarTodayProjectId(null);
-                }}
-                onClose={() => setActiveCalendarTodayProjectId(null)}
-                position="bottom"
-                align="right"
-                currentTaskId={task.id}
-                taskEstimatedAU={task.estimatedAU}
-              />
+        {/* Row 2: Micro-metadata (Project tag, AU, Environment, Reschedule) */}
+        <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-100 dark:border-slate-800/60 flex-wrap text-xs text-slate-500">
+          <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+            {!options?.hideProjectBadge && task.projectId && (
+              <button
+                onClick={() => handleOpenTaskInProject(task)}
+                className={`flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium ${projectTheme.badgeBg} hover:opacity-85 transition-all cursor-pointer max-w-[150px] truncate shadow-2xs`}
+                title={`Open project "${project?.name || 'Project'}"`}
+              >
+                <ProjectIconDisplay icon={project?.style?.icon} emoji={project?.style?.emoji} className="w-3 h-3 shrink-0" />
+                <span className="truncate">{project?.name || 'Project'}</span>
+              </button>
             )}
+
+            {!options?.hideProjectBadge && project?.isAttention && (
+              <span
+                className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[11px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60 shadow-2xs shrink-0"
+                title="Priority Attention Project"
+              >
+                <Zap className="w-3 h-3 fill-current text-amber-500" />
+                <span>Attention</span>
+              </span>
+            )}
+
+            {renderAUControls(task, true)}
           </div>
 
-          {task.projectId && (
+          <div className="flex items-center space-x-1.5 ml-auto">
+            {/* Environment Toggle Button */}
             <button
-              onClick={() => handleOpenTaskInProject(task)}
-              className="p-1 rounded text-slate-400 hover:text-emerald-500 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-              title="Open Project Graph"
+              type="button"
+              onClick={() => {
+                const curEnv = task.environment || 'computer';
+                const nextEnv: TaskEnvironment = curEnv === 'computer' ? 'physical' : curEnv === 'physical' ? 'mixed' : 'computer';
+                updateNode({ ...task, environment: nextEnv });
+              }}
+              className="inline-flex items-center space-x-1 text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
+              title={`Task Environment: ${task.environment || 'computer'} (Click to switch: Computer 💻 → Physical 🏃 → Mixed 🔄)`}
+              data-testid="myday-task-environment-toggle"
             >
-              <ChevronRight className="w-4 h-4" />
+              <span>{(task.environment || 'computer') === 'computer' ? '💻' : task.environment === 'physical' ? '🏃' : '🔄'}</span>
+              <span className="capitalize hidden sm:inline">{task.environment || 'computer'}</span>
             </button>
-          )}
+
+            {/* Reschedule Date Button with CalendarPicker */}
+            <div className={`relative ${isCalendarOpen ? 'z-50' : ''}`}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActiveCalendarTodayProjectId((prev) => (prev === task.id ? null : task.id));
+                }}
+                className="flex items-center space-x-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-medium border bg-slate-100 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:bg-slate-200 dark:hover:bg-slate-800 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors cursor-pointer"
+                title="Reschedule task date"
+              >
+                <Calendar className="w-3 h-3 opacity-70" />
+                <span>{formatDateDisplay(task.dueDate)}</span>
+              </button>
+
+              {activeCalendarTodayProjectId === task.id && (
+                <CalendarPicker
+                  value={task.dueDate}
+                  onChange={(newDate) => {
+                    moveNodeDate(task.id, newDate, true);
+                    setActiveCalendarTodayProjectId(null);
+                  }}
+                  onClose={() => setActiveCalendarTodayProjectId(null)}
+                  position="bottom"
+                  align="right"
+                  currentTaskId={task.id}
+                  taskEstimatedAU={task.estimatedAU}
+                />
+              )}
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -1371,106 +1410,779 @@ export const MyDayView: React.FC = () => {
     return (
       <div
         key={task.id}
-        className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0 group transition-all shadow-xs ${
+        className={`bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800/90 hover:border-slate-300 dark:hover:border-slate-700 rounded-xl p-3 flex flex-col gap-2 group transition-all shadow-xs ${
           isElevated ? 'relative z-40' : ''
         }`}
       >
-        <div className="flex items-start sm:items-center space-x-3 min-w-0 flex-1 sm:mr-2">
-          <button
-            onClick={() => handleToggleStandaloneStatus(task.id, task.status)}
-            className="text-slate-400 hover:text-teal-500 transition-colors shrink-0 cursor-pointer mt-0.5 sm:mt-0"
-            title={task.status === 'completed' ? 'Mark incomplete' : 'Mark complete'}
-          >
-            {task.status === 'completed' ? (
-              <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-            ) : (
-              <Circle className="w-5 h-5" />
-            )}
-          </button>
-          {renderStandaloneTaskName(task)}
-        </div>
-
-        <div className="flex items-center space-x-2 shrink-0 ml-8 sm:ml-auto flex-wrap sm:flex-nowrap gap-y-1">
-          {renderAUControls(task, false)}
-          {/* Environment Toggle Button */}
-          <button
-            type="button"
-            onClick={() => {
-              const curEnv = task.environment || 'computer';
-              const nextEnv: TaskEnvironment = curEnv === 'computer' ? 'physical' : curEnv === 'physical' ? 'mixed' : 'computer';
-              updateStandaloneTask({ ...task, environment: nextEnv });
-            }}
-            className="inline-flex items-center space-x-1 text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
-            title={`Task Environment: ${task.environment || 'computer'} (Click to switch: Computer 💻 → Physical 🏃 → Mixed 🔄)`}
-            data-testid="myday-standalone-environment-toggle"
-          >
-            <span>{(task.environment || 'computer') === 'computer' ? '💻' : task.environment === 'physical' ? '🏃' : '🔄'}</span>
-            <span className="capitalize hidden sm:inline">{task.environment || 'computer'}</span>
-          </button>
-          {/* Recurrence Badge / Picker */}
-          <RecurrencePicker
-            value={task.recurrence}
-            baseDate={task.dueDate}
-            onChange={(newRule) => updateStandaloneTask({ ...task, recurrence: newRule })}
-            onOpenChange={(open) => setActiveRecurrenceTaskId(open ? task.id : null)}
-            buttonVariant={task.recurrence ? 'badge' : 'icon'}
-            align="right"
-          />
-
-          {/* Due Date Button & Picker */}
-          <div className={`relative ${activeCalendarTaskId === task.id ? 'z-50' : ''}`}>
+        {/* Row 1: Checkbox, Name (inline editable, full width), WorkButton & Delete */}
+        <div className="flex items-start justify-between gap-2 min-w-0">
+          <div className="flex items-start space-x-2.5 min-w-0 flex-1">
             <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setActiveCalendarTaskId((prev) => (prev === task.id ? null : task.id));
-              }}
-              className={`flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-xs font-mono font-medium border transition-colors cursor-pointer group/date ${
-                isTaskOverdue
-                  ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-800/60 hover:bg-amber-100'
-                  : 'bg-slate-100 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:text-emerald-600 dark:hover:text-emerald-400'
-              }`}
-              title="Reschedule standalone task"
+              onClick={() => handleToggleStandaloneStatus(task.id, task.status)}
+              className="text-slate-400 hover:text-teal-500 transition-colors shrink-0 cursor-pointer mt-0.5"
+              title={task.status === 'completed' ? 'Mark incomplete' : 'Mark complete'}
             >
-              <Calendar className="w-3.5 h-3.5 opacity-70 group-hover/date:opacity-100 transition-opacity" />
-              <span>{formatDateDisplay(task.dueDate)}</span>
-              {isTaskOverdue && (
-                <span className="text-xs font-sans font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
-                  Overdue
-                </span>
+              {task.status === 'completed' ? (
+                <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+              ) : (
+                <Circle className="w-5 h-5" />
               )}
             </button>
-
-            {activeCalendarTaskId === task.id && (
-              <CalendarPicker
-                value={task.dueDate}
-                onChange={(newDate) => {
-                  updateStandaloneTask({ ...task, dueDate: newDate });
-                  setActiveCalendarTaskId(null);
-                }}
-                onClose={() => setActiveCalendarTaskId(null)}
-                position="bottom"
-                align="right"
-                currentTaskId={task.id}
-                taskEstimatedAU={task.estimatedAU}
-              />
-            )}
+            <div className="min-w-0 flex-1">
+              {renderStandaloneTaskName(task)}
+            </div>
           </div>
 
-          <button
-            onClick={() => deleteStandaloneTask(task.id)}
-            className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 p-1.5 sm:p-1 transition-opacity cursor-pointer"
-            title="Delete standalone task"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
+          <div className="flex items-center space-x-1 shrink-0 ml-1" onClick={(e) => e.stopPropagation()}>
+            <WorkButton taskId={task.id} taskText={task.text} />
+            <button
+              onClick={() => deleteStandaloneTask(task.id)}
+              className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 p-1 transition-opacity cursor-pointer"
+              title="Delete standalone task"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Row 2: Micro-metadata (AU, Environment, Recurrence, Due Date) */}
+        <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-100 dark:border-slate-800/60 flex-wrap text-xs text-slate-500">
+          <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+            {renderAUControls(task, false)}
+          </div>
+
+          <div className="flex items-center space-x-1.5 ml-auto">
+            {/* Environment Toggle Button */}
+            <button
+              type="button"
+              onClick={() => {
+                const curEnv = task.environment || 'computer';
+                const nextEnv: TaskEnvironment = curEnv === 'computer' ? 'physical' : curEnv === 'physical' ? 'mixed' : 'computer';
+                updateStandaloneTask({ ...task, environment: nextEnv });
+              }}
+              className="inline-flex items-center space-x-1 text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
+              title={`Task Environment: ${task.environment || 'computer'} (Click to switch: Computer 💻 → Physical 🏃 → Mixed 🔄)`}
+              data-testid="myday-standalone-environment-toggle"
+            >
+              <span>{(task.environment || 'computer') === 'computer' ? '💻' : task.environment === 'physical' ? '🏃' : '🔄'}</span>
+              <span className="capitalize hidden sm:inline">{task.environment || 'computer'}</span>
+            </button>
+
+            {/* Recurrence Badge / Picker */}
+            <RecurrencePicker
+              value={task.recurrence}
+              baseDate={task.dueDate}
+              onChange={(newRule) => updateStandaloneTask({ ...task, recurrence: newRule })}
+              onOpenChange={(open) => setActiveRecurrenceTaskId(open ? task.id : null)}
+              buttonVariant={task.recurrence ? 'badge' : 'icon'}
+              align="right"
+            />
+
+            {/* Due Date Button & Picker */}
+            <div className={`relative ${activeCalendarTaskId === task.id ? 'z-50' : ''}`}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActiveCalendarTaskId((prev) => (prev === task.id ? null : task.id));
+                }}
+                className={`flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-[11px] font-mono font-medium border transition-colors cursor-pointer group/date ${
+                  isTaskOverdue
+                    ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-800/60 hover:bg-amber-100'
+                    : 'bg-slate-100 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:text-emerald-600 dark:hover:text-emerald-400'
+                }`}
+                title="Reschedule standalone task"
+              >
+                <Calendar className="w-3 h-3 opacity-70 group-hover/date:opacity-100 transition-opacity" />
+                <span>{formatDateDisplay(task.dueDate)}</span>
+                {isTaskOverdue && (
+                  <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                    Overdue
+                  </span>
+                )}
+              </button>
+
+              {activeCalendarTaskId === task.id && (
+                <CalendarPicker
+                  value={task.dueDate}
+                  onChange={(newDate) => {
+                    updateStandaloneTask({ ...task, dueDate: newDate });
+                    setActiveCalendarTaskId(null);
+                  }}
+                  onClose={() => setActiveCalendarTaskId(null)}
+                  position="bottom"
+                  align="right"
+                  currentTaskId={task.id}
+                  taskEstimatedAU={task.estimatedAU}
+                />
+              )}
+            </div>
+          </div>
         </div>
       </div>
     );
   };
 
+  const renderProjectTasksContent = (isStream: boolean) => (
+    <>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center space-x-2">
+          <Folder className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
+          <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+            {isStream ? 'Deep Work: Project Tasks' : 'Project Tasks'}
+          </h2>
+          <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono font-semibold">
+            {displayProjectTasks.length}
+          </span>
+          {projectTotalAU > 0 && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 font-mono font-semibold border border-amber-200 dark:border-amber-800/60" title="Total Project Tasks Planned Attention Units">
+              {Math.round(projectTotalAU * 10) / 10} AU
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center space-x-2 flex-wrap gap-y-2">
+          {/* Grouping Mode Switcher for Today's Project Tasks */}
+          <div className="flex items-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-0.5 rounded-lg shadow-2xs">
+            <button
+              type="button"
+              onClick={() => handleTodayProjectGroupModeChange('hierarchy')}
+              className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                todayProjectTasksGroupMode === 'hierarchy'
+                  ? 'bg-emerald-600 text-white shadow-xs font-semibold'
+                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+              title="Group by Project & Subtask Hierarchy"
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Hierarchy</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleTodayProjectGroupModeChange('attention')}
+              className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                todayProjectTasksGroupMode === 'attention'
+                  ? 'bg-emerald-600 text-white shadow-xs font-semibold'
+                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+              title="Group by Priority Attention"
+            >
+              <Zap className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Attention</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleTodayProjectGroupModeChange('flat')}
+              className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                todayProjectTasksGroupMode === 'flat'
+                  ? 'bg-emerald-600 text-white shadow-xs font-semibold'
+                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+              title="Show all project tasks in a flat list"
+            >
+              <List className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Flat</span>
+            </button>
+          </div>
+
+          {/* Attention Filter Toggle Pills */}
+          <div className="flex items-center bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-0.5 rounded-lg text-xs">
+            <button
+              onClick={() => setAttentionOnlyFilter(false)}
+              className={`px-2.5 py-1 rounded-md font-medium transition-all cursor-pointer ${
+                !attentionOnlyFilter
+                  ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
+            >
+              All Projects
+            </button>
+            <button
+              onClick={() => setAttentionOnlyFilter(true)}
+              className={`flex items-center space-x-1 px-2.5 py-1 rounded-md font-medium transition-all cursor-pointer ${
+                attentionOnlyFilter
+                  ? 'bg-amber-500 text-white shadow-xs font-semibold'
+                  : 'text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300'
+              }`}
+            >
+              <Zap className="w-3 h-3 fill-current" />
+              <span>Attention Only</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {displayProjectTasks.length === 0 ? (
+        <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800/80 rounded-xl p-6 text-center text-xs text-slate-500">
+          {attentionOnlyFilter
+            ? 'No tasks scheduled for today from your priority attention projects.'
+            : 'No project tasks scheduled for today across your active projects.'}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {/* 1. HIERARCHY MODE */}
+          {todayProjectTasksGroupMode === 'hierarchy' && (
+            <div className="space-y-3">
+              {todayHierarchyGroups.map((group) => {
+                const isCollapsed = !!collapsedTodayProjects[group.projectId];
+                const projectTheme = getProjectColorTheme(group.project?.style?.color);
+
+                return (
+                  <div
+                    key={group.projectId}
+                    className="bg-white/90 dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800/80 rounded-xl p-3.5 space-y-3 shadow-xs"
+                  >
+                    {/* Project Group Header */}
+                    <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-slate-100 dark:border-slate-800/60">
+                      <div className="flex items-center space-x-2.5 min-w-0">
+                        <button
+                          type="button"
+                          onClick={() => toggleTodayProjectCollapse(group.projectId)}
+                          className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                          title={isCollapsed ? 'Expand project tasks' : 'Collapse project tasks'}
+                        >
+                          {isCollapsed ? (
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          ) : (
+                            <ChevronDown className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => group.project && openProject(group.projectId)}
+                          className="flex items-center space-x-2 group/title cursor-pointer hover:opacity-80 transition-opacity"
+                          title={`Open project "${group.projectName}"`}
+                        >
+                          <div className={`p-1.5 rounded-lg ${projectTheme.badgeBg}`}>
+                            <ProjectIconDisplay
+                              icon={group.project?.style?.icon}
+                              emoji={group.project?.style?.emoji}
+                              className="w-4 h-4"
+                            />
+                          </div>
+                          <span className="text-sm font-semibold text-slate-900 dark:text-slate-100 group-hover/title:text-indigo-600 dark:group-hover/title:text-indigo-400 transition-colors truncate">
+                            {group.projectName}
+                          </span>
+                        </button>
+
+                        {group.isAttention && (
+                          <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60 shadow-2xs shrink-0">
+                            <Zap className="w-3 h-3 fill-current text-amber-500" />
+                            <span>Attention</span>
+                          </span>
+                        )}
+
+                        <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold shrink-0">
+                          {group.allTasks.length} {group.allTasks.length === 1 ? 'task' : 'tasks'}
+                        </span>
+                      </div>
+
+                      {group.project && (
+                        <button
+                          type="button"
+                          onClick={() => openProject(group.projectId)}
+                          className="p-1 rounded text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer ml-auto"
+                          title={`Open project "${group.projectName}" graph`}
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Project Tasks Body */}
+                    {!isCollapsed && (
+                      <div className="space-y-2.5 pt-1">
+                        {/* Root Tasks */}
+                        {group.rootTasks.length > 0 && (
+                          <div className="space-y-1.5">
+                            {group.rootTasks.map((task) =>
+                              renderTodayProjectTaskRow(task, { hideProjectBadge: true, hideParentBreadcrumbs: true })
+                            )}
+                          </div>
+                        )}
+
+                        {/* Subtask Hierarchical Groups */}
+                        {group.subtaskGroups.map((subGroup) => (
+                          <div
+                            key={subGroup.key}
+                            className="bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-800/70 rounded-lg p-2.5 space-y-1.5"
+                          >
+                            {/* Breadcrumbs trail header */}
+                            <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-300 px-1 pb-1">
+                              <div className="flex items-center space-x-1.5 truncate">
+                                <Layers className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                                <span className="font-semibold text-slate-500 dark:text-slate-400 shrink-0">
+                                  Inside:
+                                </span>
+                                <div className="flex items-center space-x-1 truncate font-medium">
+                                  {subGroup.breadcrumbs.map((bNode, idx) => (
+                                    <React.Fragment key={bNode.id}>
+                                      {idx > 0 && <span className="text-slate-400">→</span>}
+                                      <button
+                                        type="button"
+                                        onClick={() => openProject(group.projectId, bNode)}
+                                        className="hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline cursor-pointer truncate"
+                                        title={`Open node "${bNode.text}" in project`}
+                                      >
+                                        {bNode.text}
+                                      </button>
+                                    </React.Fragment>
+                                  ))}
+                                </div>
+                              </div>
+                              <span className="text-xs font-mono text-slate-400 dark:text-slate-500 shrink-0 pl-2">
+                                {subGroup.tasks.length} {subGroup.tasks.length === 1 ? 'task' : 'tasks'}
+                              </span>
+                            </div>
+
+                            {/* Task Rows in Subtask Group */}
+                            <div className="space-y-1.5">
+                              {subGroup.tasks.map((task) =>
+                                renderTodayProjectTaskRow(task, { hideProjectBadge: true, hideParentBreadcrumbs: true })
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* 2. ATTENTION MODE */}
+          {todayProjectTasksGroupMode === 'attention' && (
+            <div className="space-y-3">
+              {/* Priority Attention Tasks */}
+              {todayAttentionGroups.attentionTasks.length > 0 && (
+                <div className="bg-amber-50/40 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 rounded-xl p-3.5 space-y-2.5 shadow-xs">
+                  <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-amber-200/60 dark:border-amber-900/40">
+                    <div className="flex items-center space-x-2">
+                      <div className="p-1.5 rounded-lg bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60">
+                        <Zap className="w-4 h-4 fill-current text-amber-500" />
+                      </div>
+                      <span className="text-sm font-semibold text-amber-950 dark:text-amber-100">
+                        Priority Attention Tasks
+                      </span>
+                      <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-amber-200/80 dark:bg-amber-900/80 text-amber-900 dark:text-amber-100 font-semibold">
+                        {todayAttentionGroups.attentionTasks.length}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    {todayAttentionGroups.attentionTasks.map((task) =>
+                      renderTodayProjectTaskRow(task, { hideProjectBadge: false, hideParentBreadcrumbs: false })
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Regular Tasks */}
+              {todayAttentionGroups.regularTasks.length > 0 && (
+                <div className="bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 space-y-2.5 shadow-xs">
+                  <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-slate-100 dark:border-slate-800/60">
+                    <div className="flex items-center space-x-2">
+                      <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                        <Folder className="w-4 h-4 text-slate-500" />
+                      </div>
+                      <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                        Standard Projects
+                      </span>
+                      <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
+                        {todayAttentionGroups.regularTasks.length}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    {todayAttentionGroups.regularTasks.map((task) =>
+                      renderTodayProjectTaskRow(task, { hideProjectBadge: false, hideParentBreadcrumbs: false })
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 3. FLAT MODE */}
+          {todayProjectTasksGroupMode === 'flat' && (
+            <div className="space-y-1.5">
+              {displayProjectTasks.map((task) =>
+                renderTodayProjectTaskRow(task, { hideProjectBadge: false, hideParentBreadcrumbs: false })
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+
+  const renderStandaloneTasksContent = (isStream: boolean) => (
+    <>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center space-x-2">
+          <CheckCircle2 className="w-4 h-4 text-teal-500 dark:text-teal-400" />
+          <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+            {isStream ? 'Velocity: Standalone Tasks' : 'Standalone Tasks'}
+          </h2>
+          <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono font-semibold">
+            {allDisplayStandaloneTasks.length}
+          </span>
+          {preferences.attentionSystemEnabled && (() => {
+            const totalAU = allDisplayStandaloneTasks.reduce((acc, t) => acc + (t.estimatedAU || 0), 0);
+            return totalAU > 0 ? (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 font-mono font-semibold border border-amber-200 dark:border-amber-800/60" title="Total Standalone Tasks Planned Attention Units">
+                {Math.round(totalAU * 10) / 10} AU
+              </span>
+            ) : null;
+          })()}
+        </div>
+
+        {/* Grouping Mode Switcher for Standalone Tasks */}
+        <div className="flex items-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-0.5 rounded-lg shadow-2xs">
+          <button
+            type="button"
+            onClick={() => handleStandaloneGroupModeChange('schedule')}
+            className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
+              standaloneGroupMode === 'schedule'
+                ? 'bg-teal-600 text-white shadow-xs font-semibold'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+            title="Group by Schedule (Overdue, Today, Upcoming)"
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">By Schedule</span>
+            <span className="sm:hidden">Schedule</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleStandaloneGroupModeChange('recurrence')}
+            className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
+              standaloneGroupMode === 'recurrence'
+                ? 'bg-teal-600 text-white shadow-xs font-semibold'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+            title="Group by Recurrence (Recurring vs One-Off)"
+          >
+            <RotateCw className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">By Recurrence</span>
+            <span className="sm:hidden">Recurrence</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleStandaloneGroupModeChange('flat')}
+            className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
+              standaloneGroupMode === 'flat'
+                ? 'bg-teal-600 text-white shadow-xs font-semibold'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+            title="Show all standalone tasks in a flat list with filters"
+          >
+            <List className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Flat</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Inline Add Standalone Task */}
+      <form
+        onSubmit={handleAddStandalone}
+        className={`flex flex-col gap-2 p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 shadow-xs transition-all ${
+          isCalendarOpen || isNewRecurrenceOpen || isNewAuOpen ? 'relative z-50 ring-2 ring-teal-500/20' : 'relative z-10'
+        }`}
+      >
+        <input
+          type="text"
+          placeholder="Add a standalone task (e.g. Call dentist, buy printer paper)..."
+          value={newStandaloneText}
+          onChange={(e) => setNewStandaloneText(e.target.value)}
+          className="w-full text-xs sm:text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg py-2 px-3 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-teal-500 shadow-2xs transition-colors"
+        />
+
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center space-x-1.5 flex-wrap gap-y-1.5">
+            {/* Due Date Selector */}
+            <div className={`relative ${isCalendarOpen ? 'z-50' : ''}`}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsCalendarOpen((prev) => !prev);
+                }}
+                className={`flex items-center space-x-1.5 px-2.5 py-1 text-xs font-mono font-medium rounded-md transition-colors cursor-pointer group/cal border ${
+                  newStandaloneDueDate
+                    ? 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 hover:text-teal-600 dark:hover:text-teal-400 border-slate-200 dark:border-slate-700'
+                    : 'bg-amber-50/70 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 border-dashed border-amber-300 dark:border-amber-600/70'
+                }`}
+                title={newStandaloneDueDate ? 'Click to select due date' : 'Select due date (required)'}
+              >
+                <Calendar className={`w-3.5 h-3.5 shrink-0 transition-colors ${
+                  newStandaloneDueDate
+                    ? 'text-slate-400 group-hover/cal:text-teal-500'
+                    : 'text-amber-500 group-hover/cal:text-amber-600'
+                }`} />
+                <span>{newStandaloneDueDate ? formatDateDisplay(newStandaloneDueDate) : 'Pick date'}</span>
+              </button>
+
+              {isCalendarOpen && (
+                <CalendarPicker
+                  value={newStandaloneDueDate}
+                  onChange={(newDate) => setNewStandaloneDueDate(newDate)}
+                  onClose={() => setIsCalendarOpen(false)}
+                  position="bottom"
+                  align="left"
+                  taskEstimatedAU={newStandaloneEstimatedAU ? parseFloat(newStandaloneEstimatedAU) : undefined}
+                />
+              )}
+            </div>
+
+            {/* Recurrence Selector */}
+            <RecurrencePicker
+              value={newStandaloneRecurrence}
+              baseDate={newStandaloneDueDate || getTodayString()}
+              onChange={setNewStandaloneRecurrence}
+              onOpenChange={setIsNewRecurrenceOpen}
+              buttonVariant={newStandaloneRecurrence ? 'badge' : 'icon'}
+              align="left"
+            />
+
+            {/* Estimated AU Input (if attention system enabled) */}
+            {preferences.attentionSystemEnabled && (
+              <AttentionUnitInput
+                value={newStandaloneEstimatedAU ? parseFloat(newStandaloneEstimatedAU) : undefined}
+                onChange={(val) => setNewStandaloneEstimatedAU(val !== undefined ? String(val) : '')}
+                auMinutes={preferences.attentionUnitMinutes}
+                compact={true}
+                placeholder="+ AU"
+                align="left"
+                onOpenChange={setIsNewAuOpen}
+              />
+            )}
+
+            {/* Environment Selector */}
+            <button
+              type="button"
+              onClick={() => {
+                const nextEnv: TaskEnvironment =
+                  newStandaloneEnvironment === 'computer'
+                    ? 'physical'
+                    : newStandaloneEnvironment === 'physical'
+                    ? 'mixed'
+                    : 'computer';
+                setNewStandaloneEnvironment(nextEnv);
+              }}
+              className="flex items-center space-x-1 px-2 py-1 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-850 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shadow-2xs cursor-pointer"
+              title={`Task Environment: ${newStandaloneEnvironment} (Click to switch)`}
+              data-testid="standalone-environment-picker"
+            >
+              <span>{newStandaloneEnvironment === 'computer' ? '💻' : newStandaloneEnvironment === 'physical' ? '🏃' : '🔄'}</span>
+              <span className="capitalize">{newStandaloneEnvironment}</span>
+            </button>
+          </div>
+
+          <button
+            type="submit"
+            disabled={!newStandaloneText.trim() || !newStandaloneDueDate}
+            title={
+              !newStandaloneText.trim()
+                ? 'Enter a task description'
+                : !newStandaloneDueDate
+                ? 'Please select a due date'
+                : 'Add task'
+            }
+            className="flex items-center space-x-1.5 px-3.5 py-1 rounded-lg text-xs font-semibold bg-teal-600 hover:bg-teal-500 disabled:opacity-50 text-white transition-colors shrink-0 cursor-pointer shadow-xs disabled:cursor-not-allowed ml-auto"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Add</span>
+          </button>
+        </div>
+      </form>
+
+      {allDisplayStandaloneTasks.length === 0 ? (
+        <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800/80 rounded-xl p-6 text-center text-sm text-slate-500">
+          No active standalone tasks. Tasks created here exist outside project graphs.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {/* 1. SCHEDULE MODE (Overdue, Today, Upcoming) */}
+          {standaloneGroupMode === 'schedule' && (
+            <div className="space-y-3">
+              {standaloneScheduleGroups.map((sGroup) => {
+                const isCollapsed = !!collapsedStandaloneGroups[sGroup.id];
+
+                return (
+                  <div
+                    key={sGroup.id}
+                    className="bg-white/90 dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800/80 rounded-xl p-3.5 space-y-2.5 shadow-xs"
+                  >
+                    <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-slate-100 dark:border-slate-800/60">
+                      <div className="flex items-center space-x-2">
+                        <button
+                          type="button"
+                          onClick={() => toggleStandaloneGroupCollapse(sGroup.id)}
+                          className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                          title={isCollapsed ? 'Expand group' : 'Collapse group'}
+                        >
+                          {isCollapsed ? (
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          ) : (
+                            <ChevronDown className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                        <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                          {sGroup.title}
+                        </span>
+                        <span className={`text-xs font-mono px-2 py-0.5 rounded-full font-semibold ${sGroup.badgeClass}`}>
+                          {sGroup.tasks.length}
+                        </span>
+                        {preferences.attentionSystemEnabled && (() => {
+                          const groupAU = sGroup.tasks.reduce((acc, t) => acc + (t.estimatedAU || 0), 0);
+                          return groupAU > 0 ? (
+                            <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60 font-semibold" title="Total Group Planned Attention Units">
+                              {Math.round(groupAU * 10) / 10} AU
+                            </span>
+                          ) : null;
+                        })()}
+                      </div>
+                    </div>
+
+                    {!isCollapsed && (
+                      <div className="space-y-1.5">
+                        {sGroup.tasks.map((task) => renderStandaloneTaskRow(task))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* 2. RECURRENCE MODE */}
+          {standaloneGroupMode === 'recurrence' && (
+            <div className="space-y-3">
+              {standaloneRecurrenceGroups.map((rGroup) => {
+                const isCollapsed = !!collapsedStandaloneGroups[rGroup.id];
+
+                return (
+                  <div
+                    key={rGroup.id}
+                    className="bg-white/90 dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800/80 rounded-xl p-3.5 space-y-2.5 shadow-xs"
+                  >
+                    <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-slate-100 dark:border-slate-800/60">
+                      <div className="flex items-center space-x-2">
+                        <button
+                          type="button"
+                          onClick={() => toggleStandaloneGroupCollapse(rGroup.id)}
+                          className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                          title={isCollapsed ? 'Expand group' : 'Collapse group'}
+                        >
+                          {isCollapsed ? (
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          ) : (
+                            <ChevronDown className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                        <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                          {rGroup.title}
+                        </span>
+                        <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
+                          {rGroup.tasks.length}
+                        </span>
+                        {preferences.attentionSystemEnabled && (() => {
+                          const groupAU = rGroup.tasks.reduce((acc, t) => acc + (t.estimatedAU || 0), 0);
+                          return groupAU > 0 ? (
+                            <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60 font-semibold" title="Total Group Planned Attention Units">
+                              {Math.round(groupAU * 10) / 10} AU
+                            </span>
+                          ) : null;
+                        })()}
+                      </div>
+                    </div>
+
+                    {!isCollapsed && (
+                      <div className="space-y-1.5">
+                        {rGroup.tasks.map((task) => renderStandaloneTaskRow(task))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* 3. FLAT MODE WITH FILTER PILLS */}
+          {standaloneGroupMode === 'flat' && (
+            <div className="space-y-2">
+              <div className="flex items-center space-x-1 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-0.5 rounded-lg text-xs self-start">
+                <button
+                  onClick={() => setStandaloneFilter('all')}
+                  className={`px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                    standaloneFilter === 'all'
+                      ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-xs font-semibold'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  All ({allDisplayStandaloneTasks.length})
+                </button>
+                {overdueStandaloneTasks.length > 0 && (
+                  <button
+                    onClick={() => setStandaloneFilter('overdue')}
+                    className={`px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center space-x-1.5 ${
+                      standaloneFilter === 'overdue'
+                        ? 'bg-white dark:bg-slate-800 text-amber-600 dark:text-amber-400 shadow-xs font-semibold'
+                        : 'text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40'
+                    }`}
+                  >
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span>Overdue ({overdueStandaloneTasks.length})</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => setStandaloneFilter('today')}
+                  className={`px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center space-x-1.5 ${
+                    standaloneFilter === 'today'
+                      ? 'bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 shadow-xs font-semibold'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Today ({todayStandaloneTasks.length})</span>
+                </button>
+                <button
+                  onClick={() => setStandaloneFilter('upcoming')}
+                  className={`px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center space-x-1.5 ${
+                    standaloneFilter === 'upcoming'
+                      ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs font-semibold'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  <CalendarDays className="w-3.5 h-3.5" />
+                  <span>Upcoming ({upcomingStandaloneTasks.length})</span>
+                </button>
+              </div>
+
+              <div className="space-y-1.5 pt-1">
+                {(standaloneFilter === 'all'
+                  ? allDisplayStandaloneTasks
+                  : standaloneFilter === 'overdue'
+                  ? overdueStandaloneTasks
+                  : standaloneFilter === 'today'
+                  ? todayStandaloneTasks
+                  : upcomingStandaloneTasks
+                ).map((task) => renderStandaloneTaskRow(task))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+
   return (
-    <div className="flex-1 overflow-y-auto p-3 sm:p-5 md:p-6 lg:p-8 max-w-[1550px] mx-auto w-full space-y-6">
+    <div className="flex-1 overflow-y-auto p-3 sm:p-5 md:p-6 lg:p-8 max-w-[1550px] mx-auto w-full space-y-6 pb-28 sm:pb-32">
       {/* View Header */}
       <div className="flex flex-col gap-4 border-b border-slate-200 dark:border-slate-800 pb-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -1550,6 +2262,36 @@ export const MyDayView: React.FC = () => {
                 Current Tasks
               </button>
             </div>
+
+            {/* Layout Toggle: Focus Stream vs Dual Board */}
+            <div className="flex items-center bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-1 rounded-lg">
+              <button
+                type="button"
+                onClick={() => handleLayoutChange('stream')}
+                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                  viewLayout === 'stream'
+                    ? 'bg-emerald-600 text-white shadow-sm font-semibold'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+                title="Focus Stream: A calm, single-column linear flow for deep focus"
+              >
+                <List className="w-3.5 h-3.5" />
+                <span>Focus Stream</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleLayoutChange('bimodal')}
+                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                  viewLayout === 'bimodal'
+                    ? 'bg-emerald-600 text-white shadow-sm font-semibold'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+                title="Dual Board: Bimodal layout separating Deep Project Work from Velocity Chores"
+              >
+                <Columns2 className="w-3.5 h-3.5" />
+                <span>Dual Board</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1575,90 +2317,94 @@ export const MyDayView: React.FC = () => {
         </div>
       </div>
 
-      {/* Mobile Segmented View Switcher (< lg) */}
-      <div className="lg:hidden flex items-center bg-slate-200/80 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 p-1 rounded-xl shadow-xs">
-        <button
-          type="button"
-          data-testid="mobile-tab-projects"
-          onClick={() => setActiveMobileTab('projects')}
-          className={`flex-1 flex items-center justify-center space-x-2 py-2 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-            activeMobileTab === 'projects'
-              ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-xs'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-          }`}
-        >
-          <Folder className="w-4 h-4 text-emerald-500 shrink-0" />
-          <span>Projects</span>
-          <span className={`text-[11px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
-            activeMobileTab === 'projects'
-              ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300'
-              : 'bg-slate-300/60 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-          }`}>
-            {displayProjectTasks.length}
-          </span>
-          {hasAttentionProjectTasks && (
-            <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0 animate-pulse" title="Attention tasks present" />
-          )}
-        </button>
-        <button
-          type="button"
-          data-testid="mobile-tab-standalone"
-          onClick={() => setActiveMobileTab('standalone')}
-          className={`flex-1 flex items-center justify-center space-x-2 py-2 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-            activeMobileTab === 'standalone'
-              ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-xs'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-          }`}
-        >
-          <CheckCircle2 className="w-4 h-4 text-teal-500 shrink-0" />
-          <span>Standalone</span>
-          <span className={`text-[11px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
-            activeMobileTab === 'standalone'
-              ? 'bg-teal-100 dark:bg-teal-950/80 text-teal-700 dark:text-teal-300'
-              : 'bg-slate-300/60 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-          }`}>
-            {allDisplayStandaloneTasks.length}
-          </span>
-        </button>
-      </div>
+      {/* Mobile Segmented View Switcher (< lg, bimodal board only) */}
+      {viewLayout === 'bimodal' && (
+        <div className="lg:hidden flex items-center bg-slate-200/80 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 p-1 rounded-xl shadow-xs">
+          <button
+            type="button"
+            data-testid="mobile-tab-projects"
+            onClick={() => setActiveMobileTab('projects')}
+            className={`flex-1 flex items-center justify-center space-x-2 py-2 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              activeMobileTab === 'projects'
+                ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
+          >
+            <Folder className="w-4 h-4 text-emerald-500 shrink-0" />
+            <span>Projects</span>
+            <span className={`text-[11px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+              activeMobileTab === 'projects'
+                ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300'
+                : 'bg-slate-300/60 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+            }`}>
+              {displayProjectTasks.length}
+            </span>
+            {hasAttentionProjectTasks && (
+              <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0 animate-pulse" title="Attention tasks present" />
+            )}
+          </button>
+          <button
+            type="button"
+            data-testid="mobile-tab-standalone"
+            onClick={() => setActiveMobileTab('standalone')}
+            className={`flex-1 flex items-center justify-center space-x-2 py-2 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              activeMobileTab === 'standalone'
+                ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
+          >
+            <CheckCircle2 className="w-4 h-4 text-teal-500 shrink-0" />
+            <span>Standalone</span>
+            <span className={`text-[11px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+              activeMobileTab === 'standalone'
+                ? 'bg-teal-100 dark:bg-teal-950/80 text-teal-700 dark:text-teal-300'
+                : 'bg-slate-300/60 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+            }`}>
+              {allDisplayStandaloneTasks.length}
+            </span>
+          </button>
+        </div>
+      )}
 
-      {/* Mobile Lateral Quick-Switch Floating Pill (< lg) */}
-      <div className="lg:hidden fixed bottom-20 right-3.5 z-30 pointer-events-auto">
-        <button
-          type="button"
-          data-testid="mobile-lateral-switch"
-          onClick={() => setActiveMobileTab(activeMobileTab === 'projects' ? 'standalone' : 'projects')}
-          className="flex items-center space-x-2 pl-3 pr-3.5 py-2.5 rounded-full bg-slate-900/90 dark:bg-slate-800/95 text-white shadow-2xl backdrop-blur-md border border-slate-700/70 hover:bg-slate-800 dark:hover:bg-slate-700 transition-all active:scale-95 cursor-pointer group"
-          title={activeMobileTab === 'projects' ? 'Switch to Standalone Tasks' : 'Switch to Project Tasks'}
-          aria-label="Switch My Day Panel"
-        >
-          {activeMobileTab === 'projects' ? (
-            <>
-              <div className="p-1 rounded-full bg-teal-500/20 text-teal-400 group-hover:bg-teal-500/30 transition-colors">
-                <CheckCircle2 className="w-3.5 h-3.5 text-teal-400" />
-              </div>
-              <div className="text-left">
-                <div className="text-[11px] font-bold leading-tight flex items-center space-x-1">
-                  <span>Standalone</span>
-                  <span className="text-[10px] text-teal-400 font-mono font-normal">({allDisplayStandaloneTasks.length})</span>
+      {/* Mobile Lateral Quick-Switch Floating Pill (< lg, bimodal board only) */}
+      {viewLayout === 'bimodal' && (
+        <div className="lg:hidden fixed bottom-20 right-3.5 z-30 pointer-events-auto">
+          <button
+            type="button"
+            data-testid="mobile-lateral-switch"
+            onClick={() => setActiveMobileTab(activeMobileTab === 'projects' ? 'standalone' : 'projects')}
+            className="flex items-center space-x-2 pl-3 pr-3.5 py-2.5 rounded-full bg-slate-900/90 dark:bg-slate-800/95 text-white shadow-2xl backdrop-blur-md border border-slate-700/70 hover:bg-slate-800 dark:hover:bg-slate-700 transition-all active:scale-95 cursor-pointer group"
+            title={activeMobileTab === 'projects' ? 'Switch to Standalone Tasks' : 'Switch to Project Tasks'}
+            aria-label="Switch My Day Panel"
+          >
+            {activeMobileTab === 'projects' ? (
+              <>
+                <div className="p-1 rounded-full bg-teal-500/20 text-teal-400 group-hover:bg-teal-500/30 transition-colors">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-teal-400" />
                 </div>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="p-1 rounded-full bg-emerald-500/20 text-emerald-400 group-hover:bg-emerald-500/30 transition-colors">
-                <Folder className="w-3.5 h-3.5 text-emerald-400" />
-              </div>
-              <div className="text-left">
-                <div className="text-[11px] font-bold leading-tight flex items-center space-x-1">
-                  <span>Projects</span>
-                  <span className="text-[10px] text-emerald-400 font-mono font-normal">({displayProjectTasks.length})</span>
+                <div className="text-left">
+                  <div className="text-[11px] font-bold leading-tight flex items-center space-x-1">
+                    <span>Standalone</span>
+                    <span className="text-[10px] text-teal-400 font-mono font-normal">({allDisplayStandaloneTasks.length})</span>
+                  </div>
                 </div>
-              </div>
-            </>
-          )}
-        </button>
-      </div>
+              </>
+            ) : (
+              <>
+                <div className="p-1 rounded-full bg-emerald-500/20 text-emerald-400 group-hover:bg-emerald-500/30 transition-colors">
+                  <Folder className="w-3.5 h-3.5 text-emerald-400" />
+                </div>
+                <div className="text-left">
+                  <div className="text-[11px] font-bold leading-tight flex items-center space-x-1">
+                    <span>Projects</span>
+                    <span className="text-[10px] text-emerald-400 font-mono font-normal">({displayProjectTasks.length})</span>
+                  </div>
+                </div>
+              </>
+            )}
+          </button>
+        </div>
+      )}
 
       {/* Fallback Notice for Current Tasks */}
       {myDayData.isFallback && preferences.myDayMode === 'current_tasks' && (
@@ -1672,22 +2418,22 @@ export const MyDayView: React.FC = () => {
 
       {/* Late Tasks Collapsed Section */}
       {totalLateCount > 0 && (
-        <div className="rounded-2xl border border-rose-200/90 dark:border-rose-900/50 bg-rose-50/40 dark:bg-rose-950/20 overflow-hidden shadow-xs">
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/80 overflow-hidden shadow-xs">
           {/* Collapsible Header */}
-          <div className="p-4 flex items-center justify-between gap-3 flex-wrap">
+          <div className="p-3.5 sm:p-4 flex items-center justify-between gap-3 flex-wrap">
             <button
               onClick={() => setIsLateTasksOpen(!isLateTasksOpen)}
               className="flex items-center space-x-2.5 text-left group cursor-pointer"
             >
-              <div className="p-1 rounded-md bg-rose-100 dark:bg-rose-900/50 group-hover:bg-rose-200 dark:group-hover:bg-rose-800/60 transition-colors text-rose-600 dark:text-rose-400">
+              <div className="p-1 rounded-md bg-slate-200/80 dark:bg-slate-800 group-hover:bg-slate-300 dark:group-hover:bg-slate-700 transition-colors text-slate-700 dark:text-slate-300">
                 {isLateTasksOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
               </div>
               <div className="flex items-center space-x-2">
-                <AlertTriangle className="w-4 h-4 text-rose-500 animate-pulse" />
-                <h2 className="text-sm font-bold text-rose-900 dark:text-rose-200 tracking-tight">
-                  Late Tasks
+                <Clock className="w-4 h-4 text-amber-500" />
+                <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 tracking-tight">
+                  Overdue Tasks (Triage & Recovery)
                 </h2>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-rose-200/80 dark:bg-rose-900/80 text-rose-800 dark:text-rose-200 font-mono font-bold">
+                <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 font-mono font-semibold">
                   {totalLateCount}
                 </span>
               </div>
@@ -1695,14 +2441,14 @@ export const MyDayView: React.FC = () => {
 
             <div className="flex items-center space-x-2 shrink-0 flex-wrap gap-y-2">
               {/* Grouping Mode Switcher */}
-              <div className="flex items-center bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-900/60 p-0.5 rounded-lg shadow-2xs">
+              <div className="flex items-center bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-0.5 rounded-lg shadow-2xs">
                 <button
                   type="button"
                   onClick={() => handleGroupModeChange('hierarchy')}
                   className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
                     lateTasksGroupMode === 'hierarchy'
-                      ? 'bg-rose-600 text-white shadow-xs font-semibold'
-                      : 'text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                      ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900 shadow-xs font-semibold'
+                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
                   }`}
                   title="Group by Project & Subtask Hierarchy"
                 >
@@ -1714,8 +2460,8 @@ export const MyDayView: React.FC = () => {
                   onClick={() => handleGroupModeChange('attention')}
                   className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
                     lateTasksGroupMode === 'attention'
-                      ? 'bg-rose-600 text-white shadow-xs font-semibold'
-                      : 'text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                      ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900 shadow-xs font-semibold'
+                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
                   }`}
                   title="Group by Priority Attention"
                 >
@@ -1727,8 +2473,8 @@ export const MyDayView: React.FC = () => {
                   onClick={() => handleGroupModeChange('time')}
                   className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
                     lateTasksGroupMode === 'time'
-                      ? 'bg-rose-600 text-white shadow-xs font-semibold'
-                      : 'text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                      ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900 shadow-xs font-semibold'
+                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
                   }`}
                   title="Group by Overdue Time"
                 >
@@ -1740,8 +2486,8 @@ export const MyDayView: React.FC = () => {
                   onClick={() => handleGroupModeChange('flat')}
                   className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
                     lateTasksGroupMode === 'flat'
-                      ? 'bg-rose-600 text-white shadow-xs font-semibold'
-                      : 'text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                      ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900 shadow-xs font-semibold'
+                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
                   }`}
                   title="Show all late tasks in a flat list"
                 >
@@ -1753,10 +2499,10 @@ export const MyDayView: React.FC = () => {
               {/* Reschedule All to Today */}
               <button
                 onClick={handleRescheduleAllLateToToday}
-                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-rose-50 dark:hover:bg-slate-800 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/60 text-xs font-semibold transition-all cursor-pointer shadow-xs"
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-all cursor-pointer shadow-xs"
                 title="Reschedule all late tasks to today"
               >
-                <CalendarCheck className="w-3.5 h-3.5 text-rose-500" />
+                <CalendarCheck className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Reschedule All to Today</span>
                 <span className="sm:hidden">All to Today</span>
               </button>
@@ -2131,670 +2877,36 @@ export const MyDayView: React.FC = () => {
         </div>
       )}
 
-      {/* Execution Surface: Two-Column Layout (Projects left, Standalone right) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start" data-testid="my-day-columns">
-        {/* 1. Project Tasks Column (Left) */}
-        <div
-          className={`space-y-4 ${activeMobileTab === 'projects' ? 'block' : 'hidden lg:block'}`}
-          data-testid="projects-column"
-        >
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div className="flex items-center space-x-2">
-              <Folder className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
-              <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
-                Project Tasks
-              </h2>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono font-semibold">
-                {displayProjectTasks.length}
-              </span>
-              {projectTotalAU > 0 && (
-                <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 font-mono font-semibold border border-amber-200 dark:border-amber-800/60" title="Total Project Tasks Planned Attention Units">
-                  {Math.round(projectTotalAU * 10) / 10} AU
-                </span>
-              )}
-            </div>
+      {/* Execution Surface: Bimodal Dual Board vs Focus Stream */}
+      {viewLayout === 'bimodal' ? (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start" data-testid="my-day-columns">
+          {/* 1. Project Tasks Column (Left) */}
+          <div
+            className={`space-y-4 ${activeMobileTab === 'projects' ? 'block' : 'hidden lg:block'}`}
+            data-testid="projects-column"
+          >
+            {renderProjectTasksContent(false)}
+          </div>
 
-          <div className="flex items-center space-x-2 flex-wrap gap-y-2">
-            {/* Grouping Mode Switcher for Today's Project Tasks */}
-            <div className="flex items-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-0.5 rounded-lg shadow-2xs">
-              <button
-                type="button"
-                onClick={() => handleTodayProjectGroupModeChange('hierarchy')}
-                className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
-                  todayProjectTasksGroupMode === 'hierarchy'
-                    ? 'bg-emerald-600 text-white shadow-xs font-semibold'
-                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-                }`}
-                title="Group by Project & Subtask Hierarchy"
-              >
-                <Layers className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Hierarchy</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleTodayProjectGroupModeChange('attention')}
-                className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
-                  todayProjectTasksGroupMode === 'attention'
-                    ? 'bg-emerald-600 text-white shadow-xs font-semibold'
-                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-                }`}
-                title="Group by Priority Attention"
-              >
-                <Zap className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Attention</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleTodayProjectGroupModeChange('flat')}
-                className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
-                  todayProjectTasksGroupMode === 'flat'
-                    ? 'bg-emerald-600 text-white shadow-xs font-semibold'
-                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-                }`}
-                title="Show all project tasks in a flat list"
-              >
-                <List className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Flat</span>
-              </button>
-            </div>
-
-            {/* Attention Filter Toggle Pills */}
-            <div className="flex items-center bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-0.5 rounded-lg text-xs">
-              <button
-                onClick={() => setAttentionOnlyFilter(false)}
-                className={`px-2.5 py-1 rounded-md font-medium transition-all cursor-pointer ${
-                  !attentionOnlyFilter
-                    ? 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 shadow-xs'
-                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                }`}
-              >
-                All Projects
-              </button>
-              <button
-                onClick={() => setAttentionOnlyFilter(true)}
-                className={`flex items-center space-x-1 px-2.5 py-1 rounded-md font-medium transition-all cursor-pointer ${
-                  attentionOnlyFilter
-                    ? 'bg-amber-500 text-white shadow-xs font-semibold'
-                    : 'text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300'
-                }`}
-              >
-                <Zap className="w-3 h-3 fill-current" />
-                <span>Attention Only</span>
-              </button>
-            </div>
+          {/* 2. Standalone Tasks Column (Right) */}
+          <div
+            className={`space-y-4 ${activeMobileTab === 'standalone' ? 'block' : 'hidden lg:block'}`}
+            data-testid="standalone-column"
+          >
+            {renderStandaloneTasksContent(false)}
           </div>
         </div>
-
-        {displayProjectTasks.length === 0 ? (
-          <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800/80 rounded-xl p-6 text-center text-xs text-slate-500">
-            {attentionOnlyFilter
-              ? 'No tasks scheduled for today from your priority attention projects.'
-              : 'No project tasks scheduled for today across your active projects.'}
+      ) : (
+        /* Focus Stream (Single calm cognitive flow) */
+        <div className="max-w-4xl mx-auto w-full space-y-8" data-testid="stream-view-container">
+          <div className="space-y-4">
+            {renderProjectTasksContent(true)}
           </div>
-        ) : (
-          <div className="space-y-3">
-            {/* 1. HIERARCHY MODE */}
-            {todayProjectTasksGroupMode === 'hierarchy' && (
-              <div className="space-y-3">
-                {todayHierarchyGroups.map((group) => {
-                  const isCollapsed = !!collapsedTodayProjects[group.projectId];
-                  const projectTheme = getProjectColorTheme(group.project?.style?.color);
-
-                  return (
-                    <div
-                      key={group.projectId}
-                      className="bg-white/90 dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800/80 rounded-xl p-3.5 space-y-3 shadow-xs"
-                    >
-                      {/* Project Group Header */}
-                      <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-slate-100 dark:border-slate-800/60">
-                        <div className="flex items-center space-x-2.5 min-w-0">
-                          <button
-                            type="button"
-                            onClick={() => toggleTodayProjectCollapse(group.projectId)}
-                            className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                            title={isCollapsed ? 'Expand project tasks' : 'Collapse project tasks'}
-                          >
-                            {isCollapsed ? (
-                              <ChevronRight className="w-3.5 h-3.5" />
-                            ) : (
-                              <ChevronDown className="w-3.5 h-3.5" />
-                            )}
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => group.project && openProject(group.projectId)}
-                            className="flex items-center space-x-2 group/title cursor-pointer hover:opacity-80 transition-opacity"
-                            title={`Open project "${group.projectName}"`}
-                          >
-                            <div className={`p-1.5 rounded-lg ${projectTheme.badgeBg}`}>
-                              <ProjectIconDisplay
-                                icon={group.project?.style?.icon}
-                                emoji={group.project?.style?.emoji}
-                                className="w-4 h-4"
-                              />
-                            </div>
-                            <span className="text-sm font-semibold text-slate-900 dark:text-slate-100 group-hover/title:text-indigo-600 dark:group-hover/title:text-indigo-400 transition-colors truncate">
-                              {group.projectName}
-                            </span>
-                          </button>
-
-                          {group.isAttention && (
-                            <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60 shadow-2xs shrink-0">
-                              <Zap className="w-3 h-3 fill-current text-amber-500" />
-                              <span>Attention</span>
-                            </span>
-                          )}
-
-                          <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold shrink-0">
-                            {group.allTasks.length} {group.allTasks.length === 1 ? 'task' : 'tasks'}
-                          </span>
-                        </div>
-
-                        {group.project && (
-                          <button
-                            type="button"
-                            onClick={() => openProject(group.projectId)}
-                            className="p-1 rounded text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer ml-auto"
-                            title={`Open project "${group.projectName}" graph`}
-                          >
-                            <ChevronRight className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-
-                      {/* Project Tasks Body */}
-                      {!isCollapsed && (
-                        <div className="space-y-2.5 pt-1">
-                          {/* Root Tasks */}
-                          {group.rootTasks.length > 0 && (
-                            <div className="space-y-1.5">
-                              {group.rootTasks.map((task) =>
-                                renderTodayProjectTaskRow(task, { hideProjectBadge: true, hideParentBreadcrumbs: true })
-                              )}
-                            </div>
-                          )}
-
-                          {/* Subtask Hierarchical Groups */}
-                          {group.subtaskGroups.map((subGroup) => (
-                            <div
-                              key={subGroup.key}
-                              className="bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-800/70 rounded-lg p-2.5 space-y-1.5"
-                            >
-                              {/* Breadcrumbs trail header */}
-                              <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-300 px-1 pb-1">
-                                <div className="flex items-center space-x-1.5 truncate">
-                                  <Layers className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                                  <span className="font-semibold text-slate-500 dark:text-slate-400 shrink-0">
-                                    Inside:
-                                  </span>
-                                  <div className="flex items-center space-x-1 truncate font-medium">
-                                    {subGroup.breadcrumbs.map((bNode, idx) => (
-                                      <React.Fragment key={bNode.id}>
-                                        {idx > 0 && <span className="text-slate-400">→</span>}
-                                        <button
-                                          type="button"
-                                          onClick={() => openProject(group.projectId, bNode)}
-                                          className="hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline cursor-pointer truncate"
-                                          title={`Open node "${bNode.text}" in project`}
-                                        >
-                                          {bNode.text}
-                                        </button>
-                                      </React.Fragment>
-                                    ))}
-                                  </div>
-                                </div>
-                                <span className="text-xs font-mono text-slate-400 dark:text-slate-500 shrink-0 pl-2">
-                                  {subGroup.tasks.length} {subGroup.tasks.length === 1 ? 'task' : 'tasks'}
-                                </span>
-                              </div>
-
-                              {/* Task Rows in Subtask Group */}
-                              <div className="space-y-1.5">
-                                {subGroup.tasks.map((task) =>
-                                  renderTodayProjectTaskRow(task, { hideProjectBadge: true, hideParentBreadcrumbs: true })
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* 2. ATTENTION MODE */}
-            {todayProjectTasksGroupMode === 'attention' && (
-              <div className="space-y-3">
-                {/* Priority Attention Tasks */}
-                {todayAttentionGroups.attentionTasks.length > 0 && (
-                  <div className="bg-amber-50/40 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 rounded-xl p-3.5 space-y-2.5 shadow-xs">
-                    <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-amber-200/60 dark:border-amber-900/40">
-                      <div className="flex items-center space-x-2">
-                        <div className="p-1.5 rounded-lg bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60">
-                          <Zap className="w-4 h-4 fill-current text-amber-500" />
-                        </div>
-                        <span className="text-sm font-semibold text-amber-950 dark:text-amber-100">
-                          Priority Attention Tasks
-                        </span>
-                        <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-amber-200/80 dark:bg-amber-900/80 text-amber-900 dark:text-amber-100 font-semibold">
-                          {todayAttentionGroups.attentionTasks.length}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      {todayAttentionGroups.attentionTasks.map((task) =>
-                        renderTodayProjectTaskRow(task, { hideProjectBadge: false, hideParentBreadcrumbs: false })
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Regular Tasks */}
-                {todayAttentionGroups.regularTasks.length > 0 && (
-                  <div className="bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 space-y-2.5 shadow-xs">
-                    <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-slate-100 dark:border-slate-800/60">
-                      <div className="flex items-center space-x-2">
-                        <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
-                          <Folder className="w-4 h-4 text-slate-500" />
-                        </div>
-                        <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                          Standard Projects
-                        </span>
-                        <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
-                          {todayAttentionGroups.regularTasks.length}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      {todayAttentionGroups.regularTasks.map((task) =>
-                        renderTodayProjectTaskRow(task, { hideProjectBadge: false, hideParentBreadcrumbs: false })
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* 3. FLAT MODE */}
-            {todayProjectTasksGroupMode === 'flat' && (
-              <div className="space-y-1.5">
-                {displayProjectTasks.map((task) =>
-                  renderTodayProjectTaskRow(task, { hideProjectBadge: false, hideParentBreadcrumbs: false })
-                )}
-              </div>
-            )}
-          </div>
-        )}
-        </div>
-
-        {/* 2. Standalone Tasks Column (Right) */}
-        <div
-          className={`space-y-4 ${activeMobileTab === 'standalone' ? 'block' : 'hidden lg:block'}`}
-          data-testid="standalone-column"
-        >
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div className="flex items-center space-x-2">
-              <CheckCircle2 className="w-4 h-4 text-teal-500 dark:text-teal-400" />
-              <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
-                Standalone Tasks
-              </h2>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono font-semibold">
-                {allDisplayStandaloneTasks.length}
-              </span>
-              {preferences.attentionSystemEnabled && (() => {
-                const totalAU = allDisplayStandaloneTasks.reduce((acc, t) => acc + (t.estimatedAU || 0), 0);
-                return totalAU > 0 ? (
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 font-mono font-semibold border border-amber-200 dark:border-amber-800/60" title="Total Standalone Tasks Planned Attention Units">
-                    {Math.round(totalAU * 10) / 10} AU
-                  </span>
-                ) : null;
-              })()}
-            </div>
-
-          {/* Grouping Mode Switcher for Standalone Tasks */}
-          <div className="flex items-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-0.5 rounded-lg shadow-2xs">
-            <button
-              type="button"
-              onClick={() => handleStandaloneGroupModeChange('schedule')}
-              className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
-                standaloneGroupMode === 'schedule'
-                  ? 'bg-teal-600 text-white shadow-xs font-semibold'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-              }`}
-              title="Group by Schedule (Overdue, Today, Upcoming)"
-            >
-              <Clock className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">By Schedule</span>
-              <span className="sm:hidden">Schedule</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleStandaloneGroupModeChange('recurrence')}
-              className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
-                standaloneGroupMode === 'recurrence'
-                  ? 'bg-teal-600 text-white shadow-xs font-semibold'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-              }`}
-              title="Group by Recurrence (Recurring vs One-Off)"
-            >
-              <RotateCw className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">By Recurrence</span>
-              <span className="sm:hidden">Recurrence</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleStandaloneGroupModeChange('flat')}
-              className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
-                standaloneGroupMode === 'flat'
-                  ? 'bg-teal-600 text-white shadow-xs font-semibold'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-              }`}
-              title="Show all standalone tasks in a flat list with filters"
-            >
-              <List className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Flat</span>
-            </button>
+          <div className="space-y-4 pt-6 border-t border-slate-200 dark:border-slate-800">
+            {renderStandaloneTasksContent(true)}
           </div>
         </div>
-
-        {/* Inline Add Standalone Task */}
-        <form
-          onSubmit={handleAddStandalone}
-          className={`flex flex-col gap-2 p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 shadow-xs transition-all ${
-            isCalendarOpen || isNewRecurrenceOpen || isNewAuOpen ? 'relative z-50 ring-2 ring-teal-500/20' : 'relative z-10'
-          }`}
-        >
-          <input
-            type="text"
-            placeholder="Add a standalone task (e.g. Call dentist, buy printer paper)..."
-            value={newStandaloneText}
-            onChange={(e) => setNewStandaloneText(e.target.value)}
-            className="w-full text-xs sm:text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg py-2 px-3 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-teal-500 shadow-2xs transition-colors"
-          />
-
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <div className="flex items-center space-x-1.5 flex-wrap gap-y-1.5">
-              {/* Due Date Selector */}
-              <div className={`relative ${isCalendarOpen ? 'z-50' : ''}`}>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsCalendarOpen((prev) => !prev);
-                  }}
-                  className={`flex items-center space-x-1.5 px-2.5 py-1 text-xs font-mono font-medium rounded-md transition-colors cursor-pointer group/cal border ${
-                    newStandaloneDueDate
-                      ? 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 hover:text-teal-600 dark:hover:text-teal-400 border-slate-200 dark:border-slate-700'
-                      : 'bg-amber-50/70 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 border-dashed border-amber-300 dark:border-amber-600/70'
-                  }`}
-                  title={newStandaloneDueDate ? 'Click to select due date' : 'Select due date (required)'}
-                >
-                  <Calendar className={`w-3.5 h-3.5 shrink-0 transition-colors ${
-                    newStandaloneDueDate
-                      ? 'text-slate-400 group-hover/cal:text-teal-500'
-                      : 'text-amber-500 group-hover/cal:text-amber-600'
-                  }`} />
-                  <span>{newStandaloneDueDate ? formatDateDisplay(newStandaloneDueDate) : 'Pick date'}</span>
-                </button>
-
-                {isCalendarOpen && (
-                  <CalendarPicker
-                    value={newStandaloneDueDate}
-                    onChange={(newDate) => setNewStandaloneDueDate(newDate)}
-                    onClose={() => setIsCalendarOpen(false)}
-                    position="bottom"
-                    align="left"
-                    taskEstimatedAU={newStandaloneEstimatedAU ? parseFloat(newStandaloneEstimatedAU) : undefined}
-                  />
-                )}
-              </div>
-
-              {/* Recurrence Selector */}
-              <RecurrencePicker
-                value={newStandaloneRecurrence}
-                baseDate={newStandaloneDueDate || getTodayString()}
-                onChange={setNewStandaloneRecurrence}
-                onOpenChange={setIsNewRecurrenceOpen}
-                buttonVariant={newStandaloneRecurrence ? 'badge' : 'icon'}
-                align="left"
-              />
-
-              {/* Estimated AU Input (if attention system enabled) */}
-              {preferences.attentionSystemEnabled && (
-                <AttentionUnitInput
-                  value={newStandaloneEstimatedAU ? parseFloat(newStandaloneEstimatedAU) : undefined}
-                  onChange={(val) => setNewStandaloneEstimatedAU(val !== undefined ? String(val) : '')}
-                  auMinutes={preferences.attentionUnitMinutes}
-                  compact={true}
-                  placeholder="+ AU"
-                  align="left"
-                  onOpenChange={setIsNewAuOpen}
-                />
-              )}
-
-              {/* Environment Selector */}
-              <button
-                type="button"
-                onClick={() => {
-                  const nextEnv: TaskEnvironment =
-                    newStandaloneEnvironment === 'computer'
-                      ? 'physical'
-                      : newStandaloneEnvironment === 'physical'
-                      ? 'mixed'
-                      : 'computer';
-                  setNewStandaloneEnvironment(nextEnv);
-                }}
-                className="flex items-center space-x-1 px-2 py-1 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-850 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shadow-2xs cursor-pointer"
-                title={`Task Environment: ${newStandaloneEnvironment} (Click to switch)`}
-                data-testid="standalone-environment-picker"
-              >
-                <span>{newStandaloneEnvironment === 'computer' ? '💻' : newStandaloneEnvironment === 'physical' ? '🏃' : '🔄'}</span>
-                <span className="capitalize">{newStandaloneEnvironment}</span>
-              </button>
-            </div>
-
-            <button
-              type="submit"
-              disabled={!newStandaloneText.trim() || !newStandaloneDueDate}
-              title={
-                !newStandaloneText.trim()
-                  ? 'Enter a task description'
-                  : !newStandaloneDueDate
-                  ? 'Please select a due date'
-                  : 'Add task'
-              }
-              className="flex items-center space-x-1.5 px-3.5 py-1 rounded-lg text-xs font-semibold bg-teal-600 hover:bg-teal-500 disabled:opacity-50 text-white transition-colors shrink-0 cursor-pointer shadow-xs disabled:cursor-not-allowed ml-auto"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add</span>
-            </button>
-          </div>
-        </form>
-
-        {allDisplayStandaloneTasks.length === 0 ? (
-          <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800/80 rounded-xl p-6 text-center text-sm text-slate-500">
-            No active standalone tasks. Tasks created here exist outside project graphs.
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {/* 1. SCHEDULE MODE (Overdue, Today, Upcoming) */}
-            {standaloneGroupMode === 'schedule' && (
-              <div className="space-y-3">
-                {standaloneScheduleGroups.map((sGroup) => {
-                  const isCollapsed = !!collapsedStandaloneGroups[sGroup.id];
-
-                  return (
-                    <div
-                      key={sGroup.id}
-                      className="bg-white/90 dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800/80 rounded-xl p-3.5 space-y-2.5 shadow-xs"
-                    >
-                      <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-slate-100 dark:border-slate-800/60">
-                        <div className="flex items-center space-x-2">
-                          <button
-                            type="button"
-                            onClick={() => toggleStandaloneGroupCollapse(sGroup.id)}
-                            className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                            title={isCollapsed ? 'Expand group' : 'Collapse group'}
-                          >
-                            {isCollapsed ? (
-                              <ChevronRight className="w-3.5 h-3.5" />
-                            ) : (
-                              <ChevronDown className="w-3.5 h-3.5" />
-                            )}
-                          </button>
-                          <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                            {sGroup.title}
-                          </span>
-                          <span className={`text-xs font-mono px-2 py-0.5 rounded-full font-semibold ${sGroup.badgeClass}`}>
-                            {sGroup.tasks.length}
-                          </span>
-                          {preferences.attentionSystemEnabled && (() => {
-                            const groupAU = sGroup.tasks.reduce((acc, t) => acc + (t.estimatedAU || 0), 0);
-                            return groupAU > 0 ? (
-                              <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60 font-semibold" title="Total Group Planned Attention Units">
-                                {Math.round(groupAU * 10) / 10} AU
-                              </span>
-                            ) : null;
-                          })()}
-                        </div>
-                      </div>
-
-                      {!isCollapsed && (
-                        <div className="space-y-1.5">
-                          {sGroup.tasks.map((task) => renderStandaloneTaskRow(task))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* 2. RECURRENCE MODE */}
-            {standaloneGroupMode === 'recurrence' && (
-              <div className="space-y-3">
-                {standaloneRecurrenceGroups.map((rGroup) => {
-                  const isCollapsed = !!collapsedStandaloneGroups[rGroup.id];
-
-                  return (
-                    <div
-                      key={rGroup.id}
-                      className="bg-white/90 dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800/80 rounded-xl p-3.5 space-y-2.5 shadow-xs"
-                    >
-                      <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-slate-100 dark:border-slate-800/60">
-                        <div className="flex items-center space-x-2">
-                          <button
-                            type="button"
-                            onClick={() => toggleStandaloneGroupCollapse(rGroup.id)}
-                            className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                            title={isCollapsed ? 'Expand group' : 'Collapse group'}
-                          >
-                            {isCollapsed ? (
-                              <ChevronRight className="w-3.5 h-3.5" />
-                            ) : (
-                              <ChevronDown className="w-3.5 h-3.5" />
-                            )}
-                          </button>
-                          <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                            {rGroup.title}
-                          </span>
-                          <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
-                            {rGroup.tasks.length}
-                          </span>
-                          {preferences.attentionSystemEnabled && (() => {
-                            const groupAU = rGroup.tasks.reduce((acc, t) => acc + (t.estimatedAU || 0), 0);
-                            return groupAU > 0 ? (
-                              <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60 font-semibold" title="Total Group Planned Attention Units">
-                                {Math.round(groupAU * 10) / 10} AU
-                              </span>
-                            ) : null;
-                          })()}
-                        </div>
-                      </div>
-
-                      {!isCollapsed && (
-                        <div className="space-y-1.5">
-                          {rGroup.tasks.map((task) => renderStandaloneTaskRow(task))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* 3. FLAT MODE WITH FILTER PILLS (Overdue first, then Today, then Upcoming) */}
-            {standaloneGroupMode === 'flat' && (
-              <div className="space-y-2">
-                <div className="flex items-center space-x-1 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-0.5 rounded-lg text-xs self-start">
-                  <button
-                    onClick={() => setStandaloneFilter('all')}
-                    className={`px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
-                      standaloneFilter === 'all'
-                        ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-xs font-semibold'
-                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                    }`}
-                  >
-                    All ({allDisplayStandaloneTasks.length})
-                  </button>
-                  {overdueStandaloneTasks.length > 0 && (
-                    <button
-                      onClick={() => setStandaloneFilter('overdue')}
-                      className={`px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center space-x-1.5 ${
-                        standaloneFilter === 'overdue'
-                          ? 'bg-white dark:bg-slate-800 text-amber-600 dark:text-amber-400 shadow-xs font-semibold'
-                          : 'text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40'
-                      }`}
-                    >
-                      <AlertCircle className="w-3.5 h-3.5" />
-                      <span>Overdue ({overdueStandaloneTasks.length})</span>
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setStandaloneFilter('today')}
-                    className={`px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center space-x-1.5 ${
-                      standaloneFilter === 'today'
-                        ? 'bg-white dark:bg-slate-800 text-teal-600 dark:text-teal-400 shadow-xs font-semibold'
-                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                    }`}
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Today ({todayStandaloneTasks.length})</span>
-                  </button>
-                  <button
-                    onClick={() => setStandaloneFilter('upcoming')}
-                    className={`px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center space-x-1.5 ${
-                      standaloneFilter === 'upcoming'
-                        ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs font-semibold'
-                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                    }`}
-                  >
-                    <CalendarDays className="w-3.5 h-3.5" />
-                    <span>Upcoming ({upcomingStandaloneTasks.length})</span>
-                  </button>
-                </div>
-
-                <div className="space-y-1.5 pt-1">
-                  {(standaloneFilter === 'all'
-                    ? allDisplayStandaloneTasks
-                    : standaloneFilter === 'overdue'
-                    ? overdueStandaloneTasks
-                    : standaloneFilter === 'today'
-                    ? todayStandaloneTasks
-                    : upcomingStandaloneTasks
-                  ).map((task) => renderStandaloneTaskRow(task))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-        </div>
-      </div>
+      )}
 
       {/* Completed Today Toggle */}
       {(myDayData.completedTodayProjectTasks.length > 0 ||

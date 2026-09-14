@@ -214,4 +214,32 @@ describe('MyDayView Two-Column Layout and Mobile Panel Switching', () => {
       undefined
     );
   });
+
+  it('renders layout toggle buttons and switches between Dual Board and Focus Stream', () => {
+    render(<MyDayView />);
+
+    expect(screen.getByTestId('my-day-columns')).toBeDefined();
+    expect(screen.queryByTestId('stream-view-container')).toBeNull();
+
+    const streamBtn = screen.getByRole('button', { name: /focus stream/i });
+    const dualBtn = screen.getByRole('button', { name: /dual board/i });
+
+    expect(streamBtn).toBeDefined();
+    expect(dualBtn).toBeDefined();
+
+    // Switch to Focus Stream
+    fireEvent.click(streamBtn);
+
+    expect(screen.queryByTestId('my-day-columns')).toBeNull();
+    const streamContainer = screen.getByTestId('stream-view-container');
+    expect(streamContainer).toBeDefined();
+    expect(screen.getByText(/Deep Work: Project Tasks/i)).toBeDefined();
+    expect(screen.getByText(/Velocity: Standalone Tasks/i)).toBeDefined();
+
+    // Switch back to Dual Board
+    fireEvent.click(dualBtn);
+    expect(screen.getByTestId('my-day-columns')).toBeDefined();
+    expect(screen.queryByTestId('stream-view-container')).toBeNull();
+  });
 });
+

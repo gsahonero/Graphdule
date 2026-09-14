@@ -313,6 +313,7 @@ export interface UserPreferences {
   readonly weeklyPlannedAU?: number;
   readonly activeWorkSession?: ActiveWorkSession | null;
   readonly idleSyncIntervalMinutes?: number;
+  readonly myDayViewLayout?: 'stream' | 'bimodal';
   readonly capacityConfig?: DailyCapacityConfig;
   readonly healthConfig?: HealthConfig;
 }
