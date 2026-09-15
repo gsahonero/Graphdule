@@ -12,6 +12,8 @@ import {
   Minimize2,
   RotateCcw,
   Heart,
+  Sparkles,
+  Trash2,
 } from 'lucide-react';
 import {
   requestPictureInPictureWindow,
@@ -29,6 +31,10 @@ export const ActiveWorkBar: React.FC = () => {
     resumeWork,
     stopWork,
     completeAndStopWork,
+    stopProjectPlanning,
+    discardActiveWorkSession,
+    planningToast,
+    dismissPlanningToast,
     attentionUnitMinutes,
     openProject,
     setCurrentView,
@@ -266,6 +272,7 @@ export const ActiveWorkBar: React.FC = () => {
   const progressPercent = progressRatio !== null ? Math.round(progressRatio * 100) : null;
   const clampedProgressWidth = progressPercent !== null ? Math.min(100, Math.max(0, progressPercent)) : null;
   const isOverEstimated = progressRatio !== null && progressRatio > 1.0;
+  const isPlanning = activeWorkSession?.sessionType === 'planning';
 
   const handleNavigateToTask = () => {
     if (typeof window !== 'undefined' && window.focus) {
@@ -280,14 +287,16 @@ export const ActiveWorkBar: React.FC = () => {
 
   // Content for the floating Picture-in-Picture window
   const pipContent = (
-    <div className="w-full h-full min-h-[160px] bg-slate-950 text-slate-100 flex flex-col justify-between p-3.5 box-border select-none overflow-hidden font-sans border-t-2 border-amber-500">
+    <div className={`w-full h-full min-h-[160px] bg-slate-950 text-slate-100 flex flex-col justify-between p-3.5 box-border select-none overflow-hidden font-sans border-t-2 ${isPlanning ? 'border-indigo-500' : 'border-amber-500'}`}>
       {/* Top row: Task text + Project + Exit PiP */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 min-w-0">
             <span
               className={`inline-block h-2.5 w-2.5 rounded-full flex-shrink-0 ${
-                activeWorkSession.isPaused ? 'bg-amber-400' : 'bg-emerald-500 animate-ping'
+                activeWorkSession.isPaused
+                  ? isPlanning ? 'bg-indigo-400' : 'bg-amber-400'
+                  : isPlanning ? 'bg-indigo-500 animate-ping' : 'bg-emerald-500 animate-ping'
               }`}
             />
             <button
@@ -300,16 +309,25 @@ export const ActiveWorkBar: React.FC = () => {
             </button>
           </div>
           <div className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1.5">
-            <span className="text-amber-300 font-medium truncate">
+            <span className={`${isPlanning ? 'text-indigo-300' : 'text-amber-300'} font-medium truncate`}>
               {activeWorkSession.projectName || 'Standalone'}
             </span>
             <span className="text-slate-600">•</span>
-            <span
-              data-testid="pip-environment-badge"
-              className="px-1 py-0.2 rounded font-mono text-[9px] bg-slate-800 text-slate-300 border border-slate-700 capitalize"
-            >
-              {taskEnvironment === 'physical' ? '🏃 physical' : taskEnvironment === 'mixed' ? '🔄 mixed' : '💻 computer'}
-            </span>
+            {isPlanning ? (
+              <span
+                data-testid="pip-planning-badge"
+                className="px-1.5 py-0.2 rounded font-sans text-[9px] bg-indigo-950 text-indigo-300 border border-indigo-700 font-medium"
+              >
+                🧠 Planning
+              </span>
+            ) : (
+              <span
+                data-testid="pip-environment-badge"
+                className="px-1 py-0.2 rounded font-mono text-[9px] bg-slate-800 text-slate-300 border border-slate-700 capitalize"
+              >
+                {taskEnvironment === 'physical' ? '🏃 physical' : taskEnvironment === 'mixed' ? '🔄 mixed' : '💻 computer'}
+              </span>
+            )}
             <span className="text-slate-600">•</span>
             <span className="font-mono text-slate-300">
               {Math.round(currentAU * 100) / 100} AU
@@ -397,7 +415,7 @@ export const ActiveWorkBar: React.FC = () => {
         {activeWorkSession.isPaused ? (
           <button
             onClick={() => resumeWork()}
-            className="flex-1 py-1.5 px-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium text-xs flex items-center justify-center gap-1 transition-all cursor-pointer"
+            className={`flex-1 py-1.5 px-2 ${isPlanning ? 'bg-indigo-600 hover:bg-indigo-500' : 'bg-emerald-600 hover:bg-emerald-500'} text-white rounded-lg font-medium text-xs flex items-center justify-center gap-1 transition-all cursor-pointer`}
           >
             <Play className="w-3.5 h-3.5 fill-current" />
             <span>Resume</span>
@@ -412,22 +430,44 @@ export const ActiveWorkBar: React.FC = () => {
           </button>
         )}
 
-        <button
-          onClick={() => completeAndStopWork()}
-          className="flex-1 py-1.5 px-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium text-xs flex items-center justify-center gap-1 transition-all cursor-pointer"
-        >
-          <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-          <span>Complete</span>
-        </button>
+        {isPlanning ? (
+          <>
+            <button
+              onClick={() => stopProjectPlanning()}
+              className="flex-1 py-1.5 px-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium text-xs flex items-center justify-center gap-1 transition-all cursor-pointer"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Finish</span>
+            </button>
 
-        <button
-          onClick={() => stopWork()}
-          className="py-1.5 px-2.5 bg-rose-600/90 hover:bg-rose-500 text-white rounded-lg font-medium text-xs flex items-center justify-center gap-1 transition-all cursor-pointer"
-          title="Stop clock"
-        >
-          <Square className="w-3.5 h-3.5 fill-current" />
-          <span>Stop</span>
-        </button>
+            <button
+              onClick={() => discardActiveWorkSession()}
+              className="py-1.5 px-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-rose-300 rounded-lg font-medium text-xs flex items-center justify-center gap-1 transition-all border border-slate-700/60 cursor-pointer"
+              title="Discard planning session"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={() => completeAndStopWork()}
+              className="flex-1 py-1.5 px-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium text-xs flex items-center justify-center gap-1 transition-all cursor-pointer"
+            >
+              <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+              <span>Complete</span>
+            </button>
+
+            <button
+              onClick={() => stopWork()}
+              className="py-1.5 px-2.5 bg-rose-600/90 hover:bg-rose-500 text-white rounded-lg font-medium text-xs flex items-center justify-center gap-1 transition-all cursor-pointer"
+              title="Stop clock"
+            >
+              <Square className="w-3.5 h-3.5 fill-current" />
+              <span>Stop</span>
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -526,6 +566,8 @@ export const ActiveWorkBar: React.FC = () => {
             ? 'border-rose-500/60 shadow-rose-950/40'
             : isDragging
             ? 'border-amber-400 shadow-amber-500/20 scale-[1.01]'
+            : isPlanning
+            ? 'border-indigo-500/60 shadow-indigo-950/30'
             : 'border-amber-500/40 dark:border-amber-500/40 shadow-amber-950/20'
         } shadow-2xl backdrop-blur-md rounded-2xl text-slate-100 sm:max-w-md md:max-w-lg lg:max-w-xl transition-shadow duration-150 overflow-hidden ${
           isDragging ? 'cursor-grabbing' : ''
@@ -568,6 +610,42 @@ export const ActiveWorkBar: React.FC = () => {
           </div>
         )}
 
+        {/* Project Planning Auto-Trigger Notification Banner */}
+        {planningToast && isPlanning && (
+          <div
+            data-testid="planning-toast-banner"
+            className="w-full bg-indigo-950/95 border-b border-indigo-500/40 px-3 py-1.5 flex items-center justify-between gap-2 text-xs text-indigo-100 shadow-md backdrop-blur-md animate-in fade-in slide-in-from-top-1 duration-150"
+          >
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="font-semibold text-indigo-300 shrink-0 text-[11px] flex items-center gap-1">
+                🧠 Planning Mode:
+              </span>
+              <span className="truncate text-[11px] text-indigo-100">
+                {planningToast.projectName ? `Tracking planning on "${planningToast.projectName}"` : 'Tracking project planning session'}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                onClick={() => discardActiveWorkSession()}
+                data-testid="planning-toast-discard-btn"
+                className="px-2 py-0.5 bg-rose-600/80 hover:bg-rose-600 active:scale-95 text-white rounded font-medium text-[10px] sm:text-[11px] transition-all cursor-pointer shadow-xs"
+                title="Discard this planning session without saving"
+              >
+                Discard
+              </button>
+              <button
+                onClick={() => dismissPlanningToast()}
+                data-testid="planning-toast-dismiss-btn"
+                className="px-1.5 py-0.5 bg-slate-800/80 hover:bg-slate-700 active:scale-95 text-slate-300 hover:text-white rounded text-[10px] sm:text-[11px] transition-all cursor-pointer"
+                title="Keep tracking planning work"
+              >
+                Got it
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="relative w-full flex items-center justify-between gap-2 sm:gap-3 px-2.5 sm:px-3.5 py-2 sm:py-2.5">
         {/* Visual Attention Progress Track (at bottom edge of the bar) */}
         {clampedProgressWidth !== null && (
@@ -579,7 +657,7 @@ export const ActiveWorkBar: React.FC = () => {
           >
             <div
               className={`h-full transition-all duration-300 ${
-                isOverEstimated ? 'bg-amber-400' : 'bg-emerald-500'
+                isPlanning ? 'bg-indigo-500' : isOverEstimated ? 'bg-amber-400' : 'bg-emerald-500'
               }`}
               style={{ width: `${clampedProgressWidth}%` }}
             />
@@ -605,6 +683,8 @@ export const ActiveWorkBar: React.FC = () => {
             title={
               activeWorkSession.isPaused
                 ? 'Work session is paused. Click to jump to task.'
+                : isPlanning
+                ? 'Project planning session in progress.'
                 : 'Focus work session in progress. Click to jump to task.'
             }
           >
@@ -612,12 +692,18 @@ export const ActiveWorkBar: React.FC = () => {
               className={`h-3 w-3 rounded-full ${
                 activeWorkSession.isPaused
                   ? 'bg-amber-400'
+                  : isPlanning
+                  ? 'bg-indigo-500 animate-ping opacity-75'
                   : 'bg-emerald-500 animate-ping opacity-75'
               }`}
             />
             <span
               className={`absolute h-2.5 w-2.5 rounded-full ${
-                activeWorkSession.isPaused ? 'bg-amber-400' : 'bg-emerald-500'
+                activeWorkSession.isPaused
+                  ? 'bg-amber-400'
+                  : isPlanning
+                  ? 'bg-indigo-500'
+                  : 'bg-emerald-500'
               }`}
             />
           </div>
@@ -636,8 +722,19 @@ export const ActiveWorkBar: React.FC = () => {
               </button>
             </div>
 
-            {/* Row 2: Context badges (Project + Timer + AU + Progress %) */}
+            {/* Row 2: Context badges (Project + Planning + Timer + AU + Progress %) */}
             <div className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-[11px] text-slate-400 mt-0.5 whitespace-nowrap overflow-hidden">
+              {isPlanning && (
+                <span
+                  data-testid="workbar-planning-badge"
+                  className="px-1.5 py-0.2 rounded text-[9px] sm:text-[10px] font-semibold border shrink-0 flex items-center gap-1 bg-indigo-500/20 border-indigo-500/40 text-indigo-300"
+                  title="Deliberate project planning session (cognitive design work)"
+                >
+                  <span>🧠</span>
+                  <span>Planning</span>
+                </span>
+              )}
+
               {activeWorkSession.projectName ? (
                 <span
                   className="truncate max-w-[80px] sm:max-w-[130px] text-amber-300/80 font-medium shrink-0"
@@ -732,26 +829,54 @@ export const ActiveWorkBar: React.FC = () => {
             </button>
           )}
 
-          {/* Complete & Stop */}
-          <button
-            onClick={() => completeAndStopWork()}
-            className="p-1.5 sm:px-2.5 bg-emerald-600/90 hover:bg-emerald-500 active:scale-95 text-white rounded-lg transition-all flex items-center gap-1 text-xs font-medium shadow-sm cursor-pointer"
-            title="Mark task completed and stop work session"
-          >
-            <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-            <span className="hidden sm:inline md:hidden">Done</span>
-            <span className="hidden md:inline">Complete & Stop</span>
-          </button>
+          {isPlanning ? (
+            <>
+              {/* Finish Planning */}
+              <button
+                onClick={() => stopProjectPlanning()}
+                data-testid="workbar-finish-planning-btn"
+                className="p-1.5 sm:px-2.5 bg-indigo-600/90 hover:bg-indigo-500 active:scale-95 text-white rounded-lg transition-all flex items-center gap-1 text-xs font-medium shadow-sm cursor-pointer"
+                title="Finish and save project planning session"
+              >
+                <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                <span className="hidden sm:inline">Finish Planning</span>
+              </button>
 
-          {/* Stop Clock */}
-          <button
-            onClick={() => stopWork()}
-            className="p-1.5 sm:px-2 bg-rose-600/90 hover:bg-rose-500 active:scale-95 text-white rounded-lg transition-all flex items-center gap-1 text-xs font-medium shadow-sm cursor-pointer"
-            title="Stop work clock without completing task"
-          >
-            <Square className="w-3.5 h-3.5 fill-current" />
-            <span className="hidden sm:inline">Stop</span>
-          </button>
+              {/* Discard Planning */}
+              <button
+                onClick={() => discardActiveWorkSession()}
+                data-testid="workbar-discard-planning-btn"
+                className="p-1.5 sm:px-2 bg-rose-600/90 hover:bg-rose-500 active:scale-95 text-white rounded-lg transition-all flex items-center gap-1 text-xs font-medium shadow-sm cursor-pointer"
+                title="Discard planning session without saving"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Discard</span>
+              </button>
+            </>
+          ) : (
+            <>
+              {/* Complete & Stop */}
+              <button
+                onClick={() => completeAndStopWork()}
+                className="p-1.5 sm:px-2.5 bg-emerald-600/90 hover:bg-emerald-500 active:scale-95 text-white rounded-lg transition-all flex items-center gap-1 text-xs font-medium shadow-sm cursor-pointer"
+                title="Mark task completed and stop work session"
+              >
+                <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                <span className="hidden sm:inline md:hidden">Done</span>
+                <span className="hidden md:inline">Complete & Stop</span>
+              </button>
+
+              {/* Stop Clock */}
+              <button
+                onClick={() => stopWork()}
+                className="p-1.5 sm:px-2 bg-rose-600/90 hover:bg-rose-500 active:scale-95 text-white rounded-lg transition-all flex items-center gap-1 text-xs font-medium shadow-sm cursor-pointer"
+                title="Stop work clock without completing task"
+              >
+                <Square className="w-3.5 h-3.5 fill-current" />
+                <span className="hidden sm:inline">Stop</span>
+              </button>
+            </>
+          )}
 
           {/* Picture-in-Picture Button */}
           <button
@@ -780,3 +905,4 @@ export const ActiveWorkBar: React.FC = () => {
     </>
   );
 };
+

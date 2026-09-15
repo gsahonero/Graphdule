@@ -190,13 +190,13 @@ export class AttentionService {
       const type = normalizeEventType(ev.type);
       const taskId = ev.entityId;
 
-      if (type === 'work_started') {
+      if (type === 'work_started' || type === 'planning_started') {
         openSessions.set(taskId, {
           event: ev,
           startedAt: ev.timestamp,
           accumulatedSeconds: 0,
         });
-      } else if (type === 'work_paused') {
+      } else if (type === 'work_paused' || type === 'planning_paused') {
         const current = openSessions.get(taskId);
         if (current) {
           const pauseElapsed = Math.max(
@@ -205,7 +205,7 @@ export class AttentionService {
           );
           current.accumulatedSeconds += pauseElapsed;
         }
-      } else if (type === 'work_resumed') {
+      } else if (type === 'work_resumed' || type === 'planning_resumed') {
         const current = openSessions.get(taskId);
         if (current) {
           current.startedAt = ev.timestamp;
@@ -216,7 +216,7 @@ export class AttentionService {
             accumulatedSeconds: 0,
           });
         }
-      } else if (type === 'work_stopped') {
+      } else if (type === 'work_stopped' || type === 'planning_stopped') {
         const current = openSessions.get(taskId);
         let durationSeconds = 0;
 
@@ -243,9 +243,16 @@ export class AttentionService {
             : ev.timestamp;
 
         const au = AttentionService.durationSecondsToAU(durationSeconds, auMinutes);
+        const sessionType =
+          type === 'planning_stopped' ||
+          current?.event.type === 'planning_started' ||
+          ev.metadata?.sessionType === 'planning'
+            ? 'planning'
+            : 'execution';
 
         sessions.push({
           id: ev.id,
+          sessionType,
           taskId,
           projectId: ev.projectId || current?.event.projectId,
           taskText: ev.entityText || current?.event.entityText,
@@ -401,8 +408,31 @@ export class AttentionService {
     const projectMap = new Map<string, ProjectSummary>();
     projects.forEach((p) => projectMap.set(p.id, p));
 
-    // 2. Project Allocations
-    const projectAUs = new Map<string, { au: number; seconds: number; taskIds: Set<string> }>();
+    // 2. Deliberation vs Execution Breakdown
+    let planningSeconds = 0;
+    let executionSeconds = 0;
+    for (const s of weekSessions) {
+      if (s.sessionType === 'planning') {
+        planningSeconds += s.durationSeconds;
+      } else {
+        executionSeconds += s.durationSeconds;
+      }
+    }
+    const planningAU = AttentionService.durationSecondsToAU(planningSeconds, auMinutes);
+    const executionAU = AttentionService.durationSecondsToAU(executionSeconds, auMinutes);
+    const totalDelibAU = Math.round((planningAU + executionAU) * 100) / 100;
+    const deliberationRatio = totalDelibAU > 0 ? Math.round((planningAU / totalDelibAU) * 1000) / 10 : 0;
+    const deliberationSummary = {
+      planningAU,
+      executionAU,
+      deliberationRatio,
+    };
+
+    // 3. Project Allocations
+    const projectAUs = new Map<
+      string,
+      { au: number; planningAU: number; executionAU: number; seconds: number; taskIds: Set<string> }
+    >();
     let standaloneAU = 0;
     const standaloneTaskIds = new Set<string>();
 
@@ -410,10 +440,17 @@ export class AttentionService {
       if (session.projectId && session.projectId !== 'standalone') {
         const existing = projectAUs.get(session.projectId) || {
           au: 0,
+          planningAU: 0,
+          executionAU: 0,
           seconds: 0,
           taskIds: new Set(),
         };
         existing.au = Math.round((existing.au + session.au) * 100) / 100;
+        if (session.sessionType === 'planning') {
+          existing.planningAU = Math.round((existing.planningAU + session.au) * 100) / 100;
+        } else {
+          existing.executionAU = Math.round((existing.executionAU + session.au) * 100) / 100;
+        }
         existing.seconds += session.durationSeconds;
         existing.taskIds.add(session.taskId);
         projectAUs.set(session.projectId, existing);
@@ -437,6 +474,8 @@ export class AttentionService {
         projectName: proj?.name || 'Project',
         isAttention: !!proj?.isAttention,
         au: data.au,
+        planningAU: data.planningAU,
+        executionAU: data.executionAU,
         percentage,
         tasksWorkedCount: data.taskIds.size,
         tasksCompletedCount: completedInPeriod,
@@ -636,20 +675,33 @@ export class AttentionService {
       }
     }
 
-    // Rule 4: Project Progress Alignment
-    const topProject = projectAllocations.length > 0 ? projectAllocations[0] : null;
-    if (topProject && topProject.percentage >= 40) {
-      patternObservations.push({
-        id: 'project_concentration',
-        title: `Attention Concentration: ${topProject.projectName}`,
-        description: `${topProject.percentage}% of all focused attention was invested in "${topProject.projectName}", resulting in ${topProject.tasksCompletedCount} completed tasks.`,
-        ruleExplanation: 'Triggered when a single project receives >= 40% of weekly tracked attention.',
-        evidence: [
-          { label: 'Project attention', value: `${topProject.au} AU (${topProject.percentage}%)` },
-          { label: 'Tasks completed in project', value: `${topProject.tasksCompletedCount}` },
-        ],
-        tone: 'info',
-      });
+    // Rule 5: Deliberation vs Execution Balance
+    if (trackedAU >= 2.0 && deliberationSummary) {
+      if (deliberationSummary.deliberationRatio === 0) {
+        patternObservations.push({
+          id: 'deliberation_zero_planning',
+          title: 'Planning Deficit: 0% Time Allocated to Project Architecture',
+          description: `All ${trackedAU} AU tracked this week was spent on task execution without dedicated project planning sessions. Proactive DAG modeling helps prevent future bottlenecks.`,
+          ruleExplanation: 'Triggered when trackedAU >= 2.0 AU and planning deliberationRatio === 0%.',
+          evidence: [
+            { label: 'Execution Attention', value: `${deliberationSummary.executionAU} AU` },
+            { label: 'Planning Attention', value: '0 AU (0%)' },
+          ],
+          tone: 'neutral',
+        });
+      } else if (deliberationSummary.deliberationRatio >= 10 && deliberationSummary.deliberationRatio <= 35) {
+        patternObservations.push({
+          id: 'deliberation_healthy_balance',
+          title: 'Healthy Deliberative Rhythm: Balanced Planning & Execution',
+          description: `${deliberationSummary.deliberationRatio}% of your cognitive effort was invested in project planning and goal architecture, with the remaining ${Math.round((100 - deliberationSummary.deliberationRatio) * 10) / 10}% in execution.`,
+          ruleExplanation: 'Triggered when planning deliberationRatio is between 10% and 35% with >= 2.0 AU total tracked.',
+          evidence: [
+            { label: 'Planning Attention', value: `${deliberationSummary.planningAU} AU (${deliberationSummary.deliberationRatio}%)` },
+            { label: 'Execution Attention', value: `${deliberationSummary.executionAU} AU` },
+          ],
+          tone: 'info',
+        });
+      }
     }
 
     return {
@@ -661,6 +713,7 @@ export class AttentionService {
       trackedAU,
       trackedSeconds,
       sessionCount: weekSessions.length,
+      deliberationSummary,
       projectAllocations,
       standaloneAllocations,
       topTasksByAttention,

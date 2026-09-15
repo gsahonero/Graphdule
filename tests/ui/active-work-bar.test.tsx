@@ -249,4 +249,86 @@ describe('ActiveWorkBar and PictureInPicture', () => {
       expect(dummyDoc.body.className).toContain('bg-slate-950');
     });
   });
+
+  describe('Project Planning Session UI & Interactions', () => {
+    const stopProjectPlanningMock = vi.fn();
+    const discardActiveWorkSessionMock = vi.fn();
+    const dismissPlanningToastMock = vi.fn();
+
+    const planningContextValue: any = {
+      ...baseContextValue,
+      activeWorkSession: {
+        sessionId: 'sess-plan-1',
+        taskId: 'planning_proj-1',
+        taskText: 'Project Planning: Graph Engine',
+        projectId: 'proj-1',
+        projectName: 'Graph Engine',
+        sessionType: 'planning',
+        startedAt: new Date(Date.now() - 60000).toISOString(),
+        isPaused: false,
+      },
+      activeWorkElapsedSeconds: 60,
+      stopProjectPlanning: stopProjectPlanningMock,
+      discardActiveWorkSession: discardActiveWorkSessionMock,
+      dismissPlanningToast: dismissPlanningToastMock,
+      planningToast: {
+        projectId: 'proj-1',
+        projectName: 'Graph Engine',
+        actionReason: 'add_node',
+      },
+    };
+
+    it('renders planning badge, finish planning button, and discard button', () => {
+      render(
+        <AppContext.Provider value={planningContextValue}>
+          <ActiveWorkBar />
+        </AppContext.Provider>
+      );
+
+      expect(screen.getByTestId('workbar-planning-badge')).toBeInTheDocument();
+      expect(screen.getByText('Planning')).toBeInTheDocument();
+      expect(screen.getByTestId('workbar-finish-planning-btn')).toBeInTheDocument();
+      expect(screen.getByTestId('workbar-discard-planning-btn')).toBeInTheDocument();
+    });
+
+    it('triggers stopProjectPlanning when Finish Planning is clicked', () => {
+      render(
+        <AppContext.Provider value={planningContextValue}>
+          <ActiveWorkBar />
+        </AppContext.Provider>
+      );
+
+      fireEvent.click(screen.getByTestId('workbar-finish-planning-btn'));
+      expect(stopProjectPlanningMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('triggers discardActiveWorkSession when Discard is clicked', () => {
+      render(
+        <AppContext.Provider value={planningContextValue}>
+          <ActiveWorkBar />
+        </AppContext.Provider>
+      );
+
+      fireEvent.click(screen.getByTestId('workbar-discard-planning-btn'));
+      expect(discardActiveWorkSessionMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('renders planning toast banner with Got it and Discard actions', () => {
+      render(
+        <AppContext.Provider value={planningContextValue}>
+          <ActiveWorkBar />
+        </AppContext.Provider>
+      );
+
+      expect(screen.getByTestId('planning-toast-banner')).toBeInTheDocument();
+      expect(screen.getByText(/Tracking planning on "Graph Engine"/i)).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId('planning-toast-dismiss-btn'));
+      expect(dismissPlanningToastMock).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByTestId('planning-toast-discard-btn'));
+      expect(discardActiveWorkSessionMock).toHaveBeenCalledTimes(1);
+    });
+  });
 });
+

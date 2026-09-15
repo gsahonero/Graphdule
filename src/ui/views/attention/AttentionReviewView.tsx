@@ -15,6 +15,7 @@ import {
   Trash2,
   Info,
   Check,
+  BrainCircuit,
 } from 'lucide-react';
 
 export const AttentionReviewView: React.FC = () => {
@@ -307,7 +308,7 @@ export const AttentionReviewView: React.FC = () => {
         )}
 
         {/* 1. Core Summary Metrics Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {/* Card 1: Tracked Attention */}
           <div className="p-5 rounded-2xl bg-white dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800/80 shadow-xs dark:shadow-lg relative overflow-hidden">
             <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 mb-2 text-xs">
@@ -349,7 +350,37 @@ export const AttentionReviewView: React.FC = () => {
             )}
           </div>
 
-          {/* Card 2: Attention Performance (Estimation Ratio) */}
+          {/* Card 2: Deliberation vs Execution Ratio */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800/80 shadow-xs dark:shadow-lg">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 mb-2 text-xs">
+              <span className="font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Deliberation Ratio</span>
+              <BrainCircuit className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl font-extrabold text-slate-900 dark:text-slate-100 font-mono">
+                {activeReviewData.deliberationSummary?.deliberationRatio ?? 0}%
+              </span>
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                {(activeReviewData.deliberationSummary?.deliberationRatio ?? 0) >= 15 &&
+                (activeReviewData.deliberationSummary?.deliberationRatio ?? 0) <= 30
+                  ? 'Optimal'
+                  : (activeReviewData.deliberationSummary?.deliberationRatio ?? 0) < 15
+                  ? 'Execution heavy'
+                  : 'High planning'}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 mt-3 text-[10px] sm:text-[11px]">
+              <span className="px-1.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 dark:bg-indigo-500/10 dark:text-indigo-400 dark:border-indigo-500/20 font-medium truncate">
+                {activeReviewData.deliberationSummary?.planningAU ?? 0} AU Plan
+              </span>
+              <span className="px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700 font-medium truncate">
+                {activeReviewData.deliberationSummary?.executionAU ?? 0} AU Exec
+              </span>
+            </div>
+          </div>
+
+          {/* Card 3: Attention Performance (Estimation Ratio) */}
           <div className="p-5 rounded-2xl bg-white dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800/80 shadow-xs dark:shadow-lg">
             <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 mb-2 text-xs">
               <span className="font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Estimation Accuracy</span>
@@ -373,20 +404,20 @@ export const AttentionReviewView: React.FC = () => {
               </span>
             </div>
 
-            <div className="flex items-center gap-2 mt-3 text-[11px]">
-              <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20 font-medium">
-                {activeReviewData.estimationCalibration.accurateCount} Accurate
+            <div className="flex items-center gap-1.5 mt-3 text-[10px] sm:text-[11px]">
+              <span className="px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20 font-medium">
+                {activeReviewData.estimationCalibration.accurateCount} Acc
               </span>
-              <span className="px-2 py-0.5 rounded-md bg-cyan-50 text-cyan-700 border border-cyan-200 dark:bg-cyan-500/10 dark:text-cyan-400 dark:border-cyan-500/20 font-medium">
+              <span className="px-1.5 py-0.5 rounded-md bg-cyan-50 text-cyan-700 border border-cyan-200 dark:bg-cyan-500/10 dark:text-cyan-400 dark:border-cyan-500/20 font-medium">
                 {activeReviewData.estimationCalibration.overestimatedCount} Over
               </span>
-              <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20 font-medium">
+              <span className="px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20 font-medium">
                 {activeReviewData.estimationCalibration.underestimatedCount} Under
               </span>
             </div>
           </div>
 
-          {/* Card 3: Focused Attention vs Calendar Time */}
+          {/* Card 4: Focused Attention vs Calendar Time */}
           <div className="p-5 rounded-2xl bg-white dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800/80 shadow-xs dark:shadow-lg">
             <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 mb-2 text-xs">
               <span className="font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Focused vs Calendar</span>
@@ -399,10 +430,10 @@ export const AttentionReviewView: React.FC = () => {
               <span className="text-xs text-slate-500 dark:text-slate-400">focused</span>
               <span className="text-slate-400 dark:text-slate-500">•</span>
               <span className="text-lg font-bold text-slate-800 dark:text-slate-300">7d</span>
-              <span className="text-xs text-slate-500 dark:text-slate-400">calendar span</span>
+              <span className="text-xs text-slate-500 dark:text-slate-400">span</span>
             </div>
             <p className="text-[11px] text-slate-500 mt-3 leading-relaxed">
-              AU measures pure focus. Elapsed calendar days include sleep, context switches, and meetings.
+              AU measures pure focus. Calendar span includes rest and context switches.
             </p>
           </div>
         </div>
@@ -450,7 +481,13 @@ export const AttentionReviewView: React.FC = () => {
                     </div>
                     <div className="flex items-center justify-between text-[11px] text-slate-500">
                       <span>{p.tasksWorkedCount} tasks worked</span>
-                      <span>{p.tasksCompletedCount} completed</span>
+                      {p.planningAU !== undefined && p.planningAU > 0 ? (
+                        <span className="text-indigo-600 dark:text-indigo-400 font-mono text-[10px]">
+                          🧠 {p.planningAU} AU plan • ⚡ {p.executionAU ?? (p.au - p.planningAU)} AU exec
+                        </span>
+                      ) : (
+                        <span>{p.tasksCompletedCount} completed</span>
+                      )}
                     </div>
                   </div>
                 ))}

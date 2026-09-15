@@ -32,6 +32,7 @@ import {
 } from './layout';
 import { Node, NodeStatus, TaskEnvironment } from '../../../domain/models/types';
 import { ProjectService } from '../../../domain/services/project-service';
+import { GraphService } from '../../../domain/services/graph-service';
 import { addDays } from '../../../domain/utils/date';
 import {
   Plus,
@@ -50,6 +51,7 @@ import {
   Maximize2,
   Undo2,
   Redo2,
+  BrainCircuit,
 } from 'lucide-react';
 
 const nodeTypes = {
@@ -125,6 +127,12 @@ const GraphCanvas: React.FC = () => {
     canRedo,
     undo,
     redo,
+    isWholeProjectView,
+    setIsWholeProjectView,
+    toggleWholeProjectView,
+    startProjectPlanning,
+    stopProjectPlanning,
+    activeWorkSession,
   } = useApp();
 
   const { screenToFlowPosition, fitView } = useReactFlow();
@@ -199,25 +207,36 @@ const GraphCanvas: React.FC = () => {
     return ProjectService.resolveDocumentPresentationNodes(nodes);
   }, [nodes]);
 
+  const criticalPath = useMemo(() => {
+    if (!isWholeProjectView) return null;
+    return GraphService.calculateCriticalPath(presentationNodes, edges, project.endGoalNodeId);
+  }, [isWholeProjectView, presentationNodes, edges, project.endGoalNodeId]);
+
   // Scoped nodes for current hierarchy level (Root level has parentNodeId === null or undefined)
   const scopedNodes = useMemo(() => {
+    if (isWholeProjectView) {
+      return presentationNodes;
+    }
     return presentationNodes.filter(
       (n) => (n.parentNodeId || null) === (currentParentNode ? currentParentNode.id : null)
     );
-  }, [presentationNodes, currentParentNode]);
+  }, [presentationNodes, currentParentNode, isWholeProjectView]);
 
   // Scoped edges where both endpoints belong to current hierarchy level
   const scopedEdges = useMemo(() => {
+    if (isWholeProjectView) {
+      return edges;
+    }
     const scopedNodeIds = new Set(scopedNodes.map((n) => n.id));
     return edges.filter(
       (e) => scopedNodeIds.has(e.fromNodeId) && scopedNodeIds.has(e.toNodeId)
     );
-  }, [edges, scopedNodes]);
+  }, [edges, scopedNodes, isWholeProjectView]);
 
   // Build React Flow nodes for active scope
   const initialElements = useMemo(() => {
     const vp = typeof window !== 'undefined' ? { width: window.innerWidth, height: window.innerHeight } : undefined;
-    return getLayoutedElements(
+    const layout = getLayoutedElements(
       scopedNodes,
       scopedEdges,
       layoutMode,
@@ -226,7 +245,25 @@ const GraphCanvas: React.FC = () => {
       nodeScale,
       vp
     );
-  }, [scopedNodes, scopedEdges, layoutMode, viewDensity, nodeScale]);
+    if (!isWholeProjectView || !criticalPath) return layout;
+    const criticalEdgeSet = new Set(criticalPath.edgeIds);
+    return {
+      ...layout,
+      rfEdges: layout.rfEdges.map((e) =>
+        criticalEdgeSet.has(e.id)
+          ? {
+              ...e,
+              animated: true,
+              style: {
+                ...e.style,
+                stroke: '#818cf8',
+                strokeWidth: Math.max(3, Number(e.style?.strokeWidth || 2) * 1.5),
+              },
+            }
+          : e
+      ),
+    };
+  }, [scopedNodes, scopedEdges, layoutMode, viewDensity, nodeScale, isWholeProjectView, criticalPath]);
 
   const [rfNodes, setRfNodes] = useState<RFNode[]>(initialElements.rfNodes);
   const [rfEdges, setRfEdges] = useState<RFEdge[]>(initialElements.rfEdges);
@@ -262,9 +299,34 @@ const GraphCanvas: React.FC = () => {
         return rfNode;
       });
     });
-    setRfEdges(layout.rfEdges);
+    const criticalEdgeSet = new Set(criticalPath?.edgeIds || []);
+    const styledEdges = layout.rfEdges.map((e) => {
+      if (criticalEdgeSet.has(e.id)) {
+        return {
+          ...e,
+          animated: true,
+          style: {
+            ...e.style,
+            stroke: '#818cf8',
+            strokeWidth: Math.max(3, Number(e.style?.strokeWidth || 2) * 1.5),
+          },
+        };
+      }
+      return e;
+    });
+    setRfEdges(styledEdges);
     scopedNodes.forEach((n) => updateNodeInternals(n.id));
-  }, [scopedNodes, scopedEdges, layoutMode, viewDensity, nodeScale, updateNodeInternals]);
+  }, [scopedNodes, scopedEdges, layoutMode, viewDensity, nodeScale, criticalPath, updateNodeInternals]);
+
+  // Auto fitView when entering Whole Project view
+  useEffect(() => {
+    if (isWholeProjectView) {
+      const timer = setTimeout(() => {
+        fitView({ padding: 0.15, duration: 400 });
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isWholeProjectView, fitView]);
 
   // Keep a ref to nodes to traverse hierarchy without re-triggering fitView when node attributes change
   const nodesRef = useRef(nodes);
@@ -1070,6 +1132,8 @@ const GraphCanvas: React.FC = () => {
       const nodeData: GraphNodeData = {
         node: nodeObj,
         isEGN,
+        isOnCriticalPath: isWholeProjectView ? (criticalPath?.nodeIds.includes(nodeObj.id) ?? false) : false,
+        isWholeProjectView,
         notesCount: nodeNotesCount,
         subtaskCount,
         hasInProgressChild,
@@ -1135,6 +1199,8 @@ const GraphCanvas: React.FC = () => {
     setSelectedNode,
     setIsNotesDrawerOpen,
     handleDrillDown,
+    isWholeProjectView,
+    criticalPath,
   ]);
 
   const decoratedEdges = useMemo(() => {
@@ -1142,26 +1208,36 @@ const GraphCanvas: React.FC = () => {
     const strokeWidth = Math.max(1.5, Math.round(2.5 * nodeScale * 10) / 10);
     const interactionWidth = Math.round(20 * nodeScale);
 
+    const criticalEdgeSet = new Set(criticalPath?.edgeIds || []);
+
     return rfEdges.map((e) => {
       const isSelected = e.id === selectedEdgeId;
       const isTargetForDrop = e.id === targetEdgeForDropId;
+      const isOnCriticalPath = isWholeProjectView && criticalEdgeSet.has(e.id);
+
       return {
         ...e,
         selected: isSelected,
         type: 'smoothstep',
-        animated: isTargetForDrop,
+        animated: isTargetForDrop || isOnCriticalPath,
         interactionWidth,
         style: {
-          strokeWidth: isTargetForDrop ? Math.max(3.5, strokeWidth + 1.5) : strokeWidth,
-          stroke: isTargetForDrop ? '#10b981' : undefined,
-          strokeDasharray: isTargetForDrop ? '6 4' : undefined,
+          strokeWidth: isTargetForDrop
+            ? Math.max(3.5, strokeWidth + 1.5)
+            : isOnCriticalPath
+            ? Math.max(3, strokeWidth * 1.5)
+            : strokeWidth,
+          stroke: isTargetForDrop ? '#10b981' : isOnCriticalPath ? '#818cf8' : undefined,
+          strokeDasharray: isTargetForDrop ? '6 4' : isOnCriticalPath ? '5 5' : undefined,
         },
         markerEnd: {
           type: MarkerType.ArrowClosed,
-          width: isTargetForDrop ? arrowSize + 4 : arrowSize,
-          height: isTargetForDrop ? arrowSize + 4 : arrowSize,
+          width: isTargetForDrop ? arrowSize + 4 : isOnCriticalPath ? arrowSize + 2 : arrowSize,
+          height: isTargetForDrop ? arrowSize + 4 : isOnCriticalPath ? arrowSize + 2 : arrowSize,
           color: isTargetForDrop
             ? '#10b981'
+            : isOnCriticalPath
+            ? '#818cf8'
             : isSelected
             ? '#10b981'
             : preferences.theme === 'dark'
@@ -1170,7 +1246,7 @@ const GraphCanvas: React.FC = () => {
         },
       };
     });
-  }, [rfEdges, selectedEdgeId, targetEdgeForDropId, preferences.theme, nodeScale]);
+  }, [rfEdges, selectedEdgeId, targetEdgeForDropId, preferences.theme, nodeScale, isWholeProjectView, criticalPath]);
 
   return (
     <div className="flex-1 h-full relative dark:bg-slate-950 bg-slate-50 flex flex-col overflow-clip transition-colors duration-150">
@@ -1212,8 +1288,30 @@ const GraphCanvas: React.FC = () => {
           })}
         </div>
 
+        {/* Whole Project Mode Indicator */}
+        {isWholeProjectView && (
+          <div className="flex items-center space-x-2 text-xs shrink-0 bg-violet-500/10 dark:bg-violet-950/40 border border-violet-500/30 px-2.5 py-1 rounded-lg">
+            <span className="font-semibold text-violet-700 dark:text-violet-300 flex items-center gap-1">
+              🔭 Whole Project View
+            </span>
+            <span className="text-violet-600 dark:text-violet-400 font-mono text-[11px] hidden md:inline">
+              ({presentationNodes.length} nodes
+              {criticalPath && (
+                <> • Critical Path: {criticalPath.nodeIds.length} tasks / {Math.round(criticalPath.totalAU * 10) / 10} AU</>
+              )})
+            </span>
+            <button
+              onClick={() => setIsWholeProjectView(false)}
+              className="px-2 py-0.5 bg-violet-600 hover:bg-violet-500 text-white rounded text-[10px] font-semibold cursor-pointer transition-colors"
+              title="Exit Whole Project View"
+            >
+              Exit
+            </button>
+          </div>
+        )}
+
         {/* Right: Parent Context & Back Up button */}
-        {currentParentNode && (
+        {currentParentNode && !isWholeProjectView && (
           <div className="flex items-center space-x-3 text-xs shrink-0">
             <div className="hidden sm:flex items-center space-x-2 text-slate-500 dark:text-slate-400">
               <span>Parent Due: <span className="font-mono text-slate-700 dark:text-slate-300 font-medium">{currentParentNode.dueDate}</span></span>
@@ -1242,6 +1340,46 @@ const GraphCanvas: React.FC = () => {
         >
           <Plus className="w-3.5 h-3.5" />
           <span>{currentParentNode ? 'Add Subtask' : 'Add Task'}</span>
+        </button>
+
+        {/* Deliberate Project Planning Trigger Button */}
+        <button
+          onClick={() => {
+            if (activeWorkSession?.sessionType === 'planning' && activeWorkSession.projectId === project.id) {
+              stopProjectPlanning();
+            } else {
+              startProjectPlanning(project.id);
+            }
+          }}
+          data-testid="canvas-plan-btn"
+          className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold shadow-sm transition-all cursor-pointer ${
+            activeWorkSession?.sessionType === 'planning' && activeWorkSession.projectId === project.id
+              ? 'bg-indigo-600 hover:bg-indigo-500 text-white'
+              : 'bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800'
+          }`}
+          title="Toggle deliberate project planning session (Ctrl+Shift+P)"
+        >
+          <BrainCircuit className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">
+            {activeWorkSession?.sessionType === 'planning' && activeWorkSession.projectId === project.id
+              ? 'Planning'
+              : 'Plan'}
+          </span>
+        </button>
+
+        {/* Whole Project View Toggle Button */}
+        <button
+          onClick={toggleWholeProjectView}
+          data-testid="canvas-whole-project-btn"
+          className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold shadow-sm transition-all cursor-pointer ${
+            isWholeProjectView
+              ? 'bg-violet-600 hover:bg-violet-500 text-white'
+              : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+          }`}
+          title="Toggle Whole Project View (Flattened view highlighting critical path and end goal)"
+        >
+          <Layers className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">{isWholeProjectView ? 'Exit Whole' : 'Whole'}</span>
         </button>
 
         {/* Undo / Redo controls */}

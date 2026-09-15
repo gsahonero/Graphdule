@@ -309,4 +309,117 @@ export class GraphService {
     }
     return crossings;
   }
+
+  /**
+   * Computes the critical path (longest path) to the End Goal Node in a DAG.
+   * Path length is weighted by estimatedAU (defaults to 1 if not specified).
+   * Returns sets of node IDs and edge IDs that constitute the critical path.
+   */
+  public static calculateCriticalPath(
+    nodes: readonly Node[],
+    edges: readonly Edge[],
+    endGoalNodeId?: string
+  ): {
+    criticalPathNodeIds: Set<string>;
+    criticalPathEdgeIds: Set<string>;
+    nodeIds: string[];
+    edgeIds: string[];
+    totalAU: number;
+  } {
+    if (nodes.length === 0) {
+      return {
+        criticalPathNodeIds: new Set(),
+        criticalPathEdgeIds: new Set(),
+        nodeIds: [],
+        edgeIds: [],
+        totalAU: 0,
+      };
+    }
+
+    const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+    const validEdges = edges.filter((e) => nodeMap.has(e.fromNodeId) && nodeMap.has(e.toNodeId));
+    const sortedNodes = GraphService.topologicalSort(nodes, validEdges);
+
+    const dist = new Map<string, number>();
+    const parentEdge = new Map<string, { fromNodeId: string; edgeId: string }>();
+
+    for (const node of sortedNodes) {
+      const weight = Math.max(0.25, node.estimatedAU || 1);
+      dist.set(node.id, weight);
+    }
+
+    for (const u of sortedNodes) {
+      const currentDist = dist.get(u.id) || 0;
+      const outgoingEdges = validEdges.filter((e) => e.fromNodeId === u.id);
+
+      for (const edge of outgoingEdges) {
+        const v = nodeMap.get(edge.toNodeId);
+        if (!v) continue;
+        const vWeight = Math.max(0.25, v.estimatedAU || 1);
+        const candidateDist = currentDist + vWeight;
+
+        if (candidateDist > (dist.get(v.id) || 0)) {
+          dist.set(v.id, candidateDist);
+          parentEdge.set(v.id, { fromNodeId: u.id, edgeId: edge.id });
+        }
+      }
+    }
+
+    let targetId = endGoalNodeId;
+    if (!targetId || !nodeMap.has(targetId)) {
+      // Find terminal node (out-degree 0) with maximum cumulative distance
+      const outDegrees = new Map<string, number>();
+      nodes.forEach((n) => outDegrees.set(n.id, 0));
+      validEdges.forEach((e) => outDegrees.set(e.fromNodeId, (outDegrees.get(e.fromNodeId) || 0) + 1));
+      let maxDist = -1;
+      let bestTerminal: string | undefined;
+      for (const [id, deg] of outDegrees.entries()) {
+        if (deg === 0) {
+          const d = dist.get(id) || 0;
+          if (d > maxDist) {
+            maxDist = d;
+            bestTerminal = id;
+          }
+        }
+      }
+      targetId = bestTerminal;
+    }
+
+    if (!targetId || !nodeMap.has(targetId)) {
+      return {
+        criticalPathNodeIds: new Set(),
+        criticalPathEdgeIds: new Set(),
+        nodeIds: [],
+        edgeIds: [],
+        totalAU: 0,
+      };
+    }
+
+    const orderedNodeIds: string[] = [];
+    const orderedEdgeIds: string[] = [];
+    const criticalPathNodeIds = new Set<string>();
+    const criticalPathEdgeIds = new Set<string>();
+
+    let curr: string | undefined = targetId;
+    orderedNodeIds.unshift(curr);
+    criticalPathNodeIds.add(curr);
+
+    while (curr && parentEdge.has(curr)) {
+      const p: { fromNodeId: string; edgeId: string } = parentEdge.get(curr)!;
+      orderedEdgeIds.unshift(p.edgeId);
+      criticalPathEdgeIds.add(p.edgeId);
+      orderedNodeIds.unshift(p.fromNodeId);
+      criticalPathNodeIds.add(p.fromNodeId);
+      curr = p.fromNodeId;
+    }
+
+    const totalAU = Math.round((dist.get(targetId) || 0) * 100) / 100;
+    return {
+      criticalPathNodeIds,
+      criticalPathEdgeIds,
+      nodeIds: orderedNodeIds,
+      edgeIds: orderedEdgeIds,
+      totalAU,
+    };
+  }
 }

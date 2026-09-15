@@ -3,6 +3,7 @@ import { act } from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MyDayView } from '../../src/ui/views/my-day/MyDayView';
 import { Node, StandaloneTask } from '../../src/domain/models/types';
+import { getTodayString } from '../../src/domain/utils/date';
 import * as AppContextModule from '../../src/ui/context/AppContext';
 
 describe('MyDayView Two-Column Layout and Mobile Panel Switching', () => {
@@ -18,7 +19,7 @@ describe('MyDayView Two-Column Layout and Mobile Panel Switching', () => {
       id: 'node-1',
       projectId: 'proj-1',
       text: 'Design Two Column Layout',
-      dueDate: new Date().toISOString().split('T')[0],
+      dueDate: getTodayString(),
       status: 'planned',
       createdAt: '2026-09-01T00:00:00.000Z',
       updatedAt: '2026-09-01T00:00:00.000Z',
@@ -29,7 +30,7 @@ describe('MyDayView Two-Column Layout and Mobile Panel Switching', () => {
       id: 'node-2',
       projectId: 'proj-1',
       text: 'Build Mobile Lateral Switch',
-      dueDate: new Date().toISOString().split('T')[0],
+      dueDate: getTodayString(),
       status: 'planned',
       createdAt: '2026-09-01T00:00:00.000Z',
       updatedAt: '2026-09-01T00:00:00.000Z',
@@ -42,7 +43,7 @@ describe('MyDayView Two-Column Layout and Mobile Panel Switching', () => {
     {
       id: 'st-1',
       text: 'Review Graphdule Mobile UX',
-      dueDate: new Date().toISOString().split('T')[0],
+      dueDate: getTodayString(),
       status: 'planned',
       createdAt: '2026-09-01T00:00:00.000Z',
       updatedAt: '2026-09-01T00:00:00.000Z',
@@ -51,7 +52,7 @@ describe('MyDayView Two-Column Layout and Mobile Panel Switching', () => {
     {
       id: 'st-2',
       text: 'Dental appointment checkup',
-      dueDate: new Date().toISOString().split('T')[0],
+      dueDate: getTodayString(),
       status: 'planned',
       createdAt: '2026-09-01T00:00:00.000Z',
       updatedAt: '2026-09-01T00:00:00.000Z',

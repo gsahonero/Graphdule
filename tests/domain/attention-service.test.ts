@@ -723,5 +723,114 @@ describe('AttentionService - Attention Measurement System', () => {
       const emptySessions = AttentionService.reconstructWorkSessions([], 15);
       expect(emptySessions.length).toBe(0);
     });
+
+    it('reconstructs project planning sessions with sessionType: planning', () => {
+      const events: ActivityEvent[] = [
+        {
+          id: 'ev-p1',
+          timestamp: '2026-09-07T10:00:00.000Z',
+          type: 'planning_started',
+          entityId: 'planning_proj-1',
+          entityText: 'Project Planning: Project Alpha',
+          projectId: 'proj-1',
+        },
+        {
+          id: 'ev-p2',
+          timestamp: '2026-09-07T10:30:00.000Z',
+          type: 'planning_stopped',
+          entityId: 'planning_proj-1',
+          entityText: 'Project Planning: Project Alpha',
+          projectId: 'proj-1',
+          metadata: { durationSeconds: 1800 },
+        },
+      ];
+
+      const sessions = AttentionService.reconstructWorkSessions(events, 15);
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].taskId).toBe('planning_proj-1');
+      expect(sessions[0].projectId).toBe('proj-1');
+      expect(sessions[0].sessionType).toBe('planning');
+      expect(sessions[0].au).toBe(2.0);
+    });
+  });
+
+  describe('Deliberation vs Execution (Rule 5 & Deliberation Ratio)', () => {
+    it('calculates deliberation ratio and project allocations in weekly review', () => {
+      const events: ActivityEvent[] = [
+        // 1 hour execution on task-1 (4 AU)
+        {
+          id: 'ev-e1',
+          timestamp: '2026-09-07T08:00:00.000Z',
+          type: 'work_started',
+          entityId: 'task-1',
+          entityText: 'Build UI',
+          projectId: 'proj-1',
+        },
+        {
+          id: 'ev-e2',
+          timestamp: '2026-09-07T09:00:00.000Z',
+          type: 'work_stopped',
+          entityId: 'task-1',
+          entityText: 'Build UI',
+          projectId: 'proj-1',
+          metadata: { durationSeconds: 3600 },
+        },
+        // 30 min planning on proj-1 (2 AU)
+        {
+          id: 'ev-p1',
+          timestamp: '2026-09-07T09:30:00.000Z',
+          type: 'planning_started',
+          entityId: 'planning_proj-1',
+          entityText: 'Plan Project Alpha',
+          projectId: 'proj-1',
+        },
+        {
+          id: 'ev-p2',
+          timestamp: '2026-09-07T10:00:00.000Z',
+          type: 'planning_stopped',
+          entityId: 'planning_proj-1',
+          entityText: 'Plan Project Alpha',
+          projectId: 'proj-1',
+          metadata: { durationSeconds: 1800 },
+        },
+      ];
+
+      const projects = [
+        {
+          id: 'proj-1',
+          name: 'Project Alpha',
+          description: '',
+          endGoalNodeId: 'egn-1',
+          isAttention: true,
+          createdAt: '2026-09-01T00:00:00.000Z',
+          updatedAt: '2026-09-01T00:00:00.000Z',
+        },
+      ] as unknown as ProjectSummary[];
+
+      const review = AttentionService.generateWeeklyAttentionReview({
+        events,
+        tasks: [],
+        projects,
+        weekStartDate: '2026-09-01',
+        weekEndDate: '2026-09-07',
+        plannedAU: 10,
+        auMinutes: 15,
+      });
+
+      expect(review.trackedAU).toBe(6.0); // 4 execution + 2 planning
+      expect(review.deliberationSummary).toBeDefined();
+      expect(review.deliberationSummary?.planningAU).toBe(2.0);
+      expect(review.deliberationSummary?.executionAU).toBe(4.0);
+      // 2 / 6 = 33.333% -> rounds to 33.3%
+      expect(review.deliberationSummary?.deliberationRatio).toBe(33.3);
+
+      // Check project allocations
+      const pAlloc = review.projectAllocations.find((p) => p.projectId === 'proj-1');
+      expect(pAlloc).toBeDefined();
+      expect(pAlloc?.au).toBe(6.0);
+      expect(pAlloc?.planningAU).toBe(2.0);
+      expect(pAlloc?.executionAU).toBe(4.0);
+    });
   });
 });
+

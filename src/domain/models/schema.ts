@@ -143,6 +143,7 @@ export const StandaloneTaskSchema = z.object({
 
 export const ActiveWorkSessionSchema = z.object({
   sessionId: z.string().min(1),
+  sessionType: z.enum(['execution', 'planning']).optional().default('execution'),
   taskId: z.string().min(1),
   taskText: z.string(),
   projectId: z.string().optional(),
@@ -227,6 +228,18 @@ export function normalizeEventType(raw: string): ActivityEventType {
       return 'work_paused';
     case 'work_resumed':
       return 'work_resumed';
+    case 'planning_started':
+    case 'project_planning_started':
+      return 'planning_started';
+    case 'planning_stopped':
+    case 'project_planning_stopped':
+      return 'planning_stopped';
+    case 'planning_paused':
+    case 'project_planning_paused':
+      return 'planning_paused';
+    case 'planning_resumed':
+    case 'project_planning_resumed':
+      return 'planning_resumed';
     case 'weekly_goal_set':
       return 'weekly_goal_set';
     case 'weekly_review_triggered':

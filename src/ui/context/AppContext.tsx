@@ -217,6 +217,16 @@ interface AppContextType {
   triggerWeeklyReview: (weekStartDate: string, weekEndDate: string, userNotes?: string) => Promise<WeeklyAttentionReviewRecord>;
   deleteAttentionReview: (reviewId: string) => Promise<void>;
 
+  // Project Planning Mode & Deliberative State
+  startProjectPlanning: (projectId: string, projectName?: string) => Promise<void>;
+  stopProjectPlanning: (message?: string) => Promise<void>;
+  discardActiveWorkSession: () => Promise<void>;
+  planningToast: { projectId: string; projectName: string } | null;
+  dismissPlanningToast: () => void;
+  isWholeProjectView: boolean;
+  setIsWholeProjectView: (val: boolean) => void;
+  toggleWholeProjectView: () => void;
+
   // Daily AU Capacity & Reality Check
   capacityConfig: DailyCapacityConfig;
   capacitySnapshots: DailyCapacitySnapshot[];
@@ -454,6 +464,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const activeProjectDocRef = useRef<ProjectDocument | null>(activeProjectDoc);
+  const checkAndTriggerProjectPlanningRef = useRef<(projectId: string, projectName?: string, reason?: string) => Promise<void>>(() => Promise.resolve());
+  const createSnapshotRef = useRef<(message?: string) => Promise<SnapshotMetadata | null | void>>(() => Promise.resolve());
 
   useEffect(() => {
     activeProjectDocRef.current = activeProjectDoc;
@@ -896,6 +908,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       await refreshData();
       await openProject(project.id);
+      checkAndTriggerProjectPlanningRef.current(project.id, project.name, 'create_project').catch(() => {});
     },
     [storage, refreshData, openProject]
   );
@@ -1270,12 +1283,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const au = AttentionService.durationSecondsToAU(totalDurationSeconds, attentionUnitMinutes);
     const stoppedAt = new Date().toISOString();
 
-    await logActivityEvent('work_stopped', sessionToStop.taskId, {
+    const eventType = sessionToStop.sessionType === 'planning' ? 'planning_stopped' : 'work_stopped';
+    await logActivityEvent(eventType, sessionToStop.taskId, {
       entityText: sessionToStop.taskText,
       projectId: sessionToStop.projectId,
       projectName: sessionToStop.projectName,
       metadata: {
         sessionId: sessionToStop.sessionId,
+        sessionType: sessionToStop.sessionType || 'execution',
         durationSeconds: totalDurationSeconds,
         au,
         startedAt: sessionToStop.startedAt,
@@ -1301,12 +1316,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       lastResumedAt: undefined,
     };
 
-    await logActivityEvent('work_paused', activeWorkSession.taskId, {
+    const eventType = activeWorkSession.sessionType === 'planning' ? 'planning_paused' : 'work_paused';
+    await logActivityEvent(eventType, activeWorkSession.taskId, {
       entityText: activeWorkSession.taskText,
       projectId: activeWorkSession.projectId,
       projectName: activeWorkSession.projectName,
       metadata: {
         sessionId: activeWorkSession.sessionId,
+        sessionType: activeWorkSession.sessionType || 'execution',
         durationSeconds: Math.round(totalAccum),
       },
     });
@@ -1467,12 +1484,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       lastResumedAt: resumedAt,
     };
 
-    await logActivityEvent('work_resumed', activeWorkSession.taskId, {
+    const eventType = activeWorkSession.sessionType === 'planning' ? 'planning_resumed' : 'work_resumed';
+    await logActivityEvent(eventType, activeWorkSession.taskId, {
       entityText: activeWorkSession.taskText,
       projectId: activeWorkSession.projectId,
       projectName: activeWorkSession.projectName,
       metadata: {
         sessionId: activeWorkSession.sessionId,
+        sessionType: activeWorkSession.sessionType || 'execution',
       },
     });
 
@@ -1485,6 +1504,149 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     await updatePreferences({ activeWorkSession: updatedSession });
   }, [activeWorkSession, logActivityEvent, updatePreferences]);
+
+  const [planningToast, setPlanningToast] = useState<{ projectId: string; projectName: string } | null>(null);
+
+  const dismissPlanningToast = useCallback(() => {
+    setPlanningToast(null);
+  }, []);
+
+  const discardActiveWorkSession = useCallback(async () => {
+    activeWorkSessionRef.current = null;
+    setActiveWorkSession(null);
+    setActiveWorkElapsedSeconds(0);
+    continuousFocusElapsedSecondsRef.current = 0;
+    setContinuousFocusElapsedSeconds(0);
+    setActiveHealthNotification(null);
+    healthRuntimeStatesRef.current = {};
+    lastActiveTaskIdRef.current = null;
+    setPlanningToast(null);
+    try {
+      localStorage.removeItem('graphdule_active_work_session');
+    } catch {
+      // ignore
+    }
+    await updatePreferences({ activeWorkSession: null });
+  }, [updatePreferences]);
+
+  const startProjectPlanning = useCallback(
+    async (projectId: string, projectName?: string) => {
+      const doc =
+        activeProjectDoc?.project.id === projectId
+          ? activeProjectDoc
+          : await storage.readProject(projectId);
+      const effectiveName = projectName || doc?.project.name || 'Project';
+
+      // If a planning session is already active for this project, just resume if paused
+      if (
+        activeWorkSession &&
+        activeWorkSession.sessionType === 'planning' &&
+        activeWorkSession.projectId === projectId
+      ) {
+        if (activeWorkSession.isPaused) {
+          await resumeWork();
+        }
+        return;
+      }
+
+      if (activeWorkSession) {
+        await stopWork();
+      }
+
+      const sessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const startedAt = new Date().toISOString();
+      const taskId = `planning_${projectId}`;
+      const taskText = `Planning: ${effectiveName}`;
+
+      await logActivityEvent('planning_started', taskId, {
+        entityText: taskText,
+        projectId,
+        projectName: effectiveName,
+        metadata: { sessionId, sessionType: 'planning' },
+      });
+
+      const newSession: ActiveWorkSession = {
+        sessionId,
+        sessionType: 'planning',
+        taskId,
+        taskText,
+        projectId,
+        projectName: effectiveName,
+        startedAt,
+        accumulatedSecondsBeforeResume: 0,
+        isPaused: false,
+      };
+
+      activeWorkSessionRef.current = newSession;
+      setActiveWorkSession(newSession);
+      try {
+        localStorage.setItem('graphdule_active_work_session', JSON.stringify(newSession));
+      } catch {
+        // ignore
+      }
+      await updatePreferences({ activeWorkSession: newSession });
+    },
+    [activeProjectDoc, storage, activeWorkSession, resumeWork, stopWork, logActivityEvent, updatePreferences]
+  );
+
+  const stopProjectPlanning = useCallback(
+    async (message?: string) => {
+      const session = activeWorkSessionRef.current || activeWorkSession;
+      if (!session) return;
+      const elapsed = activeWorkElapsedSeconds;
+      setPlanningToast(null);
+      await stopWork();
+
+      if (activeProjectDoc && activeProjectDoc.project.id === session.projectId) {
+        const snapMsg =
+          message ||
+          `Planning session completed: ${AttentionService.formatAU(
+            AttentionService.durationSecondsToAU(elapsed, attentionUnitMinutes),
+            attentionUnitMinutes
+          )}`;
+        createSnapshotRef.current(snapMsg)?.catch(() => {});
+      }
+    },
+    [activeWorkSession, stopWork, activeProjectDoc, activeWorkElapsedSeconds, attentionUnitMinutes]
+  );
+
+  const checkAndTriggerProjectPlanning = useCallback(
+    async (projectId: string, projectName?: string, _reason?: string) => {
+      // If attention measurement system is disabled, do not auto-start
+      if (!preferences.attentionSystemEnabled) return;
+
+      const currentSession = activeWorkSessionRef.current || activeWorkSession;
+
+      // If already planning this project, keep going
+      if (currentSession && currentSession.sessionType === 'planning' && currentSession.projectId === projectId) {
+        return;
+      }
+
+      // If currently working on an execution task, do not interrupt
+      if (currentSession && currentSession.sessionType !== 'planning') {
+        return;
+      }
+
+      const doc =
+        activeProjectDoc?.project.id === projectId
+          ? activeProjectDoc
+          : await storage.readProject(projectId);
+      const effectiveName = projectName || doc?.project.name || 'Project';
+
+      await startProjectPlanning(projectId, effectiveName);
+      setPlanningToast({ projectId, projectName: effectiveName });
+    },
+    [preferences.attentionSystemEnabled, activeWorkSession, activeProjectDoc, storage, startProjectPlanning]
+  );
+
+  useEffect(() => {
+    checkAndTriggerProjectPlanningRef.current = checkAndTriggerProjectPlanning;
+  }, [checkAndTriggerProjectPlanning]);
+
+  const [isWholeProjectView, setIsWholeProjectView] = useState<boolean>(false);
+  const toggleWholeProjectView = useCallback(() => {
+    setIsWholeProjectView((prev) => !prev);
+  }, []);
 
   const updateTaskEstimate = useCallback(
     async (taskId: string, estimatedAU: number | undefined, projectIdOrIsNode?: string | boolean) => {
@@ -1709,6 +1871,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       await refreshData();
       await openProject(project.id);
+      checkAndTriggerProjectPlanningRef.current(project.id, project.name, 'germinate_seed').catch(() => {});
       return project.id;
     },
     [ideaSeeds, storage, deleteIdeaSeed, logActivityEvent, refreshData, openProject]
@@ -1902,6 +2065,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           projectName: activeProjectDoc.project.name,
         }).catch((err) => console.warn('[AppContext] Calendar sync on addNode failed:', err));
       }
+      checkAndTriggerProjectPlanningRef.current(activeProjectDoc.project.id, activeProjectDoc.project.name, 'add_node').catch(() => {});
       return newNode;
     },
     [activeProjectDoc, saveProjectDoc, logActivityEvent, recordActiveNode]
@@ -2007,6 +2171,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             }
           }
 
+          if (prevNode.text !== updatedNode.text) {
+            checkAndTriggerProjectPlanningRef.current(activeProjectDoc.project.id, activeProjectDoc.project.name, 'edit_node_title').catch(() => {});
+          }
+
           GCalendarSync.syncTaskStatusOrTextChange({
             taskId: updatedNode.id,
             taskText: updatedNode.text,
@@ -2087,6 +2255,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (selectedNode?.id === nodeId) {
         setSelectedNode(null);
       }
+      checkAndTriggerProjectPlanningRef.current(currentDoc.project.id, currentDoc.project.name, 'delete_node').catch(() => {});
     },
     [activeProjectDoc, selectedNode, saveProjectDoc, activeWorkSession, stopWork]
   );
@@ -2273,6 +2442,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         taskText,
         projectId,
         projectName,
+        sessionType: 'execution',
         startedAt,
         accumulatedSecondsBeforeResume: 0,
         isPaused: false,
@@ -2452,6 +2622,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         edges: [...currentDoc.edges, result.edge],
       });
 
+      checkAndTriggerProjectPlanningRef.current(currentDoc.project.id, currentDoc.project.name, 'add_edge').catch(() => {});
       return { success: true };
     },
     [activeProjectDoc, saveProjectDoc]
@@ -2464,6 +2635,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       SyncCoordinator.recordEdgeDeletion(edgeId);
       const updatedDoc = ProjectService.deleteEdgeFromProject(currentDoc, edgeId);
       await saveProjectDoc(updatedDoc);
+      checkAndTriggerProjectPlanningRef.current(currentDoc.project.id, currentDoc.project.name, 'delete_edge').catch(() => {});
     },
     [activeProjectDoc, saveProjectDoc]
   );
@@ -2475,6 +2647,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       SyncCoordinator.recordEdgeDeletions(edgeIds);
       const updatedDoc = ProjectService.deleteEdgesFromProject(currentDoc, edgeIds);
       await saveProjectDoc(updatedDoc);
+      checkAndTriggerProjectPlanningRef.current(currentDoc.project.id, currentDoc.project.name, 'delete_edges').catch(() => {});
     },
     [activeProjectDoc, saveProjectDoc]
   );
@@ -2500,6 +2673,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       await saveProjectDoc(result.document);
+      checkAndTriggerProjectPlanningRef.current(currentDoc.project.id, currentDoc.project.name, 'reconnect_edge').catch(() => {});
       return { success: true };
     },
     [activeProjectDoc, saveProjectDoc]
@@ -2537,6 +2711,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }).catch((err) => console.warn('[AppContext] Calendar sync on spliceNodeIntoEdge failed:', err));
       }
 
+      checkAndTriggerProjectPlanningRef.current(currentDoc.project.id, currentDoc.project.name, 'splice_node').catch(() => {});
       return { success: true };
     },
     [activeProjectDoc, saveProjectDoc]
@@ -2572,6 +2747,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       debouncedCloudSync();
+      checkAndTriggerProjectPlanningRef.current(activeProjectDoc.project.id, activeProjectDoc.project.name, 'nest_node').catch(() => {});
       return { success: true };
     },
     [activeProjectDoc, saveProjectDoc, logActivityEvent, debouncedCloudSync]
@@ -2590,6 +2766,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ...activeProjectDoc,
         nodes: syncedNodes,
       });
+      checkAndTriggerProjectPlanningRef.current(activeProjectDoc.project.id, activeProjectDoc.project.name, 'decompose_node').catch(() => {});
     },
     [activeProjectDoc, saveProjectDoc]
   );
@@ -2651,6 +2828,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     },
     [activeProjectDoc, storage, loadProjectSnapshots]
   );
+  createSnapshotRef.current = createSnapshot;
 
   const restoreSnapshot = useCallback(
     async (snapshotId: string) => {
@@ -3456,6 +3634,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         attentionReviews,
         triggerWeeklyReview,
         deleteAttentionReview,
+        startProjectPlanning,
+        stopProjectPlanning,
+        discardActiveWorkSession,
+        planningToast,
+        dismissPlanningToast,
+        isWholeProjectView,
+        setIsWholeProjectView,
+        toggleWholeProjectView,
         capacityConfig,
         capacitySnapshots,
         isCapacityConfigModalOpen,

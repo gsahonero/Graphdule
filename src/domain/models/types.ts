@@ -156,6 +156,8 @@ export interface IdeaSeed {
   readonly updatedAt: string;
 }
 
+export type WorkSessionType = 'execution' | 'planning';
+
 export const ACTIVITY_EVENT_TYPES = [
   'task_created',
   'status_changed',
@@ -173,6 +175,10 @@ export const ACTIVITY_EVENT_TYPES = [
   'work_stopped',
   'work_paused',
   'work_resumed',
+  'planning_started',
+  'planning_stopped',
+  'planning_paused',
+  'planning_resumed',
   'weekly_goal_set',
   'weekly_review_triggered',
 ] as const;
@@ -197,6 +203,7 @@ export interface ActivityEvent {
 
 export interface ActiveWorkSession {
   readonly sessionId: string;
+  readonly sessionType?: WorkSessionType;
   readonly taskId: string;
   readonly taskText: string;
   readonly projectId?: string;
@@ -209,6 +216,7 @@ export interface ActiveWorkSession {
 
 export interface WorkSession {
   readonly id: string;
+  readonly sessionType?: WorkSessionType;
   readonly taskId: string;
   readonly projectId?: string;
   readonly taskText?: string;
@@ -244,6 +252,12 @@ export interface PatternObservation {
   readonly tone: 'neutral' | 'info';
 }
 
+export interface DeliberationSummary {
+  readonly planningAU: number;
+  readonly executionAU: number;
+  readonly deliberationRatio: number; // planningAU / (planningAU + executionAU) * 100
+}
+
 export interface WeeklyAttentionReviewData {
   readonly weekStartDate: string;
   readonly weekEndDate: string;
@@ -253,11 +267,14 @@ export interface WeeklyAttentionReviewData {
   readonly trackedAU: number;
   readonly trackedSeconds: number;
   readonly sessionCount: number;
+  readonly deliberationSummary?: DeliberationSummary;
   readonly projectAllocations: readonly {
     readonly projectId: string;
     readonly projectName: string;
     readonly isAttention: boolean;
     readonly au: number;
+    readonly planningAU?: number;
+    readonly executionAU?: number;
     readonly percentage: number;
     readonly tasksWorkedCount: number;
     readonly tasksCompletedCount: number;

@@ -24,6 +24,8 @@ import { AttentionService } from '../../../domain/services/attention-service';
 export interface GraphNodeData extends Record<string, unknown> {
   node: Node;
   isEGN: boolean;
+  isOnCriticalPath?: boolean;
+  isWholeProjectView?: boolean;
   notesCount: number;
   subtaskCount: number;
   viewDensity?: 'auto' | 'compact' | 'full';
@@ -56,6 +58,8 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
   const {
     node,
     isEGN,
+    isOnCriticalPath,
+    isWholeProjectView,
     notesCount,
     subtaskCount,
     viewDensity = 'auto',
@@ -231,7 +235,15 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
       return 'border-amber-500 ring-2 ring-amber-500/50 shadow-amber-500/20 bg-amber-50/20 dark:bg-amber-950/25 shadow-md';
     }
     if (selected) return 'border-emerald-500 ring-2 ring-emerald-500/40 shadow-emerald-950/20 dark:shadow-emerald-950/80 bg-white dark:bg-slate-900/95';
-    if (isEGN) return 'border-emerald-500/80 shadow-md bg-white dark:bg-slate-900/95';
+    if (isEGN) {
+      if (isWholeProjectView) {
+        return 'border-emerald-400 dark:border-emerald-400 ring-4 ring-emerald-500/50 shadow-xl shadow-emerald-500/30 bg-white dark:bg-slate-900/95 animate-pulse';
+      }
+      return 'border-emerald-500/80 shadow-md bg-white dark:bg-slate-900/95';
+    }
+    if (isOnCriticalPath) {
+      return 'border-indigo-500 dark:border-indigo-400 ring-2 ring-indigo-500/40 shadow-indigo-500/20 bg-white dark:bg-slate-900/95 shadow-md';
+    }
     switch (node.status) {
       case 'completed':
         return 'border-emerald-400 dark:border-emerald-600/60 bg-white dark:bg-slate-900/90 shadow-sm';

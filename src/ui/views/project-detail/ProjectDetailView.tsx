@@ -21,6 +21,8 @@ import {
   Palette,
   Undo2,
   Redo2,
+  BrainCircuit,
+  Layers,
 } from 'lucide-react';
 import { getProjectColorTheme, ProjectIconDisplay } from '../../utils/project-style';
 import { ProjectStylePicker } from '../../components/ProjectStylePicker';
@@ -42,6 +44,11 @@ export const ProjectDetailView: React.FC = () => {
     canRedo,
     undo,
     redo,
+    startProjectPlanning,
+    stopProjectPlanning,
+    activeWorkSession,
+    isWholeProjectView,
+    toggleWholeProjectView,
   } = useApp();
 
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -53,6 +60,24 @@ export const ProjectDetailView: React.FC = () => {
   const [isAddingTag, setIsAddingTag] = useState(false);
   const [newTagInput, setNewTagInput] = useState('');
   const tagInputRef = useRef<HTMLInputElement>(null);
+
+  // Keyboard shortcut Ctrl+Shift+P / Cmd+Shift+P to toggle project planning
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        const projectId = activeProjectDoc?.project.id;
+        if (!projectId) return;
+        if (activeWorkSession?.sessionType === 'planning' && activeWorkSession.projectId === projectId) {
+          stopProjectPlanning();
+        } else {
+          startProjectPlanning(projectId);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeProjectDoc?.project.id, activeWorkSession, startProjectPlanning, stopProjectPlanning]);
 
   useEffect(() => {
     if (activeProjectDoc?.project.name) {
@@ -407,6 +432,48 @@ export const ProjectDetailView: React.FC = () => {
             </div>
             <div className={`text-[11px] font-bold ${theme.text}`}>{progressPercentage}%</div>
           </div>
+
+          {/* Deliberate Project Planning Trigger Button */}
+          <button
+            onClick={() => {
+              if (activeWorkSession?.sessionType === 'planning' && activeWorkSession.projectId === project.id) {
+                stopProjectPlanning();
+              } else {
+                startProjectPlanning(project.id);
+              }
+            }}
+            data-testid="project-plan-btn"
+            className={`flex items-center space-x-1 sm:space-x-1.5 p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer shadow-xs ${
+              activeWorkSession?.sessionType === 'planning' && activeWorkSession.projectId === project.id
+                ? 'bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-500 shadow-indigo-900/30'
+                : 'bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800'
+            }`}
+            title="Toggle deliberate project planning session (Ctrl+Shift+P)"
+          >
+            <BrainCircuit className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">
+              {activeWorkSession?.sessionType === 'planning' && activeWorkSession.projectId === project.id
+                ? 'Planning Active'
+                : 'Plan Project'}
+            </span>
+          </button>
+
+          {/* Whole Project View Toggle (Visible in Graph tab) */}
+          {activeProjectTab === 'graph' && (
+            <button
+              onClick={toggleWholeProjectView}
+              data-testid="whole-project-toggle-btn"
+              className={`flex items-center space-x-1 sm:space-x-1.5 p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer shadow-xs ${
+                isWholeProjectView
+                  ? 'bg-violet-600 hover:bg-violet-500 text-white border-violet-500 shadow-violet-900/30'
+                  : 'bg-slate-100 dark:bg-slate-900 hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-800'
+              }`}
+              title="Toggle Whole Project View (Flattened view highlighting critical path and end goal)"
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Whole Project</span>
+            </button>
+          )}
 
           {/* Archive / Restore Button */}
           {isArchived ? (
