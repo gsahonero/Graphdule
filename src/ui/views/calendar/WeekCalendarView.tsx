@@ -9,6 +9,7 @@ import { useApp } from '../../context/AppContext';
 interface WeekCalendarViewProps {
   currentDate: string;
   tasksByDate: Map<string, CalendarTaskItem[]>;
+  showCompleted?: boolean;
   onSelectDay: (dateStr: string) => void;
   onSelectTask: (task: CalendarTaskItem) => void;
   onToggleComplete: (task: CalendarTaskItem) => void;
@@ -19,6 +20,7 @@ interface WeekCalendarViewProps {
 export const WeekCalendarView: React.FC<WeekCalendarViewProps> = ({
   currentDate,
   tasksByDate,
+  showCompleted = false,
   onSelectDay,
   onSelectTask,
   onToggleComplete,
@@ -238,22 +240,42 @@ export const WeekCalendarView: React.FC<WeekCalendarViewProps> = ({
 
               {/* Tasks List Drop Target */}
               <div className="flex-1 p-2 space-y-2 overflow-y-auto min-h-0">
-                {dayTasks.length === 0 ? (
-                  <div className="h-28 flex flex-col items-center justify-center text-center p-3 text-slate-400 dark:text-slate-600 border border-dashed border-slate-200 dark:border-slate-800/80 rounded-lg">
-                    <p className="text-[11px]">No tasks</p>
-                    <p className="text-[10px] opacity-75">Drag task here</p>
-                  </div>
-                ) : (
-                  dayTasks.map((task) => (
-                    <CalendarTaskCard
-                      key={task.id}
-                      task={task}
-                      variant="standard"
-                      onSelectTask={onSelectTask}
-                      onToggleComplete={onToggleComplete}
-                    />
-                  ))
-                )}
+                {(() => {
+                  const candidateTasks = showCompleted ? dayTasks : activeTasks;
+                  if (candidateTasks.length === 0) {
+                    return (
+                      <div className="h-28 flex flex-col items-center justify-center text-center p-3 text-slate-400 dark:text-slate-600 border border-dashed border-slate-200 dark:border-slate-800/80 rounded-lg">
+                        <p className="text-[11px]">No active tasks</p>
+                        {!showCompleted && completedTasks.length > 0 && (
+                          <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-1">
+                            ✓ {completedTasks.length} completed hidden
+                          </p>
+                        )}
+                        <p className="text-[10px] opacity-75 mt-0.5">Drag task here</p>
+                      </div>
+                    );
+                  }
+                  return (
+                    <>
+                      {candidateTasks.map((task) => (
+                        <CalendarTaskCard
+                          key={task.id}
+                          task={task}
+                          variant="standard"
+                          onSelectTask={onSelectTask}
+                          onToggleComplete={onToggleComplete}
+                        />
+                      ))}
+                      {!showCompleted && completedTasks.length > 0 && (
+                        <div className="text-center py-1">
+                          <span className="text-[10px] text-slate-400 dark:text-slate-500 italic">
+                            ✓ {completedTasks.length} completed hidden
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Quick Add Task Button */}

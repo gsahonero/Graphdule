@@ -3,6 +3,7 @@ import { CalendarViewMode, CalendarTaskItem } from './types';
 import { MonthCalendarView } from './MonthCalendarView';
 import { WeekCalendarView } from './WeekCalendarView';
 import { DayCalendarView } from './DayCalendarView';
+import { CalendarDayInspector } from './CalendarDayInspector';
 import { CalendarTaskDetailModal } from './CalendarTaskDetailModal';
 import { useApp } from '../../context/AppContext';
 import {
@@ -11,6 +12,9 @@ import {
   Flame,
   Search,
   X,
+  CheckSquare,
+  PanelRightClose,
+  PanelRightOpen,
 } from 'lucide-react';
 import {
   addDays,
@@ -37,11 +41,17 @@ export const TaskCalendarView: React.FC = () => {
     addStandaloneTask,
   } = useApp();
 
-  const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
+  // Scientifically optimal operational horizon default: Week view
+  const [viewMode, setViewMode] = useState<CalendarViewMode>('week');
   const [currentDate, setCurrentDate] = useState<string>(getTodayString());
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
   const [selectedTaskForModal, setSelectedTaskForModal] = useState<CalendarTaskItem | null>(null);
+
+  // Cognitive hygiene & Focus+Context inspector state
+  const [showCompleted, setShowCompleted] = useState<boolean>(false);
+  const [selectedInspectorDate, setSelectedInspectorDate] = useState<string | null>(getTodayString());
+  const [isInspectorOpen, setIsInspectorOpen] = useState<boolean>(true);
 
   const parsedCurrent = parseDate(currentDate);
   const viewYear = isNaN(parsedCurrent.getTime()) ? new Date().getFullYear() : parsedCurrent.getFullYear();
@@ -282,6 +292,11 @@ export const TaskCalendarView: React.FC = () => {
     }
   };
 
+  // Inspector Quick Add Handler
+  const handleInspectorQuickAdd = async (dateStr: string, title: string, au: number) => {
+    await addStandaloneTask(title, dateStr, undefined, au);
+  };
+
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
       {/* Top Controls Toolbar */}
@@ -379,6 +394,45 @@ export const TaskCalendarView: React.FC = () => {
             ))}
           </select>
 
+          {/* Cognitive Hygiene: Show/Hide Completed Toggle */}
+          <button
+            type="button"
+            data-testid="calendar-toggle-completed"
+            aria-label={showCompleted ? 'Hide completed tasks' : 'Show completed tasks'}
+            onClick={() => setShowCompleted((prev) => !prev)}
+            className={`inline-flex items-center space-x-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg border transition-colors cursor-pointer ${
+              showCompleted
+                ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
+                : 'bg-slate-50 dark:bg-slate-950 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 border-slate-200 dark:border-slate-800'
+            }`}
+            title={showCompleted ? 'Hide completed tasks' : 'Show completed tasks'}
+          >
+            <CheckSquare className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Completed</span>
+          </button>
+
+          {/* Focus+Context Inspector Toggle (in Month view) */}
+          {viewMode === 'month' && (
+            <button
+              type="button"
+              data-testid="calendar-toggle-inspector"
+              aria-label={isInspectorOpen ? 'Collapse day panel' : 'Expand day panel'}
+              onClick={() => setIsInspectorOpen((prev) => !prev)}
+              className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
+                isInspectorOpen
+                  ? 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700'
+                  : 'bg-slate-50 dark:bg-slate-950 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 border-slate-200 dark:border-slate-800'
+              }`}
+              title={isInspectorOpen ? 'Hide Day Inspector' : 'Show Day Inspector'}
+            >
+              {isInspectorOpen ? (
+                <PanelRightClose className="w-4 h-4" />
+              ) : (
+                <PanelRightOpen className="w-4 h-4" />
+              )}
+            </button>
+          )}
+
           {/* View Mode Toggle */}
           <div className="flex items-center bg-slate-100 dark:bg-slate-950/80 p-0.5 rounded-lg border border-slate-200 dark:border-slate-800">
             {(['month', 'week', 'day'] as CalendarViewMode[]).map((mode) => (
@@ -404,25 +458,45 @@ export const TaskCalendarView: React.FC = () => {
       {/* Main Calendar View Area */}
       <div className="flex-1 flex overflow-hidden">
         {viewMode === 'month' && (
-          <MonthCalendarView
-            viewYear={viewYear}
-            viewMonth={viewMonth}
-            tasksByDate={tasksByDate}
-            onSelectDay={(dateStr) => {
-              setCurrentDate(dateStr);
-              setViewMode('day');
-            }}
-            onSelectTask={(task) => setSelectedTaskForModal(task)}
-            onToggleComplete={handleToggleComplete}
-            onMoveTask={handleMoveTask}
-            onQuickAddTask={handleQuickAddTask}
-          />
+          <div className="flex-1 flex overflow-hidden">
+            <MonthCalendarView
+              viewYear={viewYear}
+              viewMonth={viewMonth}
+              tasksByDate={tasksByDate}
+              selectedDate={selectedInspectorDate}
+              showCompleted={showCompleted}
+              onSelectDay={(dateStr) => {
+                setSelectedInspectorDate(dateStr);
+                setIsInspectorOpen(true);
+              }}
+              onSelectTask={(task) => setSelectedTaskForModal(task)}
+              onToggleComplete={handleToggleComplete}
+              onMoveTask={handleMoveTask}
+              onQuickAddTask={handleQuickAddTask}
+            />
+
+            {isInspectorOpen && selectedInspectorDate && (
+              <CalendarDayInspector
+                dateStr={selectedInspectorDate}
+                tasks={tasksByDate.get(selectedInspectorDate) || []}
+                onClose={() => setIsInspectorOpen(false)}
+                onOpenFullDay={(dateStr) => {
+                  setCurrentDate(dateStr);
+                  setViewMode('day');
+                }}
+                onSelectTask={(task) => setSelectedTaskForModal(task)}
+                onToggleComplete={handleToggleComplete}
+                onQuickAddTask={handleInspectorQuickAdd}
+              />
+            )}
+          </div>
         )}
 
         {viewMode === 'week' && (
           <WeekCalendarView
             currentDate={currentDate}
             tasksByDate={tasksByDate}
+            showCompleted={showCompleted}
             onSelectDay={(dateStr) => {
               setCurrentDate(dateStr);
               setViewMode('day');

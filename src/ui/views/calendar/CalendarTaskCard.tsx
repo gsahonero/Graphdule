@@ -40,7 +40,7 @@ export const CalendarTaskCard: React.FC<CalendarTaskCardProps> = ({
     }
   };
 
-  // Compact Variant for Month View cells
+  // Compact Variant for Month View cells: clean, space-efficient event strip
   if (variant === 'compact') {
     return (
       <div
@@ -49,50 +49,45 @@ export const CalendarTaskCard: React.FC<CalendarTaskCardProps> = ({
         onDragEnd={onDragEnd}
         onClick={() => onSelectTask?.(task)}
         title={`${task.text} (${task.estimatedAU ?? 0} AU) - ${task.projectName || 'Standalone'}`}
-        className={`group flex items-center space-x-1.5 px-1.5 py-1 rounded text-xs cursor-pointer select-none transition-all border ${
+        className={`group flex items-center justify-between space-x-1 px-1.5 py-0.5 rounded text-xs cursor-pointer select-none transition-all border ${
           isCompleted
-            ? 'bg-slate-50 dark:bg-slate-900/50 text-slate-400 dark:text-slate-500 border-slate-200/50 dark:border-slate-800 line-through'
+            ? 'bg-slate-50 dark:bg-slate-900/40 text-slate-400 dark:text-slate-500 border-slate-200/50 dark:border-slate-800/80 line-through opacity-75'
             : isInProgress
-            ? 'bg-amber-500/10 dark:bg-amber-950/30 text-slate-800 dark:text-slate-200 border-amber-500/30 shadow-2xs'
-            : 'bg-white dark:bg-slate-800/90 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-700/80 hover:border-emerald-500/50 hover:shadow-xs'
+            ? 'bg-amber-500/10 dark:bg-amber-950/30 text-slate-800 dark:text-slate-200 border-amber-500/30 hover:border-amber-500/60'
+            : 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-750 hover:border-emerald-500/50 hover:shadow-2xs'
         }`}
       >
-        <button
-          type="button"
-          onClick={handleToggle}
-          aria-label={isCompleted ? 'Mark task incomplete' : 'Mark task complete'}
-          className="shrink-0 text-slate-400 hover:text-emerald-500 transition-colors cursor-pointer"
-        >
-          {isCompleted ? (
-            <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
-          ) : (
-            <Circle className="w-3 h-3 shrink-0" />
-          )}
-        </button>
-
-        {/* Project dot */}
-        <span
-          className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-            task.isStandalone ? 'bg-slate-400' : theme.dotClass || 'bg-emerald-500'
-          }`}
-        />
-
-        {/* Title */}
-        <span className="truncate flex-1 font-medium text-[11px] leading-tight">
-          {task.text}
-        </span>
-
-        {/* AU pill */}
-        {task.estimatedAU !== undefined && task.estimatedAU > 0 && (
-          <span
-            className={`text-[9px] font-semibold px-1 py-0.2 rounded shrink-0 ${
-              isCompleted
-                ? 'bg-slate-200 dark:bg-slate-800 text-slate-400'
-                : isInProgress
-                ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300'
-                : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
-            }`}
+        <div className="flex items-center space-x-1.5 min-w-0 flex-1">
+          {/* Quick toggle check button */}
+          <button
+            type="button"
+            onClick={handleToggle}
+            aria-label={isCompleted ? 'Mark task incomplete' : 'Mark task complete'}
+            className="shrink-0 text-slate-400 hover:text-emerald-500 transition-colors cursor-pointer p-0"
           >
+            {isCompleted ? (
+              <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
+            ) : (
+              <Circle className="w-3 h-3 shrink-0 opacity-40 group-hover:opacity-100" />
+            )}
+          </button>
+
+          {/* Project indicator dot */}
+          <span
+            className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+              task.isStandalone ? 'bg-slate-400' : theme.dotClass || 'bg-emerald-500'
+            }`}
+          />
+
+          {/* Title */}
+          <span className="truncate flex-1 font-medium text-[11px] leading-tight">
+            {task.text}
+          </span>
+        </div>
+
+        {/* Discreet AU text */}
+        {task.estimatedAU !== undefined && task.estimatedAU > 0 && (
+          <span className="text-[9px] font-semibold text-slate-400 dark:text-slate-500 shrink-0 ml-1">
             {task.estimatedAU} AU
           </span>
         )}

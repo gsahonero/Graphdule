@@ -10,6 +10,8 @@ interface MonthCalendarViewProps {
   viewYear: number;
   viewMonth: number; // 0-indexed
   tasksByDate: Map<string, CalendarTaskItem[]>;
+  selectedDate?: string | null;
+  showCompleted?: boolean;
   onSelectDay: (dateStr: string) => void;
   onSelectTask: (task: CalendarTaskItem) => void;
   onToggleComplete: (task: CalendarTaskItem) => void;
@@ -21,6 +23,8 @@ export const MonthCalendarView: React.FC<MonthCalendarViewProps> = ({
   viewYear,
   viewMonth,
   tasksByDate,
+  selectedDate,
+  showCompleted = false,
   onSelectDay,
   onSelectTask,
   onToggleComplete,
@@ -128,8 +132,10 @@ export const MonthCalendarView: React.FC<MonthCalendarViewProps> = ({
         {allCells.map((cell) => {
           const { dateStr, dayNum, isCurrentMonth } = cell;
           const isToday = dateStr === todayStr;
+          const isSelected = selectedDate === dateStr;
           const dayTasks = tasksByDate.get(dateStr) || [];
           const activeTasks = dayTasks.filter((t) => t.status !== 'completed' && t.status !== 'abandoned');
+          const completedTasks = dayTasks.filter((t) => t.status === 'completed');
 
           const plannedAU = activeTasks.reduce((acc, t) => acc + (t.estimatedAU || 0), 0);
 
@@ -144,21 +150,27 @@ export const MonthCalendarView: React.FC<MonthCalendarViewProps> = ({
 
           const isCellDragOver = dragOverDate === dateStr;
 
-          // Max visible tasks in compact month cell
-          const MAX_VISIBLE = 3;
-          const visibleTasks = dayTasks.slice(0, MAX_VISIBLE);
-          const hiddenCount = Math.max(0, dayTasks.length - MAX_VISIBLE);
+          // Filter tasks according to showCompleted
+          const candidateTasks = showCompleted ? dayTasks : activeTasks;
+
+          // Max visible tasks in compact month cell: budget strictly to 2 to prevent any vertical slicing
+          const MAX_VISIBLE = 2;
+          const visibleTasks = candidateTasks.slice(0, MAX_VISIBLE);
+          const hiddenCount = Math.max(0, candidateTasks.length - MAX_VISIBLE);
 
           return (
             <div
               key={dateStr}
+              onClick={() => onSelectDay(dateStr)}
               onDragOver={(e) => handleDragOver(e, dateStr)}
               onDragLeave={(e) => handleDragLeave(e, dateStr)}
               onDrop={(e) => handleDrop(e, dateStr)}
-              className={`flex flex-col p-1.5 min-h-[95px] sm:min-h-[115px] transition-colors relative group/cell ${
+              className={`flex flex-col p-1.5 min-h-[95px] sm:min-h-[110px] transition-colors relative group/cell cursor-pointer ${
                 !isCurrentMonth
                   ? 'bg-slate-50/50 dark:bg-slate-950/30 text-slate-400 dark:text-slate-600'
-                  : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200'
+                  : isSelected
+                  ? 'bg-emerald-500/5 dark:bg-emerald-950/20 ring-2 ring-emerald-500 z-10'
+                  : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 hover:bg-slate-50/80 dark:hover:bg-slate-850'
               } ${
                 isCellDragOver
                   ? 'ring-2 ring-emerald-500 bg-emerald-500/10 dark:bg-emerald-500/15 z-10'
@@ -166,18 +178,20 @@ export const MonthCalendarView: React.FC<MonthCalendarViewProps> = ({
               }`}
             >
               {/* Day Cell Header */}
-              <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center justify-between mb-1" onClick={(e) => e.stopPropagation()}>
                 <button
                   type="button"
                   onClick={() => onSelectDay(dateStr)}
                   className={`flex items-center justify-center text-xs font-semibold rounded-md w-6 h-6 transition-transform hover:scale-110 cursor-pointer ${
                     isToday
                       ? 'bg-emerald-600 text-white shadow-xs font-bold'
+                      : isSelected
+                      ? 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 font-bold'
                       : isCurrentMonth
                       ? 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
                       : 'text-slate-400 dark:text-slate-600'
                   }`}
-                  title="Open Day View"
+                  title="Select Day"
                 >
                   {dayNum}
                 </button>
@@ -187,7 +201,7 @@ export const MonthCalendarView: React.FC<MonthCalendarViewProps> = ({
                   {isOverloaded ? (
                     <span
                       title={`Over capacity by ${overloadDelta} AU! Planned: ${plannedAU} AU, Capacity: ${dailyCapacityAU} AU (${percentage}%)`}
-                      className="inline-flex items-center space-x-0.5 px-1 py-0.5 rounded text-[9px] font-bold bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 animate-pulse"
+                      className="inline-flex items-center space-x-0.5 px-1 py-0.5 rounded text-[9px] font-bold bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30"
                     >
                       <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
                       <span>{plannedAU}/{dailyCapacityAU} AU</span>
@@ -203,16 +217,15 @@ export const MonthCalendarView: React.FC<MonthCalendarViewProps> = ({
                     >
                       {plannedAU}/{dailyCapacityAU} AU
                     </span>
-                  ) : (
-                    <span className="text-[9px] text-slate-400 dark:text-slate-600 opacity-60">
-                      {dailyCapacityAU} AU
-                    </span>
-                  )}
+                  ) : null}
 
                   {/* Quick Add Button (visible on hover) */}
                   <button
                     type="button"
-                    onClick={() => onQuickAddTask(dateStr)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onQuickAddTask(dateStr);
+                    }}
                     className="opacity-0 group-hover/cell:opacity-100 p-0.5 rounded text-slate-400 hover:text-emerald-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-opacity cursor-pointer"
                     title={`Add task for ${dateStr}`}
                   >
@@ -249,11 +262,21 @@ export const MonthCalendarView: React.FC<MonthCalendarViewProps> = ({
                   />
                 ))}
 
+                {/* Subdued completion count when completed tasks are hidden */}
+                {!showCompleted && activeTasks.length === 0 && completedTasks.length > 0 && (
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500 italic block px-1 py-0.5">
+                    ✓ {completedTasks.length} done
+                  </span>
+                )}
+
                 {/* Overflow Pill */}
                 {hiddenCount > 0 && (
                   <button
                     type="button"
-                    onClick={() => onSelectDay(dateStr)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectDay(dateStr);
+                    }}
                     className="w-full text-center py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 rounded transition-colors cursor-pointer"
                   >
                     +{hiddenCount} more

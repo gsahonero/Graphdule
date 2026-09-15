@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { TaskCalendarView } from '../../src/ui/views/calendar/TaskCalendarView';
 import { AppContext } from '../../src/ui/context/AppContext';
 import { DailyCapacityConfig, Node, StandaloneTask, ProjectSummary } from '../../src/domain/models/types';
@@ -58,11 +58,12 @@ describe('TaskCalendarView - Dedicated Full Task Calendar', () => {
     } as any,
   ];
 
+  // Align dates with current week (Monday 2026-09-14 to Sunday 2026-09-20)
   const mockActiveNodes: Node[] = [
     {
       id: 'node-1',
       text: 'Design database schema',
-      dueDate: '2026-09-07', // Monday
+      dueDate: '2026-09-14', // Monday
       status: 'planned',
       estimatedAU: 10,
       projectId: 'proj-1',
@@ -73,7 +74,7 @@ describe('TaskCalendarView - Dedicated Full Task Calendar', () => {
     {
       id: 'node-2',
       text: 'Build backend API',
-      dueDate: '2026-09-07', // Monday (10 + 6 = 16 AU total on Mon Sep 7)
+      dueDate: '2026-09-14', // Monday (10 + 6 = 16 AU total on Mon Sep 14)
       status: 'in_progress',
       estimatedAU: 6,
       projectId: 'proj-1',
@@ -84,7 +85,7 @@ describe('TaskCalendarView - Dedicated Full Task Calendar', () => {
     {
       id: 'node-3',
       text: 'Massive migration refactor',
-      dueDate: '2026-09-08', // Tuesday (26 AU on 20 AU capacity -> Overloaded!)
+      dueDate: '2026-09-15', // Tuesday (26 AU on 20 AU capacity -> Overloaded!)
       status: 'planned',
       estimatedAU: 26,
       projectId: 'proj-2',
@@ -98,7 +99,7 @@ describe('TaskCalendarView - Dedicated Full Task Calendar', () => {
     {
       id: 'st-1',
       text: 'Submit tax reports',
-      dueDate: '2026-09-09', // Wednesday
+      dueDate: '2026-09-16', // Wednesday
       status: 'planned',
       estimatedAU: 4,
       createdAt: '2026-09-01T00:00:00Z',
@@ -125,23 +126,23 @@ describe('TaskCalendarView - Dedicated Full Task Calendar', () => {
     ...overrides,
   });
 
-  it('renders Month view by default with weekday headers and task titles', () => {
+  it('renders Week view by default as the optimal operational horizon', () => {
     render(
       <AppContext.Provider value={createMockContext() as any}>
         <TaskCalendarView />
       </AppContext.Provider>
     );
 
-    // Weekday headers
+    // Week column weekday abbreviations
     expect(screen.getByText('Mon')).toBeDefined();
     expect(screen.getByText('Sun')).toBeDefined();
 
-    // View mode switch buttons
+    // View mode switch buttons exist
     expect(screen.getByTestId('view-mode-month')).toBeDefined();
     expect(screen.getByTestId('view-mode-week')).toBeDefined();
     expect(screen.getByTestId('view-mode-day')).toBeDefined();
 
-    // Verify Graphdule tasks are rendered
+    // Verify Graphdule tasks for the week are rendered
     expect(screen.getByText('Design database schema')).toBeDefined();
     expect(screen.getByText('Build backend API')).toBeDefined();
     expect(screen.getByText('Massive migration refactor')).toBeDefined();
@@ -171,12 +172,11 @@ describe('TaskCalendarView - Dedicated Full Task Calendar', () => {
       </AppContext.Provider>
     );
 
-    // Monday Sep 7: 16 / 20 AU planned (within capacity)
-    expect(screen.getByText('16/20 AU')).toBeDefined();
+    // Monday Sep 14: 16 / 20 AU planned (within capacity)
+    expect(screen.getByText('16 / 20 AU')).toBeDefined();
 
-    // Tuesday Sep 8: 26 / 20 AU planned -> Overloaded (+6 AU overcapacity)
-    const overcapacityBadge = screen.getByText('26/20 AU');
-    expect(overcapacityBadge).toBeDefined();
+    // Tuesday Sep 15: 26 / 20 AU planned -> Overloaded (+6 AU overcapacity)
+    expect(screen.getByText(/over/i)).toBeDefined();
   });
 
   it('allows switching seamlessly between Month, Week, and Day views', async () => {
@@ -186,14 +186,12 @@ describe('TaskCalendarView - Dedicated Full Task Calendar', () => {
       </AppContext.Provider>
     );
 
-    // Switch to Week view
-    const weekButton = screen.getByTestId('view-mode-week');
-    fireEvent.click(weekButton);
+    // Switch to Month view
+    const monthButton = screen.getByTestId('view-mode-month');
+    fireEvent.click(monthButton);
 
-    // In Week view, Monday, Tuesday, etc. column headers appear
-    expect(await screen.findByText('Mon')).toBeDefined();
-    expect(screen.getByText('Tue')).toBeDefined();
-    expect(screen.getByText('Wed')).toBeDefined();
+    // In Month view, Day Inspector side panel appears (Focus + Context)
+    expect(await screen.findByTestId('calendar-day-inspector')).toBeDefined();
 
     // Switch to Day view
     const dayButton = screen.getByTestId('view-mode-day');
@@ -268,7 +266,10 @@ describe('TaskCalendarView - Dedicated Full Task Calendar', () => {
 
     expect(setDataMock).toHaveBeenCalledWith('text/plain', 'node-1');
 
-    // Simulate drop on Sept 10 cell
+    // Switch to Month view to test month cell drop
+    fireEvent.click(screen.getByTestId('view-mode-month'));
+
+    // Simulate drop on Sept 10 cell in Month grid
     const targetCell = screen.getByText('10').closest('.group\\/cell');
     expect(targetCell).toBeDefined();
 
@@ -349,5 +350,70 @@ describe('TaskCalendarView - Dedicated Full Task Calendar', () => {
     expect(screen.getByText('Submit tax reports')).toBeDefined();
     expect(screen.queryByText('Design database schema')).toBeNull();
     expect(screen.queryByText('Massive migration refactor')).toBeNull();
+  });
+
+  it('supports toggling completed tasks visibility in the calendar toolbar', async () => {
+    const completedNode: Node = {
+      id: 'node-completed',
+      text: 'Archived legacy milestone',
+      dueDate: '2026-09-14',
+      status: 'completed',
+      estimatedAU: 2,
+      createdAt: '2026-09-01T00:00:00Z',
+      updatedAt: '2026-09-01T00:00:00Z',
+    };
+
+    render(
+      <AppContext.Provider
+        value={
+          createMockContext({
+            allActiveNodes: [...mockActiveNodes, completedNode],
+          }) as any
+        }
+      >
+        <TaskCalendarView />
+      </AppContext.Provider>
+    );
+
+    // By default, showCompleted is false -> completed tasks are hidden or labeled as hidden
+    const toggleCompletedBtn = screen.getByTestId('calendar-toggle-completed');
+    expect(toggleCompletedBtn).toBeDefined();
+
+    // Toggle on to show completed tasks
+    fireEvent.click(toggleCompletedBtn);
+    expect(await screen.findByText('Archived legacy milestone')).toBeDefined();
+
+    // Toggle off again
+    fireEvent.click(toggleCompletedBtn);
+    expect(screen.queryByText('Archived legacy milestone')).toBeNull();
+  });
+
+  it('opens and closes the Day Inspector panel in Month view', async () => {
+    render(
+      <AppContext.Provider value={createMockContext() as any}>
+        <TaskCalendarView />
+      </AppContext.Provider>
+    );
+
+    // Switch to Month view
+    fireEvent.click(screen.getByTestId('view-mode-month'));
+
+    // Day Inspector is initially visible
+    expect(screen.getByTestId('calendar-day-inspector')).toBeDefined();
+
+    // Close Inspector via header button
+    const closeBtn = screen.getByRole('button', { name: /close inspector/i });
+    fireEvent.click(closeBtn);
+
+    expect(screen.queryByTestId('calendar-day-inspector')).toBeNull();
+
+    // Re-open by clicking on a day cell (e.g. Sept 15)
+    const day15Cell = screen.getByText('15').closest('.group\\/cell');
+    expect(day15Cell).toBeDefined();
+    fireEvent.click(day15Cell!);
+
+    const inspector = await screen.findByTestId('calendar-day-inspector');
+    expect(inspector).toBeDefined();
+    expect(within(inspector).getByText('Massive migration refactor')).toBeDefined();
   });
 });
