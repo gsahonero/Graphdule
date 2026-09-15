@@ -16,6 +16,7 @@ import { TaskWorkSessionsModal } from './ui/components/TaskWorkSessionsModal';
 import { CapacityConfigModal } from './ui/components/CapacityConfigModal';
 import { WeeklyCapacityModal } from './ui/components/WeeklyCapacityModal';
 import { HealthConfigModal } from './ui/components/HealthConfigModal';
+import { AppearanceModal } from './ui/components/AppearanceModal';
 import { BottomNav } from './ui/components/BottomNav';
 
 const AppContent: React.FC = () => {
@@ -47,6 +48,7 @@ const AppContent: React.FC = () => {
       <CapacityConfigModal />
       <WeeklyCapacityModal />
       <HealthConfigModal />
+      <AppearanceModal />
     </div>
   );
 };

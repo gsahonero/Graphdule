@@ -315,9 +315,20 @@ export interface WeeklyAttentionReviewRecord {
   readonly userNotes?: string;
 }
 
+export type ColorPaletteId =
+  | 'emerald'
+  | 'ocean'
+  | 'amber'
+  | 'sage'
+  | 'indigo'
+  | 'rose'
+  | 'teal'
+  | 'minimal';
+
 export interface UserPreferences {
   readonly myDayMode: 'today' | 'current_tasks';
   readonly theme: 'dark' | 'light' | 'system';
+  readonly colorPalette?: ColorPaletteId;
   readonly dateFormat?: 'DD/MM/YYYY' | 'MMM_D_YYYY';
   readonly onboardingCompleted: boolean;
   readonly preferredStorageProvider: 'browser' | 'local_file';

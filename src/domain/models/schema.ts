@@ -157,6 +157,10 @@ export const ActiveWorkSessionSchema = z.object({
 export const UserPreferencesSchema = z.object({
   myDayMode: z.enum(['today', 'current_tasks']).default('today'),
   theme: z.enum(['dark', 'light', 'system']).default('dark'),
+  colorPalette: z
+    .enum(['emerald', 'ocean', 'amber', 'sage', 'indigo', 'rose', 'teal', 'minimal'])
+    .optional()
+    .default('emerald'),
   dateFormat: z.enum(['DD/MM/YYYY', 'MMM_D_YYYY']).optional().default('DD/MM/YYYY'),
   onboardingCompleted: z.boolean().default(false),
   preferredStorageProvider: z.enum(['browser', 'local_file']).default('browser'),

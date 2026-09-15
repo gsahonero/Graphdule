@@ -22,6 +22,7 @@ import {
   SchedulingImpactPreview,
   TaskEnvironment,
   HealthConfig,
+  ColorPaletteId,
 } from '../../domain/models/types';
 import { normalizeEventType } from '../../domain/models/schema';
 import {
@@ -61,6 +62,7 @@ import {
 import { JsonFileProvider } from '../../storage/file/json-file-provider';
 import { formatDisplayDate, DateDisplayFormat, getTodayString, addDays, getMondayOfWeek, getISOWeekString, parseDate } from '../../domain/utils/date';
 import { createDefaultSampleProject, DEFAULT_SAMPLE_PROJECT_ID } from '../../config/sample-project';
+import { DEFAULT_PALETTE_ID, applyPaletteToDOM } from '../utils/palettes';
 
 interface AppContextType {
   storage: IStorageProvider;
@@ -249,6 +251,12 @@ interface AppContextType {
   updateHealthConfig: (partial: Partial<HealthConfig>) => Promise<void>;
   acknowledgeHealthIntervention: (interventionId: string) => void;
   dismissHealthIntervention: (interventionId: string) => void;
+
+  // Visual Customization & Appearance
+  colorPalette: ColorPaletteId;
+  setColorPalette: (palette: ColorPaletteId) => Promise<void>;
+  isAppearanceModalOpen: boolean;
+  setIsAppearanceModalOpen: (open: boolean) => void;
 }
 
 export const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -268,9 +276,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [preferences, setPreferences] = useState<UserPreferences>(() => {
     const localTheme = typeof window !== 'undefined' ? (localStorage.getItem('graphdule_theme') as 'dark' | 'light' | null) : null;
     const localDateFormat = typeof window !== 'undefined' ? (localStorage.getItem('graphdule_date_format') as DateDisplayFormat | null) : null;
+    const localPalette = typeof window !== 'undefined' ? (localStorage.getItem('graphdule_palette') as ColorPaletteId | null) : null;
+    const activePalette = localPalette || DEFAULT_PALETTE_ID;
+    if (typeof window !== 'undefined') {
+      applyPaletteToDOM(activePalette);
+    }
     return {
       myDayMode: 'today',
       theme: localTheme || 'dark',
+      colorPalette: activePalette,
       dateFormat: localDateFormat || 'DD/MM/YYYY',
       onboardingCompleted: false,
       preferredStorageProvider: 'browser',
@@ -283,6 +297,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isNotesDrawerOpen, setIsNotesDrawerOpen] = useState(false);
   const [pendingCascade, setPendingCascade] = useState<CascadeImpactPreview | null>(null);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+  const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState(false);
 
   // Idea Seeds and Activity Log states
   const [ideaSeeds, setIdeaSeeds] = useState<IdeaSeed[]>([]);
@@ -542,6 +557,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           document.documentElement.classList.add('dark');
         }
       }
+      if (partial.colorPalette) {
+        applyPaletteToDOM(partial.colorPalette);
+      }
       if (partial.dateFormat) {
         localStorage.setItem('graphdule_date_format', partial.dateFormat);
       }
@@ -552,6 +570,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     },
     [preferences, storage, debouncedCloudSync]
+  );
+
+  const setColorPalette = useCallback(
+    async (palette: ColorPaletteId) => {
+      await updatePreferences({ colorPalette: palette });
+    },
+    [updatePreferences]
   );
 
   const toggleDateFormat = useCallback(async () => {
@@ -650,12 +675,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const finalTheme = localTheme || prefs.theme || 'dark';
     const localDateFormat = localStorage.getItem('graphdule_date_format') as DateDisplayFormat | null;
     const finalDateFormat = localDateFormat || prefs.dateFormat || 'DD/MM/YYYY';
+    const localPalette = localStorage.getItem('graphdule_palette') as ColorPaletteId | null;
+    const finalPalette = localPalette || prefs.colorPalette || DEFAULT_PALETTE_ID;
 
     const mergedPrefs: UserPreferences = {
       ...prefs,
       theme: finalTheme,
+      colorPalette: finalPalette,
       dateFormat: finalDateFormat,
     };
+
+    applyPaletteToDOM(finalPalette);
 
     if (finalTheme === 'light') {
       document.documentElement.classList.remove('dark');
@@ -3661,6 +3691,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateHealthConfig,
         acknowledgeHealthIntervention,
         dismissHealthIntervention,
+        colorPalette: preferences.colorPalette || DEFAULT_PALETTE_ID,
+        setColorPalette,
+        isAppearanceModalOpen,
+        setIsAppearanceModalOpen,
       }}
     >
       {children}

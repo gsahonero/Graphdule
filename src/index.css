@@ -2,6 +2,25 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --brand-50: 240 253 244;
+  --brand-100: 220 252 231;
+  --brand-200: 187 247 208;
+  --brand-300: 134 239 172;
+  --brand-400: 74 222 128;
+  --brand-500: 16 185 129;
+  --brand-600: 5 150 105;
+  --brand-700: 4 120 87;
+  --brand-800: 6 95 70;
+  --brand-900: 6 78 59;
+  --brand-950: 2 44 34;
+  --brand-selection-light-bg: #a7f3d0;
+  --brand-selection-light-text: #064e3b;
+  --brand-selection-dark-bg: #065f46;
+  --brand-selection-dark-text: #f0fdf4;
+  --brand-glow: rgba(16, 185, 129, 0.8);
+}
+
 @layer base {
   html {
     @apply h-full;
@@ -18,30 +37,30 @@
 
   /* Custom text selection & highlight colors for high contrast and readability */
   ::selection {
-    background-color: #a7f3d0 !important; /* Soft emerald-200 mint */
-    color: #064e3b !important; /* Deep emerald-950 for crisp readability in light mode */
+    background-color: var(--brand-selection-light-bg, #a7f3d0) !important;
+    color: var(--brand-selection-light-text, #064e3b) !important;
   }
 
   html.dark ::selection,
   html.dark *::selection,
   .dark ::selection,
   .dark *::selection {
-    background-color: #065f46 !important; /* Rich emerald-800 in dark mode */
-    color: #f0fdf4 !important; /* Crisp high-contrast white-mint for maximum readability in dark mode */
+    background-color: var(--brand-selection-dark-bg, #065f46) !important;
+    color: var(--brand-selection-dark-text, #f0fdf4) !important;
   }
 
   input::selection,
   textarea::selection {
-    background-color: #a7f3d0 !important;
-    color: #064e3b !important;
+    background-color: var(--brand-selection-light-bg, #a7f3d0) !important;
+    color: var(--brand-selection-light-text, #064e3b) !important;
   }
 
   html.dark input::selection,
   html.dark textarea::selection,
   .dark input::selection,
   .dark textarea::selection {
-    background-color: #065f46 !important;
-    color: #f0fdf4 !important;
+    background-color: var(--brand-selection-dark-bg, #065f46) !important;
+    color: var(--brand-selection-dark-text, #f0fdf4) !important;
   }
 
   /* HTML <mark> styling */
@@ -82,7 +101,7 @@
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(16, 185, 129, 0.7);
+  background: rgb(var(--brand-500, 16 185 129) / 0.7);
 }
 
 /* Firefox standard scrollbar support */
@@ -117,9 +136,9 @@
 }
 
 .react-flow__edge.selected .react-flow__edge-path {
-  stroke: #10b981 !important;
+  stroke: rgb(var(--brand-500, 16 185 129)) !important;
   stroke-width: 4 !important;
-  filter: drop-shadow(0 0 6px rgba(16, 185, 129, 0.8));
+  filter: drop-shadow(0 0 6px var(--brand-glow, rgba(16, 185, 129, 0.8)));
 }
 
 /* Arrowhead / Causality Marker Styles */
@@ -155,9 +174,9 @@
 .react-flow__edge.selected .react-flow__arrowhead,
 .react-flow__edge.selected .react-flow__arrowhead polyline,
 .react-flow__edge.selected .react-flow__arrowhead path {
-  fill: #10b981 !important;
-  stroke: #10b981 !important;
-  filter: drop-shadow(0 0 4px rgba(16, 185, 129, 0.8));
+  fill: rgb(var(--brand-500, 16 185 129)) !important;
+  stroke: rgb(var(--brand-500, 16 185 129)) !important;
+  filter: drop-shadow(0 0 4px var(--brand-glow, rgba(16, 185, 129, 0.8)));
 }
 
 /* Handle Perfect Symmetrical Centering & Mobile Touch Hitbox */

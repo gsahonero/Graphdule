@@ -23,6 +23,10 @@
           document.documentElement.classList.add('dark');
           document.documentElement.classList.remove('light');
         }
+        const palette = localStorage.getItem('graphdule_palette');
+        if (palette) {
+          document.documentElement.setAttribute('data-palette', palette);
+        }
       } catch (e) {}
 
       if ('serviceWorker' in navigator) {
@@ -60,8 +64,8 @@
       gtag('config', 'G-2HP9X9RKJV');
     </script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <script type="module" crossorigin src="./assets/index-BaRpDoAP.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-Bnrqs2hF.css">
+    <script type="module" crossorigin src="./assets/index-DHPVgRxQ.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-DxfStiGv.css">
   </head>
   <body class="h-full m-0 p-0 overflow-hidden font-sans antialiased selection:bg-emerald-500/30 selection:text-emerald-200">
     <div id="root" class="h-full flex flex-col"></div>

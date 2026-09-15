@@ -21,7 +21,7 @@ export const BottomNav: React.FC = () => {
           onClick={() => setCurrentView(activeProjectDoc ? 'project_detail' : 'projects')}
           className={`flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-all cursor-pointer min-h-[44px] ${
             isProjectsActive
-              ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
+              ? 'text-brand-600 dark:text-brand-400 font-semibold'
               : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
           }`}
           title={activeProjectDoc ? `Project: ${activeProjectDoc.project.name}` : 'Projects'}
@@ -37,7 +37,7 @@ export const BottomNav: React.FC = () => {
           onClick={() => setCurrentView('my_day')}
           className={`flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-all cursor-pointer min-h-[44px] ${
             isMyDayActive
-              ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
+              ? 'text-brand-600 dark:text-brand-400 font-semibold'
               : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
           }`}
           title="My Day"
@@ -53,7 +53,7 @@ export const BottomNav: React.FC = () => {
           onClick={() => setCurrentView('calendar')}
           className={`flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-all cursor-pointer min-h-[44px] ${
             isCalendarActive
-              ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
+              ? 'text-brand-600 dark:text-brand-400 font-semibold'
               : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
           }`}
           title="Task Calendar"

@@ -23,6 +23,10 @@
           document.documentElement.classList.add('dark');
           document.documentElement.classList.remove('light');
         }
+        const palette = localStorage.getItem('graphdule_palette');
+        if (palette) {
+          document.documentElement.setAttribute('data-palette', palette);
+        }
       } catch (e) {}
 
       if ('serviceWorker' in navigator) {

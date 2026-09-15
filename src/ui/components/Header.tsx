@@ -17,6 +17,7 @@ import {
   Cloud,
   Scale,
   Heart,
+  Palette,
 } from 'lucide-react';
 import { SyncStatusIndicator } from './SyncStatusIndicator';
 
@@ -38,6 +39,8 @@ export const Header: React.FC = () => {
     setIsCapacityConfigModalOpen,
     setIsHealthConfigModalOpen,
     healthConfig,
+    colorPalette,
+    setIsAppearanceModalOpen,
   } = useApp();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -114,8 +117,8 @@ export const Header: React.FC = () => {
         className="flex items-center space-x-2 sm:space-x-3 cursor-pointer shrink-0"
         onClick={() => setCurrentView('projects')}
       >
-        <div className="w-8 h-8 rounded-lg bg-emerald-500/10 dark:bg-emerald-600/20 border border-emerald-500/30 dark:border-emerald-500/40 flex items-center justify-center text-emerald-600 dark:text-emerald-400 font-bold shadow-sm shrink-0">
-          <Calendar className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+        <div className="w-8 h-8 rounded-lg bg-brand-500/10 dark:bg-brand-600/20 border border-brand-500/30 dark:border-brand-500/40 flex items-center justify-center text-brand-600 dark:text-brand-400 font-bold shadow-sm shrink-0">
+          <Calendar className="w-4 h-4 text-brand-600 dark:text-brand-400" />
         </div>
         <div className="min-w-0">
           <div className="flex items-center space-x-1.5">
@@ -139,7 +142,7 @@ export const Header: React.FC = () => {
           onClick={() => setCurrentView(activeProjectDoc ? 'project_detail' : 'projects')}
           className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
             currentView === 'projects' || currentView === 'project_detail'
-              ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm border border-slate-200 dark:border-transparent'
+              ? 'bg-white dark:bg-slate-800 text-brand-600 dark:text-brand-400 shadow-sm border border-slate-200 dark:border-transparent'
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-900'
           }`}
         >
@@ -157,7 +160,7 @@ export const Header: React.FC = () => {
           onClick={() => setCurrentView('my_day')}
           className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
             currentView === 'my_day'
-              ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm border border-slate-200 dark:border-transparent'
+              ? 'bg-white dark:bg-slate-800 text-brand-600 dark:text-brand-400 shadow-sm border border-slate-200 dark:border-transparent'
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-900'
           }`}
         >
@@ -170,7 +173,7 @@ export const Header: React.FC = () => {
           onClick={() => setCurrentView('calendar')}
           className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
             currentView === 'calendar'
-              ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm border border-slate-200 dark:border-transparent'
+              ? 'bg-white dark:bg-slate-800 text-brand-600 dark:text-brand-400 shadow-sm border border-slate-200 dark:border-transparent'
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-900'
           }`}
         >
@@ -236,9 +239,9 @@ export const Header: React.FC = () => {
           <button
             onClick={toggleDateFormat}
             title={`Date Format: ${preferences.dateFormat === 'MMM_D_YYYY' ? 'Month, Day (Year)' : 'DD/MM/YYYY'} (Click to switch)`}
-            className="flex items-center space-x-1.5 px-2 py-1 rounded-md text-[11px] font-mono font-medium text-slate-600 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 bg-slate-100 dark:bg-slate-950/80 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 transition-colors cursor-pointer"
+            className="flex items-center space-x-1.5 px-2 py-1 rounded-md text-[11px] font-mono font-medium text-slate-600 dark:text-slate-300 hover:text-brand-600 dark:hover:text-brand-400 bg-slate-100 dark:bg-slate-950/80 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 transition-colors cursor-pointer"
           >
-            <Calendar className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+            <Calendar className="w-3.5 h-3.5 text-brand-500 shrink-0" />
             <span>{preferences.dateFormat === 'MMM_D_YYYY' ? 'Mon, DD (YYYY)' : 'DD/MM/YYYY'}</span>
           </button>
 
@@ -247,9 +250,9 @@ export const Header: React.FC = () => {
             onClick={() => setIsCapacityConfigModalOpen(true)}
             title="Daily AU Capacity & Reality Check Settings"
             data-testid="header-capacity-button"
-            className="flex items-center space-x-1.5 px-2 py-1 rounded-md text-[11px] font-mono font-medium text-slate-600 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 bg-slate-100 dark:bg-slate-950/80 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 transition-colors cursor-pointer"
+            className="flex items-center space-x-1.5 px-2 py-1 rounded-md text-[11px] font-mono font-medium text-slate-600 dark:text-slate-300 hover:text-brand-600 dark:hover:text-brand-400 bg-slate-100 dark:bg-slate-950/80 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 transition-colors cursor-pointer"
           >
-            <Scale className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+            <Scale className="w-3.5 h-3.5 text-brand-500 shrink-0" />
             <span>Capacity</span>
           </button>
 
@@ -264,11 +267,22 @@ export const Header: React.FC = () => {
             <span>Health</span>
           </button>
 
+          {/* Appearance & Color Palette Settings */}
+          <button
+            onClick={() => setIsAppearanceModalOpen(true)}
+            title="Appearance & Color Palette (Science-backed themes)"
+            data-testid="header-appearance-button"
+            className="flex items-center space-x-1.5 px-2 py-1 rounded-md text-[11px] font-mono font-medium text-slate-600 dark:text-slate-300 hover:text-brand-600 dark:hover:text-brand-400 bg-slate-100 dark:bg-slate-950/80 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 transition-colors cursor-pointer"
+          >
+            <Palette className="w-3.5 h-3.5 text-brand-500 shrink-0" />
+            <span>Palette</span>
+          </button>
+
           {/* Onboarding Guide */}
           <button
             onClick={() => setIsOnboardingOpen(true)}
             title="Welcome Tour & Guide"
-            className="p-1.5 rounded-md text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            className="p-1.5 rounded-md text-slate-500 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <HelpCircle className="w-4 h-4" />
           </button>
@@ -356,6 +370,24 @@ export const Header: React.FC = () => {
                   </span>
                 </button>
 
+                {/* Appearance & Palette */}
+                <button
+                  onClick={() => {
+                    setIsAppearanceModalOpen(true);
+                    setIsMobileMenuOpen(false);
+                  }}
+                  data-testid="mobile-menu-appearance-button"
+                  className="w-full px-3.5 py-2.5 text-left text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between cursor-pointer border-b border-slate-100 dark:border-slate-800/80 mb-0.5"
+                >
+                  <span className="flex items-center space-x-2">
+                    <Palette className="w-4 h-4 text-brand-500 shrink-0" />
+                    <span className="font-medium text-slate-800 dark:text-slate-200">Appearance & Palette</span>
+                  </span>
+                  <span className="text-[10px] font-medium text-brand-600 dark:text-brand-400 bg-brand-500/10 px-1.5 py-0.5 rounded border border-brand-500/30 capitalize">
+                    {colorPalette}
+                  </span>
+                </button>
+
                 {/* Date Format Toggle */}
                 <button
                   onClick={() => {
@@ -365,7 +397,7 @@ export const Header: React.FC = () => {
                   className="w-full px-3.5 py-2.5 text-left text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between cursor-pointer"
                 >
                   <span className="flex items-center space-x-2">
-                    <Calendar className="w-4 h-4 text-emerald-500" />
+                    <Calendar className="w-4 h-4 text-brand-500" />
                     <span>Date Format</span>
                   </span>
                   <span className="font-mono text-[10px] text-slate-400">
@@ -404,7 +436,7 @@ export const Header: React.FC = () => {
                       handleInstallApp();
                       setIsMobileMenuOpen(false);
                     }}
-                    className="w-full px-3.5 py-2.5 text-left text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 flex items-center space-x-2 font-medium cursor-pointer"
+                    className="w-full px-3.5 py-2.5 text-left text-brand-600 dark:text-brand-400 hover:bg-brand-500/10 dark:hover:bg-brand-950/40 flex items-center space-x-2 font-medium cursor-pointer"
                   >
                     <Smartphone className="w-4 h-4" />
                     <span>Install App</span>
