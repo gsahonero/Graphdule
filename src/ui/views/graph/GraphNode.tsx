@@ -440,7 +440,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
         )}
 
         {/* Floating Rich Tooltip / Hover Card Popover with Full Modification Capabilities */}
-        {(isHovered || isCalendarOpen || isEditing || selected) && (
+        {((isWholeProjectView ? false : isHovered) || selected || isCalendarOpen || isEditing) && (
           <div
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}

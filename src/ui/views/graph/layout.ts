@@ -71,6 +71,7 @@ class LayeredGraphLayout {
   private readonly direction: LayoutDirection;
   private readonly nodeW: number;
   private readonly nodeH: number;
+  private readonly customDimensions?: Map<string, { width: number; height: number }>;
 
   // Spacing parameters in (U, V) space
   private readonly spacingU: number;
@@ -81,11 +82,13 @@ class LayeredGraphLayout {
     validEdges: readonly Edge[],
     direction: LayoutDirection,
     isCompact: boolean,
-    nodeScale: number
+    nodeScale: number,
+    customDimensions?: Map<string, { width: number; height: number }>
   ) {
     this.nodes = nodes;
     this.validEdges = validEdges;
     this.direction = direction;
+    this.customDimensions = customDimensions;
 
     this.nodeW = Math.round((isCompact ? COMPACT_NODE_SIZE : NODE_WIDTH) * nodeScale);
     this.nodeH = Math.round((isCompact ? COMPACT_NODE_SIZE : NODE_HEIGHT) * nodeScale);
@@ -99,12 +102,26 @@ class LayeredGraphLayout {
     }
   }
 
-  private getNodeDimU(): number {
-    return this.direction === 'LR' ? this.nodeW : this.nodeH;
+  public getNodeW(nodeId?: string): number {
+    if (nodeId && this.customDimensions?.has(nodeId)) {
+      return this.customDimensions.get(nodeId)!.width;
+    }
+    return this.nodeW;
   }
 
-  private getNodeDimV(): number {
-    return this.direction === 'LR' ? this.nodeH : this.nodeW;
+  public getNodeH(nodeId?: string): number {
+    if (nodeId && this.customDimensions?.has(nodeId)) {
+      return this.customDimensions.get(nodeId)!.height;
+    }
+    return this.nodeH;
+  }
+
+  private getNodeDimU(nodeId?: string): number {
+    return this.direction === 'LR' ? this.getNodeW(nodeId) : this.getNodeH(nodeId);
+  }
+
+  private getNodeDimV(nodeId?: string): number {
+    return this.direction === 'LR' ? this.getNodeH(nodeId) : this.getNodeW(nodeId);
   }
 
   /**
@@ -182,11 +199,13 @@ class LayeredGraphLayout {
     let maxX = -Infinity;
     let maxY = -Infinity;
 
-    resolvedCoords.forEach((pos) => {
+    resolvedCoords.forEach((pos, id) => {
       if (pos.x < minX) minX = pos.x;
       if (pos.y < minY) minY = pos.y;
-      if (pos.x + this.nodeW > maxX) maxX = pos.x + this.nodeW;
-      if (pos.y + this.nodeH > maxY) maxY = pos.y + this.nodeH;
+      const w = this.getNodeW(id);
+      const h = this.getNodeH(id);
+      if (pos.x + w > maxX) maxX = pos.x + w;
+      if (pos.y + h > maxY) maxY = pos.y + h;
     });
 
     const targetMinX = 60;
@@ -375,15 +394,16 @@ class LayeredGraphLayout {
    */
   private assignUVCoordinates(layers: string[][]): Map<string, { u: number; v: number }> {
     const coords = new Map<string, { u: number; v: number }>();
-    const dimU = this.getNodeDimU();
-    const dimV = this.getNodeDimV();
 
     // Calculate maximum V span across all layers to center smaller layers
-    let maxVCount = 1;
+    let maxTotalVLength = 0;
     layers.forEach((layer) => {
-      if (layer.length > maxVCount) maxVCount = layer.length;
+      let layerV = 0;
+      layer.forEach((id, idx) => {
+        layerV += this.getNodeDimV(id) + (idx > 0 ? this.spacingV : 0);
+      });
+      if (layerV > maxTotalVLength) maxTotalVLength = layerV;
     });
-    const totalMaxVLength = maxVCount * dimV + (maxVCount - 1) * this.spacingV;
 
     // Track predecessors and successors for barycenter secondary alignment
     const predsMap = new Map<string, string[]>();
@@ -394,18 +414,30 @@ class LayeredGraphLayout {
     layers.forEach((layer) => {
       if (layer.length === 0) return;
 
-      const layerVLength = layer.length * dimV + (layer.length - 1) * this.spacingV;
-      const layerOffsetV = Math.max(0, (totalMaxVLength - layerVLength) / 2);
+      let layerVLength = 0;
+      let maxLayerDimU = 0;
+      layer.forEach((id, idx) => {
+        const dimU = this.getNodeDimU(id);
+        const dimV = this.getNodeDimV(id);
+        if (dimU > maxLayerDimU) maxLayerDimU = dimU;
+        layerVLength += dimV + (idx > 0 ? this.spacingV : 0);
+      });
 
+      const layerOffsetV = Math.max(0, (maxTotalVLength - layerVLength) / 2);
+
+      let runningV = layerOffsetV;
       layer.forEach((id, indexInLayer) => {
-        // Compute base V from layer index
-        let targetV = layerOffsetV + indexInLayer * (dimV + this.spacingV);
+        const dimV = this.getNodeDimV(id);
+        let targetV = runningV;
 
         // Barycentric alignment with predecessor if single predecessor exists
         const preds = predsMap.get(id) || [];
         if (preds.length === 1 && coords.has(preds[0])) {
           const predV = coords.get(preds[0])!.v;
-          const minAllowedV = indexInLayer === 0 ? 0 : (coords.get(layer[indexInLayer - 1])?.v ?? 0) + dimV + this.spacingV;
+          const prevId = indexInLayer > 0 ? layer[indexInLayer - 1] : null;
+          const minAllowedV = prevId
+            ? (coords.get(prevId)!.v + this.getNodeDimV(prevId) + this.spacingV)
+            : 0;
           if (predV >= minAllowedV) {
             targetV = predV;
           }
@@ -415,6 +447,8 @@ class LayeredGraphLayout {
           u: currentU,
           v: targetV,
         });
+
+        runningV = targetV + dimV + this.spacingV;
       });
 
       // Forward sweep: ensure minimum separation
@@ -422,14 +456,15 @@ class LayeredGraphLayout {
         const prevId = layer[i - 1];
         const currId = layer[i];
         const prevV = coords.get(prevId)!.v;
+        const prevDimV = this.getNodeDimV(prevId);
         const currCoord = coords.get(currId)!;
-        const minV = prevV + dimV + this.spacingV;
+        const minV = prevV + prevDimV + this.spacingV;
         if (currCoord.v < minV) {
           coords.set(currId, { u: currCoord.u, v: minV });
         }
       }
 
-      currentU += dimU + this.spacingU;
+      currentU += maxLayerDimU + this.spacingU;
     });
 
     return coords;
@@ -459,12 +494,12 @@ class LayeredGraphLayout {
       for (let i = 0; i < nodeIds.length; i++) {
         const id1 = nodeIds[i];
         const pos1 = resolved.get(id1)!;
-        const rect1 = { x: pos1.x, y: pos1.y, width: this.nodeW, height: this.nodeH };
+        const rect1 = { x: pos1.x, y: pos1.y, width: this.getNodeW(id1), height: this.getNodeH(id1) };
 
         for (let j = i + 1; j < nodeIds.length; j++) {
           const id2 = nodeIds[j];
           const pos2 = resolved.get(id2)!;
-          const rect2 = { x: pos2.x, y: pos2.y, width: this.nodeW, height: this.nodeH };
+          const rect2 = { x: pos2.x, y: pos2.y, width: this.getNodeW(id2), height: this.getNodeH(id2) };
 
           if (doRectanglesOverlap(rect1, rect2, minGapX, minGapY)) {
             hadOverlap = true;
@@ -528,15 +563,15 @@ class LayeredGraphLayout {
 
       let sx: number, sy: number, tx: number, ty: number;
       if (this.direction === 'LR') {
-        sx = p1.x + this.nodeW;
-        sy = p1.y + this.nodeH / 2;
+        sx = p1.x + this.getNodeW(edge.fromNodeId);
+        sy = p1.y + this.getNodeH(edge.fromNodeId) / 2;
         tx = p2.x;
-        ty = p2.y + this.nodeH / 2;
+        ty = p2.y + this.getNodeH(edge.toNodeId) / 2;
         edgeBends += Math.abs(ty - sy);
       } else {
-        sx = p1.x + this.nodeW / 2;
-        sy = p1.y + this.nodeH;
-        tx = p2.x + this.nodeW / 2;
+        sx = p1.x + this.getNodeW(edge.fromNodeId) / 2;
+        sy = p1.y + this.getNodeH(edge.fromNodeId);
+        tx = p2.x + this.getNodeW(edge.toNodeId) / 2;
         ty = p2.y;
         edgeBends += Math.abs(tx - sx);
       }
@@ -551,10 +586,10 @@ class LayeredGraphLayout {
     const nodeIds = Array.from(positions.keys());
     for (let i = 0; i < nodeIds.length; i++) {
       const pos1 = positions.get(nodeIds[i])!;
-      const r1 = { x: pos1.x, y: pos1.y, width: this.nodeW, height: this.nodeH };
+      const r1 = { x: pos1.x, y: pos1.y, width: this.getNodeW(nodeIds[i]), height: this.getNodeH(nodeIds[i]) };
       for (let j = i + 1; j < nodeIds.length; j++) {
         const pos2 = positions.get(nodeIds[j])!;
-        const r2 = { x: pos2.x, y: pos2.y, width: this.nodeW, height: this.nodeH };
+        const r2 = { x: pos2.x, y: pos2.y, width: this.getNodeW(nodeIds[j]), height: this.getNodeH(nodeIds[j]) };
         if (doRectanglesOverlap(r1, r2, 0, 0)) {
           overlapCount++;
         }
@@ -783,3 +818,265 @@ export function getLayoutedElements(
     metrics: layoutMetrics,
   };
 }
+
+export interface CompoundLayoutOptions {
+  direction?: LayoutMode;
+  forceLayout?: boolean;
+  isCompact?: boolean;
+  nodeScale?: number;
+  viewport?: ViewportDimensions;
+  endGoalNodeId?: string;
+  criticalPathNodeIds?: Set<string>;
+}
+
+/**
+ * Compound Hierarchical Layout Engine for Whole Project View (Direction A).
+ * Automatically detects decomposed parent tasks and arranges their subtasks
+ * into spacious, non-overlapping compound group containers with relative coordinates.
+ */
+export function getCompoundLayoutedElements(
+  nodes: readonly Node[],
+  edges: readonly Edge[],
+  options: CompoundLayoutOptions = {}
+): LayoutResult {
+  const direction = options.direction || 'LR';
+  const isCompact = options.isCompact ?? false;
+  const nodeScale = options.nodeScale ?? 1.0;
+  const viewport = options.viewport;
+  const endGoalNodeId = options.endGoalNodeId;
+  const criticalPathNodeIds = options.criticalPathNodeIds;
+
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  const nodeW = Math.round((isCompact ? COMPACT_NODE_SIZE : NODE_WIDTH) * nodeScale);
+  const nodeH = Math.round((isCompact ? COMPACT_NODE_SIZE : NODE_HEIGHT) * nodeScale);
+
+  // 1. Group child nodes by parentNodeId
+  const childrenByParent = new Map<string, Node[]>();
+  nodes.forEach((n) => {
+    if (n.parentNodeId && nodeMap.has(n.parentNodeId)) {
+      if (!childrenByParent.has(n.parentNodeId)) {
+        childrenByParent.set(n.parentNodeId, []);
+      }
+      childrenByParent.get(n.parentNodeId)!.push(n);
+    }
+  });
+
+  // If no hierarchy exists, fall back to standard layout with forced clean positioning
+  if (childrenByParent.size === 0) {
+    return getLayoutedElements(nodes, edges, direction, true, isCompact, nodeScale, viewport);
+  }
+
+  const parentIdSet = new Set(childrenByParent.keys());
+  const customDimensions = new Map<string, { width: number; height: number }>();
+  const childRelativePos = new Map<string, { x: number; y: number; parentId: string }>();
+
+  // 2. Lay out each sub-DAG inside its compound parent container
+  const PAD_X = Math.round(28 * nodeScale);
+  const HEADER_H = Math.round(56 * nodeScale);
+  const PAD_Y = Math.round(20 * nodeScale);
+  const PAD_BOTTOM = Math.round(24 * nodeScale);
+
+  for (const [parentId, children] of childrenByParent.entries()) {
+    const childIdSet = new Set(children.map((c) => c.id));
+    const internalEdges = edges.filter(
+      (e) => childIdSet.has(e.fromNodeId) && childIdSet.has(e.toNodeId) && e.fromNodeId !== e.toNodeId
+    );
+
+    // Compute internal layout of children
+    const childLayout = getLayoutedElements(
+      children,
+      internalEdges,
+      direction === 'auto' ? 'LR' : direction,
+      true,
+      isCompact,
+      nodeScale
+    );
+
+    const childBox = childLayout.boundingBox;
+    const containerW = Math.max(340, Math.round(childBox.width + PAD_X * 2));
+    const containerH = Math.max(180, Math.round(childBox.height + HEADER_H + PAD_Y + PAD_BOTTOM));
+
+    customDimensions.set(parentId, { width: containerW, height: containerH });
+
+    children.forEach((c) => {
+      const rawPos = childLayout.rfNodes.find((n) => n.id === c.id)?.position || { x: 0, y: 0 };
+      const relX = Math.round(rawPos.x - childBox.x + PAD_X);
+      const relY = Math.round(rawPos.y - childBox.y + HEADER_H + PAD_Y);
+      childRelativePos.set(c.id, { x: relX, y: relY, parentId });
+    });
+  }
+
+  // 3. Construct the meta-graph (Root nodes and parent compound nodes)
+  const metaNodes = nodes.filter((n) => !n.parentNodeId || !parentIdSet.has(n.parentNodeId));
+  const metaNodeIds = new Set(metaNodes.map((n) => n.id));
+
+  const getMetaAncestorId = (id: string): string => {
+    let curr = id;
+    const visited = new Set<string>();
+    while (nodeMap.get(curr)?.parentNodeId && parentIdSet.has(nodeMap.get(curr)!.parentNodeId!) && !visited.has(curr)) {
+      visited.add(curr);
+      curr = nodeMap.get(curr)!.parentNodeId!;
+    }
+    return curr;
+  };
+
+  const metaEdges: Edge[] = [];
+  const metaEdgeKeySet = new Set<string>();
+  edges.forEach((e) => {
+    const fromMeta = getMetaAncestorId(e.fromNodeId);
+    const toMeta = getMetaAncestorId(e.toNodeId);
+    if (fromMeta !== toMeta && metaNodeIds.has(fromMeta) && metaNodeIds.has(toMeta)) {
+      const key = `${fromMeta}->${toMeta}`;
+      if (!metaEdgeKeySet.has(key)) {
+        metaEdgeKeySet.add(key);
+        metaEdges.push({
+          id: `meta-${key}`,
+          projectId: e.projectId,
+          fromNodeId: fromMeta,
+          toNodeId: toMeta,
+          createdAt: e.createdAt,
+        });
+      }
+    }
+  });
+
+  // 4. Lay out the meta-graph
+  let chosenDir: LayoutDirection = direction === 'TB' ? 'TB' : 'LR';
+  let metaPositions = new Map<string, { x: number; y: number }>();
+  let finalBoundingBox: BoundingBox;
+
+  if (direction === 'auto') {
+    const lrLayout = new LayeredGraphLayout(metaNodes, metaEdges, 'LR', isCompact, nodeScale, customDimensions);
+    const tbLayout = new LayeredGraphLayout(metaNodes, metaEdges, 'TB', isCompact, nodeScale, customDimensions);
+    const lrRes = lrLayout.computeLayout();
+    const tbRes = tbLayout.computeLayout();
+    const vp = viewport || { width: 1400, height: 900 };
+    const vpAspect = vp.width / vp.height;
+    const lrAspect = lrRes.boundingBox.width / Math.max(1, lrRes.boundingBox.height);
+    const tbAspect = tbRes.boundingBox.width / Math.max(1, tbRes.boundingBox.height);
+    if (Math.abs(tbAspect - vpAspect) < Math.abs(lrAspect - vpAspect) * 0.7) {
+      chosenDir = 'TB';
+      metaPositions = tbRes.positions;
+      finalBoundingBox = tbRes.boundingBox;
+    } else {
+      chosenDir = 'LR';
+      metaPositions = lrRes.positions;
+      finalBoundingBox = lrRes.boundingBox;
+    }
+  } else {
+    chosenDir = direction === 'TB' ? 'TB' : 'LR';
+    const layout = new LayeredGraphLayout(metaNodes, metaEdges, chosenDir, isCompact, nodeScale, customDimensions);
+    const res = layout.computeLayout();
+    metaPositions = res.positions;
+    finalBoundingBox = res.boundingBox;
+  }
+
+  // 5. Build React Flow elements
+  // IMPORTANT: In React Flow, parent nodes MUST precede child nodes!
+  const rfNodes: RFNode[] = [];
+
+  // Top-level meta nodes first
+  metaNodes.forEach((node) => {
+    const pos = metaPositions.get(node.id) || { x: 60, y: 60 };
+    if (parentIdSet.has(node.id)) {
+      const dim = customDimensions.get(node.id)!;
+      const children = childrenByParent.get(node.id) || [];
+      const completedCount = children.filter((c) => c.status === 'completed').length;
+      const totalAU = Math.round(children.reduce((acc, c) => acc + (c.estimatedAU || 0), 0) * 100) / 100;
+
+      rfNodes.push({
+        id: node.id,
+        type: 'groupNode',
+        position: pos,
+        width: dim.width,
+        height: dim.height,
+        style: {
+          width: dim.width,
+          height: dim.height,
+        },
+        data: {
+          node,
+          childCount: children.length,
+          completedCount,
+          totalAU,
+          width: dim.width,
+          height: dim.height,
+          isOnCriticalPath: criticalPathNodeIds?.has(node.id),
+          isEGN: node.id === endGoalNodeId,
+          layoutDir: chosenDir,
+        },
+      });
+    } else {
+      rfNodes.push({
+        id: node.id,
+        type: 'graphNode',
+        position: pos,
+        width: nodeW,
+        height: nodeH,
+        data: {
+          node,
+          isEGN: node.id === endGoalNodeId,
+          isOnCriticalPath: criticalPathNodeIds?.has(node.id),
+          isWholeProjectView: true,
+        },
+      });
+    }
+  });
+
+  // Then append child nodes (with parentId and relative coords)
+  for (const [parentId, children] of childrenByParent.entries()) {
+    children.forEach((child) => {
+      const rel = childRelativePos.get(child.id) || { x: PAD_X, y: HEADER_H + PAD_Y };
+      rfNodes.push({
+        id: child.id,
+        type: 'graphNode',
+        parentId,
+        extent: 'parent',
+        position: { x: rel.x, y: rel.y },
+        width: nodeW,
+        height: nodeH,
+        data: {
+          node: child,
+          isEGN: child.id === endGoalNodeId,
+          isOnCriticalPath: criticalPathNodeIds?.has(child.id),
+          isWholeProjectView: true,
+        },
+      });
+    });
+  }
+
+  // 6. Build rfEdges
+  const arrowSize = Math.round(18 * nodeScale);
+  const strokeWidth = Math.max(1.5, Math.round(2.5 * nodeScale * 10) / 10);
+  const interactionWidth = Math.round(20 * nodeScale);
+
+  const allNodeIds = new Set(nodes.map((n) => n.id));
+  const validEdges = edges.filter(
+    (e) => allNodeIds.has(e.fromNodeId) && allNodeIds.has(e.toNodeId) && e.fromNodeId !== e.toNodeId
+  );
+
+  const rfEdges: RFEdge[] = validEdges.map((edge) => ({
+    id: edge.id,
+    source: edge.fromNodeId,
+    target: edge.toNodeId,
+    type: 'smoothstep',
+    animated: false,
+    selectable: true,
+    focusable: true,
+    interactionWidth,
+    markerEnd: {
+      type: MarkerType.ArrowClosed,
+      width: arrowSize,
+      height: arrowSize,
+    },
+    style: { strokeWidth },
+  }));
+
+  return {
+    rfNodes,
+    rfEdges,
+    boundingBox: finalBoundingBox,
+    direction: chosenDir,
+  };
+}
+

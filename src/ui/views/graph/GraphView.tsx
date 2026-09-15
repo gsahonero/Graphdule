@@ -21,8 +21,10 @@ import '@xyflow/react/dist/style.css';
 
 import { useApp } from '../../context/AppContext';
 import { GraphNode, GraphNodeData } from './GraphNode';
+import { GroupNode, GroupNodeData } from './GroupNode';
 import {
   getLayoutedElements,
+  getCompoundLayoutedElements,
   isValidCoordinate,
   NODE_WIDTH,
   NODE_HEIGHT,
@@ -56,6 +58,7 @@ import {
 
 const nodeTypes = {
   graphNode: GraphNode,
+  groupNode: GroupNode,
 };
 
 const SNAP_THRESHOLD = 15;
@@ -236,15 +239,24 @@ const GraphCanvas: React.FC = () => {
   // Build React Flow nodes for active scope
   const initialElements = useMemo(() => {
     const vp = typeof window !== 'undefined' ? { width: window.innerWidth, height: window.innerHeight } : undefined;
-    const layout = getLayoutedElements(
-      scopedNodes,
-      scopedEdges,
-      layoutMode,
-      false,
-      viewDensity === 'compact',
-      nodeScale,
-      vp
-    );
+    const layout = isWholeProjectView
+      ? getCompoundLayoutedElements(scopedNodes, scopedEdges, {
+          direction: layoutMode,
+          isCompact: viewDensity === 'compact',
+          nodeScale,
+          viewport: vp,
+          endGoalNodeId: project.endGoalNodeId,
+          criticalPathNodeIds: criticalPath ? new Set(criticalPath.nodeIds) : undefined,
+        })
+      : getLayoutedElements(
+          scopedNodes,
+          scopedEdges,
+          layoutMode,
+          false,
+          viewDensity === 'compact',
+          nodeScale,
+          vp
+        );
     if (!isWholeProjectView || !criticalPath) return layout;
     const criticalEdgeSet = new Set(criticalPath.edgeIds);
     return {
@@ -263,7 +275,7 @@ const GraphCanvas: React.FC = () => {
           : e
       ),
     };
-  }, [scopedNodes, scopedEdges, layoutMode, viewDensity, nodeScale, isWholeProjectView, criticalPath]);
+  }, [scopedNodes, scopedEdges, layoutMode, viewDensity, nodeScale, isWholeProjectView, criticalPath, project.endGoalNodeId]);
 
   const [rfNodes, setRfNodes] = useState<RFNode[]>(initialElements.rfNodes);
   const [rfEdges, setRfEdges] = useState<RFEdge[]>(initialElements.rfEdges);
@@ -272,33 +284,48 @@ const GraphCanvas: React.FC = () => {
   // preserving current in-memory positions for existing nodes so in-place edits never cause shifting.
   React.useEffect(() => {
     const vp = typeof window !== 'undefined' ? { width: window.innerWidth, height: window.innerHeight } : undefined;
-    const layout = getLayoutedElements(
-      scopedNodes,
-      scopedEdges,
-      layoutMode,
-      false,
-      viewDensity === 'compact',
-      nodeScale,
-      vp
-    );
+    const layout = isWholeProjectView
+      ? getCompoundLayoutedElements(scopedNodes, scopedEdges, {
+          direction: layoutMode,
+          isCompact: viewDensity === 'compact',
+          nodeScale,
+          viewport: vp,
+          endGoalNodeId: project.endGoalNodeId,
+          criticalPathNodeIds: criticalPath ? new Set(criticalPath.nodeIds) : undefined,
+        })
+      : getLayoutedElements(
+          scopedNodes,
+          scopedEdges,
+          layoutMode,
+          false,
+          viewDensity === 'compact',
+          nodeScale,
+          vp
+        );
     setLayoutDir(layout.direction);
-    setRfNodes((prevRfNodes) => {
-      const prevPosMap = new Map(
-        prevRfNodes
-          .filter((n) => n?.position && isValidCoordinate(n.position.x) && isValidCoordinate(n.position.y))
-          .map((n) => [n.id, n.position])
-      );
-      return layout.rfNodes.map((rfNode) => {
-        const existingPos = prevPosMap.get(rfNode.id);
-        if (existingPos) {
-          return {
-            ...rfNode,
-            position: existingPos,
-          };
-        }
-        return rfNode;
+
+    if (isWholeProjectView) {
+      setRfNodes(layout.rfNodes);
+    } else {
+      setRfNodes((prevRfNodes) => {
+        const prevPosMap = new Map(
+          prevRfNodes
+            .filter((n) => n?.position && isValidCoordinate(n.position.x) && isValidCoordinate(n.position.y))
+            .map((n) => [n.id, n.position])
+        );
+        return layout.rfNodes.map((rfNode) => {
+          const existingPos = prevPosMap.get(rfNode.id);
+          if (existingPos) {
+            return {
+              ...rfNode,
+              position: existingPos,
+            };
+          }
+          return rfNode;
+        });
       });
-    });
+    }
+
     const criticalEdgeSet = new Set(criticalPath?.edgeIds || []);
     const styledEdges = layout.rfEdges.map((e) => {
       if (criticalEdgeSet.has(e.id)) {
@@ -316,7 +343,7 @@ const GraphCanvas: React.FC = () => {
     });
     setRfEdges(styledEdges);
     scopedNodes.forEach((n) => updateNodeInternals(n.id));
-  }, [scopedNodes, scopedEdges, layoutMode, viewDensity, nodeScale, criticalPath, updateNodeInternals]);
+  }, [scopedNodes, scopedEdges, layoutMode, viewDensity, nodeScale, isWholeProjectView, criticalPath, updateNodeInternals, project.endGoalNodeId]);
 
   // Auto fitView when entering Whole Project view
   useEffect(() => {
@@ -1125,6 +1152,32 @@ const GraphCanvas: React.FC = () => {
       if (!nodeObj) return rfNode;
 
       const isEGN = nodeObj.id === project.endGoalNodeId;
+
+      if (rfNode.type === 'groupNode') {
+        const childNodes = presentationNodes.filter((n) => n.parentNodeId === nodeObj.id);
+        const completedCount = childNodes.filter((c) => c.status === 'completed').length;
+        const totalAU = Math.round(childNodes.reduce((acc, c) => acc + (c.estimatedAU || 0), 0) * 100) / 100;
+        const isSelected = selectedNode?.id === nodeObj.id;
+
+        const groupData: GroupNodeData = {
+          node: nodeObj,
+          childCount: childNodes.length,
+          completedCount,
+          totalAU,
+          width: Number(rfNode.width || 340),
+          height: Number(rfNode.height || 180),
+          isEGN,
+          isOnCriticalPath: isWholeProjectView ? (criticalPath?.nodeIds.includes(nodeObj.id) ?? false) : false,
+          layoutDir,
+          onDrillDown: () => handleDrillDown(nodeObj),
+        };
+        return {
+          ...rfNode,
+          selected: isSelected || Boolean(rfNode.selected),
+          data: groupData,
+        };
+      }
+
       const nodeNotesCount = notes.filter((note) => note.nodeId === nodeObj.id).length;
       const subtaskCount = presentationNodes.filter((n) => n.parentNodeId === nodeObj.id).length;
       const hasInProgressChild = presentationNodes.some((n) => n.parentNodeId === nodeObj.id && n.status === 'in_progress');
