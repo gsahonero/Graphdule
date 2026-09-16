@@ -110,7 +110,9 @@ export class MyDayService {
     parentRecurringTaskIdOrAU?: string | number,
     recurrenceInstance?: number,
     estimatedAU?: number,
-    environment?: import('../models/types').TaskEnvironment
+    environment?: import('../models/types').TaskEnvironment,
+    cognitiveDemand?: import('../models/types').CognitiveDemand,
+    nodeType: import('../models/types').NodeType = 'standard'
   ): StandaloneTask {
     const now = new Date().toISOString();
     let parentRecurringTaskId: string | undefined;
@@ -135,6 +137,8 @@ export class MyDayService {
       ...(recurrenceInstance ? { recurrenceInstance } : {}),
       ...(finalEstimatedAU !== undefined ? { estimatedAU: finalEstimatedAU } : {}),
       ...(environment ? { environment } : {}),
+      ...(cognitiveDemand ? { cognitiveDemand } : {}),
+      nodeType,
       createdAt: now,
       updatedAt: now,
     };

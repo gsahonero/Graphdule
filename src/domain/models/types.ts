@@ -4,6 +4,8 @@ export type TaskEnvironment = 'computer' | 'physical' | 'mixed';
 export type { HealthConfig } from '../health/types';
 
 export type NodeStatus = 'planned' | 'in_progress' | 'completed' | 'abandoned';
+export type CognitiveDemand = 'low' | 'medium' | 'high';
+export type NodeType = 'standard' | 'spike';
 export type ProjectStatus = 'active' | 'parked' | 'archived' | 'completed' | 'abandoned';
 
 export type ProjectColor =
@@ -66,6 +68,8 @@ export interface Node {
   readonly position?: { readonly x: number; readonly y: number };
   readonly estimatedAU?: number;
   readonly environment?: TaskEnvironment;
+  readonly cognitiveDemand?: CognitiveDemand;
+  readonly nodeType?: NodeType;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -142,6 +146,8 @@ export interface StandaloneTask {
   readonly parentRecurringTaskId?: string;
   readonly estimatedAU?: number;
   readonly environment?: TaskEnvironment;
+  readonly cognitiveDemand?: CognitiveDemand;
+  readonly nodeType?: NodeType;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -156,7 +162,7 @@ export interface IdeaSeed {
   readonly updatedAt: string;
 }
 
-export type WorkSessionType = 'execution' | 'planning';
+export type WorkSessionType = 'execution' | 'planning' | 'recovery';
 
 export const ACTIVITY_EVENT_TYPES = [
   'task_created',
@@ -325,6 +331,15 @@ export type ColorPaletteId =
   | 'teal'
   | 'minimal';
 
+export interface BonsaiState {
+  readonly growthPoints: number;
+  readonly stage: number; // 0: Seedling, 1: Sprout, 2: Sapling, 3: Cultivated, 4: Ancient
+  readonly leavesCount: number;
+  readonly blossomCount: number;
+  readonly recentProjectColors?: readonly string[];
+  readonly lastWateredDate: string;
+}
+
 export interface UserPreferences {
   readonly myDayMode: 'today' | 'current_tasks';
   readonly theme: 'dark' | 'light' | 'system';
@@ -344,6 +359,9 @@ export interface UserPreferences {
   readonly myDayViewLayout?: 'stream' | 'bimodal';
   readonly capacityConfig?: DailyCapacityConfig;
   readonly healthConfig?: HealthConfig;
+  readonly bonsai?: BonsaiState;
+  readonly bonsaiEnabled?: boolean;
+  readonly bonsaiPlacement?: 'my_day' | 'header' | 'receipt_only';
 }
 
 export interface ProjectSummary {

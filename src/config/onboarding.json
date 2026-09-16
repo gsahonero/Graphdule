@@ -25,6 +25,19 @@
       ]
     },
     {
+      "id": "cognitive-support",
+      "title": "Rolling-Wave Graphing & Cognitive Rhythm",
+      "description": "Graphdule protects your attention. Rapidly branch tasks with Tab (child) & Enter (sibling). Mark exploration tasks as Spikes to discover next steps. Take intentional recovery breaks and watch your zero-shame Bonsai flourish with sustained focus.",
+      "target": "nav-projects",
+      "badge": "Cognitive Support",
+      "highlights": [
+        "Rapid keyboard branching: Tab for child, Enter for sibling (<6s)",
+        "Spike nodes for timeboxed discovery and research",
+        "Intentional recovery curtain and post-task calibration receipts",
+        "Non-punitive Bonsai companion reflecting sustained momentum"
+      ]
+    },
+    {
       "id": "my-day",
       "title": "My Day Execution & Recurrence",
       "description": "Focus on what matters today. Combine active project tasks with standalone recurring work (daily, weekly, monthly) and toggle between 'Today' and 'Current Active' tasks.",

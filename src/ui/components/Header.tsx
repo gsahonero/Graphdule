@@ -20,6 +20,7 @@ import {
   Palette,
 } from 'lucide-react';
 import { SyncStatusIndicator } from './SyncStatusIndicator';
+import { BonsaiCompanion } from './BonsaiCompanion';
 
 export const Header: React.FC = () => {
   const {
@@ -200,6 +201,18 @@ export const Header: React.FC = () => {
 
       {/* Storage & Tools */}
       <div className="flex items-center space-x-1 sm:space-x-2 shrink-0">
+        {/* Bonsai Companion in Header if placement configured */}
+        {preferences.bonsaiEnabled !== false && preferences.bonsaiPlacement === 'header' && (
+          <div className="hidden sm:flex items-center mr-1">
+            <BonsaiCompanion
+              state={preferences.bonsai}
+              variant={activeWorkSession?.sessionType === 'recovery' ? 'resting' : activeWorkSession ? 'focusing' : 'idle'}
+              size="sm"
+              showDetails={false}
+            />
+          </div>
+        )}
+
         {/* Unified Cloud & Calendar Sync status indicator (always visible) */}
         <SyncStatusIndicator />
 

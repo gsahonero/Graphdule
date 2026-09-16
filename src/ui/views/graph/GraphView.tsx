@@ -32,7 +32,7 @@ import {
   LayoutDirection,
   LayoutMode,
 } from './layout';
-import { Node, NodeStatus, TaskEnvironment } from '../../../domain/models/types';
+import { Node, NodeStatus, TaskEnvironment, NodeType, CognitiveDemand } from '../../../domain/models/types';
 import { ProjectService } from '../../../domain/services/project-service';
 import { GraphService } from '../../../domain/services/graph-service';
 import { addDays } from '../../../domain/utils/date';
@@ -1082,6 +1082,99 @@ const GraphCanvas: React.FC = () => {
     }
   };
 
+  // Quick-Append Child Node (Tab key or action)
+  const handleQuickAppendChild = useCallback(
+    async (sourceNode: Node) => {
+      if (!activeProjectDoc) return;
+      const parentId = currentParentNode ? currentParentNode.id : null;
+      const sourcePos = sourceNode.position || { x: 100, y: 100 };
+      const newPos =
+        layoutDir === 'TB'
+          ? { x: sourcePos.x, y: sourcePos.y + 190 }
+          : { x: sourcePos.x + 320, y: sourcePos.y };
+
+      const defaultDueDate = '';
+      const newNode = await addNode(
+        'New Task',
+        defaultDueDate,
+        parentId,
+        newPos,
+        undefined,
+        undefined,
+        sourceNode.cognitiveDemand,
+        'standard'
+      );
+      if (newNode) {
+        await addEdge(sourceNode.id, newNode.id);
+        lastFocusedNodeIdRef.current = newNode.id;
+        setSelectedNode(newNode);
+      }
+    },
+    [activeProjectDoc, currentParentNode, layoutDir, addNode, addEdge, setSelectedNode]
+  );
+
+  // Quick-Append Sibling Node (Enter key or action)
+  const handleQuickAppendSibling = useCallback(
+    async (sourceNode: Node) => {
+      if (!activeProjectDoc) return;
+      const parentId = currentParentNode ? currentParentNode.id : null;
+      const sourcePos = sourceNode.position || { x: 100, y: 100 };
+      const newPos =
+        layoutDir === 'TB'
+          ? { x: sourcePos.x + 290, y: sourcePos.y }
+          : { x: sourcePos.x, y: sourcePos.y + 170 };
+
+      const defaultDueDate = '';
+      const newNode = await addNode(
+        'New Task',
+        defaultDueDate,
+        parentId,
+        newPos,
+        undefined,
+        undefined,
+        sourceNode.cognitiveDemand,
+        'standard'
+      );
+      if (newNode) {
+        // Connect from the same predecessor(s) as sourceNode
+        const incomingEdges = activeProjectDoc.edges.filter((e) => e.toNodeId === sourceNode.id);
+        for (const inEdge of incomingEdges) {
+          await addEdge(inEdge.fromNodeId, newNode.id);
+        }
+        lastFocusedNodeIdRef.current = newNode.id;
+        setSelectedNode(newNode);
+      }
+    },
+    [activeProjectDoc, currentParentNode, layoutDir, addNode, addEdge, setSelectedNode]
+  );
+
+  // Canvas Keyboard Shortcuts (Tab -> Child, Enter -> Sibling)
+  useEffect(() => {
+    const handleCanvasKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      if (
+        activeEl &&
+        (activeEl.tagName === 'INPUT' ||
+          activeEl.tagName === 'TEXTAREA' ||
+          (activeEl as HTMLElement).isContentEditable)
+      ) {
+        return;
+      }
+      if (!selectedNode || isWholeProjectView) return;
+
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        handleQuickAppendChild(selectedNode);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        handleQuickAppendSibling(selectedNode);
+      }
+    };
+
+    window.addEventListener('keydown', handleCanvasKeyDown);
+    return () => window.removeEventListener('keydown', handleCanvasKeyDown);
+  }, [selectedNode, isWholeProjectView, handleQuickAppendChild, handleQuickAppendSibling]);
+
   // Right-click on canvas pane to create node directly at cursor location
   const handlePaneContextMenu = async (event: MouseEvent | React.MouseEvent) => {
     event.preventDefault();
@@ -1224,6 +1317,10 @@ const GraphCanvas: React.FC = () => {
               deleteNode(nodeObj.id);
             },
         onDrillDown: isEGN ? undefined : () => handleDrillDown(nodeObj),
+        onQuickAppendChild: () => handleQuickAppendChild(nodeObj),
+        onQuickAppendSibling: () => handleQuickAppendSibling(nodeObj),
+        onNodeTypeChange: (type: NodeType) => updateNode({ ...nodeObj, nodeType: type }),
+        onCognitiveDemandChange: (demand: CognitiveDemand) => updateNode({ ...nodeObj, cognitiveDemand: demand }),
       };
 
       const isSelected = selectedNode?.id === nodeObj.id;
@@ -1254,6 +1351,8 @@ const GraphCanvas: React.FC = () => {
     handleDrillDown,
     isWholeProjectView,
     criticalPath,
+    handleQuickAppendChild,
+    handleQuickAppendSibling,
   ]);
 
   const decoratedEdges = useMemo(() => {

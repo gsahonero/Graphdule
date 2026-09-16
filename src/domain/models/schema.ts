@@ -4,6 +4,8 @@ import { TaskEnvironmentSchema, HealthConfigSchema } from '../health/schema';
 export { TaskEnvironmentSchema, HealthConfigSchema };
 
 export const NodeStatusSchema = z.enum(['planned', 'in_progress', 'completed', 'abandoned']);
+export const CognitiveDemandSchema = z.enum(['low', 'medium', 'high']);
+export const NodeTypeSchema = z.enum(['standard', 'spike']);
 export const ProjectStatusSchema = z.enum(['active', 'parked', 'archived', 'completed', 'abandoned']);
 
 export const ProjectColorSchema = z.enum([
@@ -71,6 +73,8 @@ export const NodeSchema = z.object({
   }).optional(),
   estimatedAU: z.number().nonnegative().optional(),
   environment: TaskEnvironmentSchema.optional(),
+  cognitiveDemand: CognitiveDemandSchema.optional(),
+  nodeType: NodeTypeSchema.optional().default('standard'),
   createdAt: z.string(),
   updatedAt: z.string(),
 }).passthrough();
@@ -137,13 +141,15 @@ export const StandaloneTaskSchema = z.object({
   parentRecurringTaskId: z.string().optional(),
   estimatedAU: z.number().nonnegative().optional(),
   environment: TaskEnvironmentSchema.optional(),
+  cognitiveDemand: CognitiveDemandSchema.optional(),
+  nodeType: NodeTypeSchema.optional().default('standard'),
   createdAt: z.string(),
   updatedAt: z.string(),
 }).passthrough();
 
 export const ActiveWorkSessionSchema = z.object({
   sessionId: z.string().min(1),
-  sessionType: z.enum(['execution', 'planning']).optional().default('execution'),
+  sessionType: z.enum(['execution', 'planning', 'recovery']).optional().default('execution'),
   taskId: z.string().min(1),
   taskText: z.string(),
   projectId: z.string().optional(),
@@ -152,6 +158,15 @@ export const ActiveWorkSessionSchema = z.object({
   lastResumedAt: z.string().optional(),
   accumulatedSecondsBeforeResume: z.number().nonnegative().optional(),
   isPaused: z.boolean().optional(),
+}).passthrough();
+
+export const BonsaiStateSchema = z.object({
+  growthPoints: z.number().nonnegative(),
+  stage: z.number().int().min(0).max(4),
+  leavesCount: z.number().int().nonnegative(),
+  blossomCount: z.number().int().nonnegative(),
+  recentProjectColors: z.array(z.string()).optional(),
+  lastWateredDate: z.string(),
 }).passthrough();
 
 export const UserPreferencesSchema = z.object({
@@ -173,8 +188,12 @@ export const UserPreferencesSchema = z.object({
   weeklyPlannedAU: z.number().nonnegative().optional(),
   activeWorkSession: ActiveWorkSessionSchema.nullable().optional(),
   idleSyncIntervalMinutes: z.number().int().positive().optional().default(15),
+  myDayViewLayout: z.enum(['stream', 'bimodal']).optional().default('bimodal'),
   capacityConfig: z.lazy(() => DailyCapacityConfigSchema).optional(),
   healthConfig: HealthConfigSchema.optional(),
+  bonsai: BonsaiStateSchema.optional(),
+  bonsaiEnabled: z.boolean().optional().default(true),
+  bonsaiPlacement: z.enum(['my_day', 'header', 'receipt_only']).optional().default('my_day'),
 }).passthrough();
 
 export const IdeaSeedSchema = z.object({

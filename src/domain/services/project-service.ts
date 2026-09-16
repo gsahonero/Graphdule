@@ -10,6 +10,8 @@ import {
   Note,
   ProjectNote,
   TaskEnvironment,
+  CognitiveDemand,
+  NodeType,
 } from '../models/types';
 import { getTodayString, isAfter } from '../utils/date';
 import { GraphService } from './graph-service';
@@ -90,7 +92,9 @@ export class ProjectService {
     parentNodeId: string | null = null,
     position?: { x: number; y: number },
     estimatedAU?: number,
-    environment?: TaskEnvironment
+    environment?: TaskEnvironment,
+    cognitiveDemand?: CognitiveDemand,
+    nodeType: NodeType = 'standard'
   ): Node {
     const now = new Date().toISOString();
     return {
@@ -103,6 +107,8 @@ export class ProjectService {
       position,
       estimatedAU,
       environment,
+      cognitiveDemand,
+      nodeType,
       createdAt: now,
       updatedAt: now,
     };

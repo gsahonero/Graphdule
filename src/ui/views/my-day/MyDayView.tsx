@@ -4,6 +4,8 @@ import { MyDayService } from '../../../domain/services/my-day-service';
 import { getTodayString, isBefore, isAfter, daysBetween } from '../../../domain/utils/date';
 import { CalendarPicker } from '../../components/CalendarPicker';
 import { RecurrencePicker } from '../../components/RecurrencePicker';
+import { TaskTriageModal, TriageTaskItem } from '../../components/TaskTriageModal';
+import { BonsaiCompanion } from '../../components/BonsaiCompanion';
 import {
   Sun,
   CheckCircle2,
@@ -88,6 +90,7 @@ export const MyDayView: React.FC = () => {
     activityLog,
     updateTaskEstimate,
     openWorkSessionsModal,
+    activeWorkSession,
   } = useApp();
 
   const [newStandaloneText, setNewStandaloneText] = useState('');
@@ -122,6 +125,8 @@ export const MyDayView: React.FC = () => {
   const [isLateTasksOpen, setIsLateTasksOpen] = useState(false);
   const [activeCalendarLateId, setActiveCalendarLateId] = useState<string | null>(null);
   const [activeCalendarTodayProjectId, setActiveCalendarTodayProjectId] = useState<string | null>(null);
+  const [triageTasks, setTriageTasks] = useState<TriageTaskItem[]>([]);
+  const [isTriageModalOpen, setIsTriageModalOpen] = useState(false);
 
   // Attention-only filter for project tasks
   const [attentionOnlyFilter, setAttentionOnlyFilter] = useState(false);
@@ -352,6 +357,42 @@ export const MyDayView: React.FC = () => {
         await moveNodeDate(task.id, today, true);
       } else {
         await updateStandaloneTask({ ...(task as StandaloneTask), dueDate: today });
+      }
+    }
+    await refreshData();
+  };
+
+  const handleOpenTriageAllLate = () => {
+    const items: TriageTaskItem[] = [
+      ...displayLateProjectTasks.map((t) => ({
+        id: t.id,
+        text: t.text,
+        dueDate: t.dueDate,
+        projectId: t.projectId,
+        isNode: true,
+      })),
+      ...lateStandaloneTasks.map((t) => ({
+        id: t.id,
+        text: t.text,
+        dueDate: t.dueDate,
+        projectId: 'standalone',
+        isNode: false,
+      })),
+    ];
+    setTriageTasks(items);
+    setIsTriageModalOpen(true);
+  };
+
+  const handleApplyTriageDelay = async (taskIds: string[], newDate: string, cascade: boolean) => {
+    for (const taskId of taskIds) {
+      const isStandalone = standaloneTasks.some((t) => t.id === taskId);
+      if (isStandalone) {
+        const target = standaloneTasks.find((t) => t.id === taskId);
+        if (target) {
+          await updateStandaloneTask({ ...target, dueDate: newDate });
+        }
+      } else {
+        await moveNodeDate(taskId, newDate, !cascade);
       }
     }
     await refreshData();
@@ -2208,6 +2249,18 @@ export const MyDayView: React.FC = () => {
             </p>
           </div>
 
+          {/* Bonsai Companion */}
+          {preferences.bonsaiEnabled !== false && (preferences.bonsaiPlacement === 'my_day' || !preferences.bonsaiPlacement) && (
+            <div className="hidden sm:flex items-center">
+              <BonsaiCompanion
+                state={preferences.bonsai}
+                variant={activeWorkSession?.sessionType === 'recovery' ? 'resting' : activeWorkSession ? 'focusing' : 'idle'}
+                size="sm"
+                showDetails={true}
+              />
+            </div>
+          )}
+
           {/* Right Header Controls: G-Calendar, Force Refresh & Mode Toggle */}
           <div className="flex flex-wrap items-center gap-2">
             {/* Quick Google Calendar Button */}
@@ -2505,6 +2558,17 @@ export const MyDayView: React.FC = () => {
                 <CalendarCheck className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Reschedule All to Today</span>
                 <span className="sm:hidden">All to Today</span>
+              </button>
+
+              {/* Triage Overdue Tasks Modal Trigger */}
+              <button
+                type="button"
+                onClick={handleOpenTriageAllLate}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-all cursor-pointer shadow-xs"
+                title="Open triage modal to postpone overdue tasks with presets (+1 Day, +3 Days, Next Monday)"
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span>Triage Overdue</span>
               </button>
             </div>
           </div>
@@ -3040,6 +3104,14 @@ export const MyDayView: React.FC = () => {
           )}
         </div>
       )}
+
+      {/* Triage & Postpone Modal */}
+      <TaskTriageModal
+        isOpen={isTriageModalOpen}
+        onClose={() => setIsTriageModalOpen(false)}
+        tasks={triageTasks}
+        onApplyDelay={handleApplyTriageDelay}
+      />
     </div>
   );
 };

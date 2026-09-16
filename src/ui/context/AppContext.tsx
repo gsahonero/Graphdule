@@ -23,6 +23,8 @@ import {
   TaskEnvironment,
   HealthConfig,
   ColorPaletteId,
+  CognitiveDemand,
+  NodeType,
 } from '../../domain/models/types';
 import { normalizeEventType } from '../../domain/models/schema';
 import {
@@ -41,6 +43,8 @@ import { MyDayService } from '../../domain/services/my-day-service';
 import { RecurrenceService } from '../../domain/services/recurrence-service';
 import { ActivityLogService } from '../../domain/services/activity-log-service';
 import { AttentionService } from '../../domain/services/attention-service';
+import { BonsaiService, DEFAULT_BONSAI_STATE } from '../../domain/services/bonsai-service';
+import { PostTaskReceiptData } from '../components/PostTaskReceiptModal';
 import {
   CapacityService,
   DEFAULT_CAPACITY_CONFIG,
@@ -104,7 +108,7 @@ interface AppContextType {
   archiveProject: (projectId: string, reason?: ProjectStatus) => Promise<void>;
   unarchiveProject: (projectId: string) => Promise<void>;
   deleteProject: (projectId: string) => Promise<void>;
-  addNode: (text: string, dueDate?: string, parentNodeId?: string | null, position?: { x: number; y: number }, estimatedAU?: number, environment?: TaskEnvironment) => Promise<Node | null>;
+  addNode: (text: string, dueDate?: string, parentNodeId?: string | null, position?: { x: number; y: number }, estimatedAU?: number, environment?: TaskEnvironment, cognitiveDemand?: CognitiveDemand, nodeType?: NodeType) => Promise<Node | null>;
   updateNode: (node: Node) => Promise<void>;
   deleteNode: (nodeId: string) => Promise<void>;
   updateNodePositions: (positions: { id: string; position: { x: number; y: number } }[]) => Promise<void>;
@@ -134,7 +138,7 @@ interface AppContextType {
   redo: () => Promise<void>;
 
   // Standalone Tasks
-  addStandaloneTask: (text: string, dueDate?: string, recurrence?: RecurrenceRule, estimatedAU?: number, environment?: TaskEnvironment) => Promise<void>;
+  addStandaloneTask: (text: string, dueDate?: string, recurrence?: RecurrenceRule, estimatedAU?: number, environment?: TaskEnvironment, cognitiveDemand?: CognitiveDemand, nodeType?: NodeType) => Promise<void>;
   updateStandaloneTask: (task: StandaloneTask) => Promise<void>;
   updateStandaloneTaskStatus: (taskId: string, status: NodeStatus) => Promise<void>;
   deleteStandaloneTask: (taskId: string) => Promise<void>;
@@ -229,6 +233,16 @@ interface AppContextType {
   setIsWholeProjectView: (val: boolean) => void;
   toggleWholeProjectView: () => void;
 
+  // Intentional Recovery & Calibration Receipt
+  startRecoverySession: (targetMinutes?: number | null) => Promise<void>;
+  recoveryTargetMinutes: number | null;
+  isRecoveryCurtainOpen: boolean;
+  openRecoveryCurtain: () => void;
+  closeRecoveryCurtain: () => void;
+  receiptModalData: PostTaskReceiptData | null;
+  isReceiptModalOpen: boolean;
+  closeReceiptModal: () => void;
+
   // Daily AU Capacity & Reality Check
   capacityConfig: DailyCapacityConfig;
   capacitySnapshots: DailyCapacitySnapshot[];
@@ -315,6 +329,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
   const [activeWorkElapsedSeconds, setActiveWorkElapsedSeconds] = useState<number>(0);
   const [attentionReviews, setAttentionReviews] = useState<WeeklyAttentionReviewRecord[]>([]);
+
+  // Intentional Recovery & Calibration Receipt states
+  const [recoveryTargetMinutes, setRecoveryTargetMinutes] = useState<number | null>(null);
+  const [isRecoveryCurtainOpen, setIsRecoveryCurtainOpen] = useState<boolean>(false);
+  const [receiptModalData, setReceiptModalData] = useState<PostTaskReceiptData | null>(null);
+  const [isReceiptModalOpen, setIsReceiptModalOpen] = useState<boolean>(false);
 
   // Daily AU Capacity & Reality Check states
   const [capacitySnapshots, setCapacitySnapshots] = useState<DailyCapacitySnapshot[]>([]);
@@ -2046,7 +2066,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       parentNodeId?: string | null,
       position?: { x: number; y: number },
       estimatedAU?: number,
-      environment?: TaskEnvironment
+      environment?: TaskEnvironment,
+      cognitiveDemand?: CognitiveDemand,
+      nodeType?: NodeType
     ): Promise<Node | null> => {
       if (!activeProjectDoc) return null;
       const effectiveDueDate = dueDate ?? '';
@@ -2057,7 +2079,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         parentNodeId,
         position,
         estimatedAU,
-        environment
+        environment,
+        cognitiveDemand,
+        nodeType || 'standard'
       );
       const updatedDoc: ProjectDocument = {
         ...activeProjectDoc,
@@ -2499,6 +2523,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     ]
   );
 
+  const startRecoverySession = useCallback(
+    async (targetMinutes?: number | null) => {
+      if (activeWorkSession) {
+        await stopWork();
+      }
+      const sessionId = `rec_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const startedAt = new Date().toISOString();
+      const taskText =
+        targetMinutes && targetMinutes > 0
+          ? `Recovery Break (${targetMinutes}m)`
+          : 'Intentional Recovery';
+
+      const newSession: ActiveWorkSession = {
+        sessionId,
+        taskId: 'intentional-recovery',
+        taskText,
+        sessionType: 'recovery',
+        startedAt,
+        accumulatedSecondsBeforeResume: 0,
+        isPaused: false,
+      };
+
+      activeWorkSessionRef.current = newSession;
+      setActiveWorkSession(newSession);
+      setRecoveryTargetMinutes(targetMinutes ?? null);
+      setIsRecoveryCurtainOpen(true);
+      try {
+        localStorage.setItem('graphdule_active_work_session', JSON.stringify(newSession));
+      } catch {
+        // ignore
+      }
+      await updatePreferences({ activeWorkSession: newSession });
+    },
+    [activeWorkSession, stopWork, updatePreferences]
+  );
+
   const moveNodeDate = useCallback(
     async (nodeId: string, newDueDate: string, force = false) => {
       if (activeProjectDoc) {
@@ -2881,9 +2941,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const addStandaloneTask = useCallback(
-    async (text: string, dueDate?: string, recurrence?: RecurrenceRule, estimatedAU?: number, environment?: TaskEnvironment) => {
+    async (
+      text: string,
+      dueDate?: string,
+      recurrence?: RecurrenceRule,
+      estimatedAU?: number,
+      environment?: TaskEnvironment,
+      cognitiveDemand?: CognitiveDemand,
+      nodeType?: NodeType
+    ) => {
       const targetDate = dueDate ?? '';
-      const newTask = MyDayService.createStandaloneTask(text, targetDate, recurrence, undefined, undefined, estimatedAU, environment);
+      const newTask = MyDayService.createStandaloneTask(
+        text,
+        targetDate,
+        recurrence,
+        undefined,
+        undefined,
+        estimatedAU,
+        environment,
+        cognitiveDemand,
+        nodeType || 'standard'
+      );
       const updated = [...standaloneTasks, newTask];
       await storage.writeStandaloneTasks(updated);
       setStandaloneTasks(updated);
@@ -3049,13 +3127,61 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const session = activeWorkSessionRef.current || activeWorkSession;
     if (!session) return;
     const { taskId, projectId } = session;
+    const elapsedSeconds = activeWorkElapsedSeconds;
     await stopWork();
     if (projectId === 'standalone' || standaloneTasks.some((t) => t.id === taskId)) {
       await updateStandaloneTaskStatus(taskId, 'completed');
     } else {
       await updateNodeStatus(taskId, 'completed');
     }
-  }, [activeWorkSession, stopWork, standaloneTasks, updateStandaloneTaskStatus, updateNodeStatus]);
+
+    // Calculate actual AU and minutes
+    const actualMinutes = Math.max(1, Math.round(elapsedSeconds / 60));
+    const actualAU = AttentionService.minutesToAU(actualMinutes, attentionUnitMinutes);
+
+    // Find predicted AU from node or standalone task
+    const targetTask =
+      standaloneTasks.find((t) => t.id === taskId) ||
+      activeProjectDoc?.nodes.find((n) => n.id === taskId) ||
+      allActiveNodes.find((n) => n.id === taskId);
+    const predictedAU = targetTask?.estimatedAU;
+
+    // Bonsai progression calculation
+    const currentBonsai = preferences.bonsai || DEFAULT_BONSAI_STATE;
+    const projectColor = activeProjectDoc?.project?.style?.color;
+    const { nextState, pointsEarned, didAdvanceStage } = BonsaiService.calculateGrowth(
+      currentBonsai,
+      actualAU,
+      projectColor
+    );
+    await updatePreferences({ bonsai: nextState });
+
+    // Open Post-Task Calibration Receipt Modal
+    setReceiptModalData({
+      taskId,
+      taskText: session.taskText,
+      projectId,
+      predictedAU,
+      actualAU,
+      actualMinutes,
+      pointsEarned,
+      newStage: nextState.stage,
+      didAdvanceStage,
+    });
+    setIsReceiptModalOpen(true);
+  }, [
+    activeWorkSession,
+    activeWorkElapsedSeconds,
+    attentionUnitMinutes,
+    stopWork,
+    standaloneTasks,
+    activeProjectDoc,
+    allActiveNodes,
+    preferences.bonsai,
+    updatePreferences,
+    updateStandaloneTaskStatus,
+    updateNodeStatus,
+  ]);
 
   const capacityConfig: DailyCapacityConfig = useMemo(
     () => preferences.capacityConfig || DEFAULT_CAPACITY_CONFIG,
@@ -3672,6 +3798,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isWholeProjectView,
         setIsWholeProjectView,
         toggleWholeProjectView,
+        startRecoverySession,
+        recoveryTargetMinutes,
+        isRecoveryCurtainOpen,
+        openRecoveryCurtain: () => setIsRecoveryCurtainOpen(true),
+        closeRecoveryCurtain: () => setIsRecoveryCurtainOpen(false),
+        receiptModalData,
+        isReceiptModalOpen,
+        closeReceiptModal: () => setIsReceiptModalOpen(false),
         capacityConfig,
         capacitySnapshots,
         isCapacityConfigModalOpen,

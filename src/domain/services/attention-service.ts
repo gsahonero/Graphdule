@@ -25,6 +25,13 @@ export class AttentionService {
   }
 
   /**
+   * Convert duration in minutes to Attention Units (AU) based on configurable auMinutes (default: 15).
+   */
+  public static minutesToAU(minutes: number, auMinutes: number = 15): number {
+    return this.durationSecondsToAU(minutes * 60, auMinutes);
+  }
+
+  /**
    * Format AU into human-readable label with equivalent real time (e.g., '2 AU (30m)' or '4 AU (1h)').
    */
   public static formatAU(au: number, auMinutes: number = 15): string {

@@ -14,6 +14,7 @@ import {
   Heart,
   Sparkles,
   Trash2,
+  Coffee,
 } from 'lucide-react';
 import {
   requestPictureInPictureWindow,
@@ -33,6 +34,8 @@ export const ActiveWorkBar: React.FC = () => {
     completeAndStopWork,
     stopProjectPlanning,
     discardActiveWorkSession,
+    startRecoverySession,
+    openRecoveryCurtain,
     planningToast,
     dismissPlanningToast,
     attentionUnitMinutes,
@@ -46,6 +49,8 @@ export const ActiveWorkBar: React.FC = () => {
     acknowledgeHealthIntervention,
     dismissHealthIntervention,
   } = useApp();
+
+  const [isBreakMenuOpen, setIsBreakMenuOpen] = useState(false);
 
   // Position & Dragging State
   const [position, setPosition] = useState<{ x: number; y: number } | null>(() => {
@@ -273,6 +278,7 @@ export const ActiveWorkBar: React.FC = () => {
   const clampedProgressWidth = progressPercent !== null ? Math.min(100, Math.max(0, progressPercent)) : null;
   const isOverEstimated = progressRatio !== null && progressRatio > 1.0;
   const isPlanning = activeWorkSession?.sessionType === 'planning';
+  const isRecovery = activeWorkSession?.sessionType === 'recovery';
 
   const handleNavigateToTask = () => {
     if (typeof window !== 'undefined' && window.focus) {
@@ -853,6 +859,28 @@ export const ActiveWorkBar: React.FC = () => {
                 <span className="hidden sm:inline">Discard</span>
               </button>
             </>
+          ) : isRecovery ? (
+            <>
+              {/* Expand Rest Screen */}
+              <button
+                onClick={() => openRecoveryCurtain()}
+                className="p-1.5 sm:px-2.5 bg-emerald-600/90 hover:bg-emerald-500 active:scale-95 text-white rounded-lg transition-all flex items-center gap-1 text-xs font-medium shadow-sm cursor-pointer"
+                title="Expand recovery rest curtain"
+              >
+                <Coffee className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Rest Screen</span>
+              </button>
+
+              {/* End Break */}
+              <button
+                onClick={() => stopWork()}
+                className="p-1.5 sm:px-2 bg-slate-700 hover:bg-slate-600 active:scale-95 text-white rounded-lg transition-all flex items-center gap-1 text-xs font-medium shadow-sm cursor-pointer"
+                title="End recovery break"
+              >
+                <Square className="w-3.5 h-3.5 fill-current" />
+                <span className="hidden sm:inline">End Break</span>
+              </button>
+            </>
           ) : (
             <>
               {/* Complete & Stop */}
@@ -865,6 +893,71 @@ export const ActiveWorkBar: React.FC = () => {
                 <span className="hidden sm:inline md:hidden">Done</span>
                 <span className="hidden md:inline">Complete & Stop</span>
               </button>
+
+              {/* Take a Break Button with Presets Dropdown */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsBreakMenuOpen((prev) => !prev)}
+                  className="p-1.5 sm:px-2 bg-amber-600/90 hover:bg-amber-500 active:scale-95 text-white rounded-lg transition-all flex items-center gap-1 text-xs font-medium shadow-sm cursor-pointer"
+                  title="Take an intentional recovery break"
+                >
+                  <Coffee className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Break</span>
+                </button>
+
+                {isBreakMenuOpen && (
+                  <div className="absolute bottom-full right-0 mb-2 w-44 bg-slate-900 border border-slate-700 rounded-xl shadow-xl p-1.5 z-50 text-xs space-y-1 animate-in fade-in zoom-in-95 duration-100">
+                    <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      Recovery Break
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsBreakMenuOpen(false);
+                        startRecoverySession(15);
+                      }}
+                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-200 hover:text-emerald-400 transition-colors flex items-center justify-between cursor-pointer"
+                    >
+                      <span>15m Quick Rest</span>
+                      <span className="text-[10px] opacity-60">15m</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsBreakMenuOpen(false);
+                        startRecoverySession(30);
+                      }}
+                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-200 hover:text-emerald-400 transition-colors flex items-center justify-between cursor-pointer"
+                    >
+                      <span>30m Deep Rest</span>
+                      <span className="text-[10px] opacity-60">30m</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsBreakMenuOpen(false);
+                        startRecoverySession(60);
+                      }}
+                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-200 hover:text-emerald-400 transition-colors flex items-center justify-between cursor-pointer"
+                    >
+                      <span>60m Meal / Walk</span>
+                      <span className="text-[10px] opacity-60">60m</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsBreakMenuOpen(false);
+                        startRecoverySession(null);
+                      }}
+                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-200 hover:text-emerald-400 transition-colors flex items-center justify-between border-t border-slate-800 pt-1.5 cursor-pointer"
+                    >
+                      <span>Open-ended</span>
+                      <span className="text-[10px] opacity-60">∞</span>
+                    </button>
+                  </div>
+                )}
+              </div>
 
               {/* Stop Clock */}
               <button

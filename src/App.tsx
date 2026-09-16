@@ -17,10 +17,23 @@ import { CapacityConfigModal } from './ui/components/CapacityConfigModal';
 import { WeeklyCapacityModal } from './ui/components/WeeklyCapacityModal';
 import { HealthConfigModal } from './ui/components/HealthConfigModal';
 import { AppearanceModal } from './ui/components/AppearanceModal';
+import { PostTaskReceiptModal } from './ui/components/PostTaskReceiptModal';
+import { RecoveryCurtainModal } from './ui/components/RecoveryCurtainModal';
 import { BottomNav } from './ui/components/BottomNav';
 
 const AppContent: React.FC = () => {
-  const { currentView } = useApp();
+  const {
+    currentView,
+    preferences,
+    isReceiptModalOpen,
+    closeReceiptModal,
+    receiptModalData,
+    isRecoveryCurtainOpen,
+    closeRecoveryCurtain,
+    recoveryTargetMinutes,
+    stopWork,
+    activeWorkElapsedSeconds,
+  } = useApp();
 
   return (
     <div className="h-[100dvh] min-h-[100dvh] w-screen flex flex-col dark:bg-slate-950 dark:text-slate-100 bg-slate-100 text-slate-900 overflow-hidden select-none transition-colors duration-150">
@@ -49,6 +62,22 @@ const AppContent: React.FC = () => {
       <WeeklyCapacityModal />
       <HealthConfigModal />
       <AppearanceModal />
+      <PostTaskReceiptModal
+        isOpen={isReceiptModalOpen}
+        onClose={closeReceiptModal}
+        data={receiptModalData}
+        bonsaiEnabled={preferences.bonsaiEnabled !== false}
+      />
+      <RecoveryCurtainModal
+        isOpen={isRecoveryCurtainOpen}
+        elapsedSeconds={activeWorkElapsedSeconds}
+        targetMinutes={recoveryTargetMinutes}
+        onEndRecovery={() => {
+          closeRecoveryCurtain();
+          stopWork();
+        }}
+        onMinimize={closeRecoveryCurtain}
+      />
     </div>
   );
 };

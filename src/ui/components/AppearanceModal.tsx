@@ -227,6 +227,58 @@ export const AppearanceModal: React.FC = () => {
             </div>
           </div>
 
+          {/* Cognitive Companion (Bonsai) Settings */}
+          <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Bonsai Growth Companion
+                </h3>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Zero-shame, non-punitive focus companion reflecting sustained momentum
+                </p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={preferences.bonsaiEnabled !== false}
+                  onChange={async (e) => {
+                    await updatePreferences({ bonsaiEnabled: e.target.checked });
+                  }}
+                  className="sr-only peer"
+                />
+                <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-slate-600 peer-checked:bg-emerald-600" />
+              </label>
+            </div>
+
+            {preferences.bonsaiEnabled !== false && (
+              <div className="grid grid-cols-3 gap-2 pt-1">
+                {(
+                  [
+                    { id: 'my_day', label: 'My Day' },
+                    { id: 'header', label: 'Top Nav' },
+                    { id: 'receipt_only', label: 'Receipts Only' },
+                  ] as const
+                ).map((placement) => (
+                  <button
+                    key={placement.id}
+                    type="button"
+                    onClick={async () => {
+                      await updatePreferences({ bonsaiPlacement: placement.id });
+                    }}
+                    className={`py-1.5 px-2 text-xs rounded-lg border text-center transition-all cursor-pointer ${
+                      (preferences.bonsaiPlacement || 'my_day') === placement.id
+                        ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-500 text-emerald-700 dark:text-emerald-300 font-semibold shadow-xs'
+                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    {placement.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Live Interactive Preview Card */}
           <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800/80">
             <div className="flex items-center space-x-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300">

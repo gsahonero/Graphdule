@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Handle, Position, NodeProps, useViewport } from '@xyflow/react';
-import { Node, NodeStatus, TaskEnvironment } from '../../../domain/models/types';
+import { Node, NodeStatus, TaskEnvironment, NodeType, CognitiveDemand } from '../../../domain/models/types';
 import { useApp } from '../../context/AppContext';
 import { CalendarPicker } from '../../components/CalendarPicker';
 import {
@@ -16,6 +16,9 @@ import {
   RotateCcw,
   Edit2,
   Trash2,
+  Compass,
+  Sparkles,
+  Plus,
 } from 'lucide-react';
 import { WorkButton } from '../../components/WorkButton';
 import { AttentionUnitInput } from '../../components/AttentionUnitInput';
@@ -42,6 +45,10 @@ export interface GraphNodeData extends Record<string, unknown> {
   onOpenDecompose?: () => void;
   onDeleteNode?: () => void;
   onDrillDown?: () => void;
+  onQuickAppendChild?: () => void;
+  onQuickAppendSibling?: () => void;
+  onNodeTypeChange?: (type: NodeType) => void;
+  onCognitiveDemandChange?: (demand: CognitiveDemand) => void;
 }
 
 export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
@@ -76,6 +83,9 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
     onOpenDecompose,
     onDeleteNode,
     onDrillDown,
+    onQuickAppendChild,
+    onNodeTypeChange,
+    onCognitiveDemandChange,
   } = data as unknown as GraphNodeData;
 
   const { zoom } = useViewport();
@@ -161,12 +171,79 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
     }
   }, [isEditing]);
 
+  const parseInlineTokens = (rawInput: string) => {
+    let text = rawInput;
+    let detectedNodeType: NodeType | undefined;
+    let detectedDemand: CognitiveDemand | undefined;
+    let detectedAU: number | undefined;
+
+    // 1. Spike / Exploration token: !spike, #spike, !explore, #explore
+    if (/(?:^|\s)(?:!|#)(spike|explore|exploration)(?:\s|$)/i.test(text)) {
+      detectedNodeType = 'spike';
+      text = text.replace(/(?:^|\s)(?:!|#)(spike|explore|exploration)(?:\s|$)/gi, ' ');
+    }
+
+    // 2. Cognitive demand tokens: !high, !med, !medium, !low
+    const demandMatch = text.match(/(?:^|\s)!(high|med|medium|low)(?:\s|$)/i);
+    if (demandMatch) {
+      const d = demandMatch[1].toLowerCase();
+      detectedDemand = d === 'high' ? 'high' : d === 'low' ? 'low' : 'medium';
+      text = text.replace(demandMatch[0], ' ');
+    }
+
+    // 3. Duration / AU tokens: e.g. 2h, 30m, 1.5au, [2 AU]
+    const auMatch = text.match(/(?:^|\s)(?:\[|\()?(\d+(?:\.\d+)?)\s*au(?:\]|\))?(?:\s|$)/i);
+    if (auMatch) {
+      detectedAU = parseFloat(auMatch[1]);
+      text = text.replace(auMatch[0], ' ');
+    } else {
+      const hoursMatch = text.match(/(?:^|\s)(\d+(?:\.\d+)?)\s*(?:h|hr|hours)(?:\s|$)/i);
+      if (hoursMatch) {
+        const hours = parseFloat(hoursMatch[1]);
+        const auMinutes = preferences.attentionUnitMinutes || 15;
+        detectedAU = Math.round((hours * 60) / auMinutes * 10) / 10;
+        text = text.replace(hoursMatch[0], ' ');
+      } else {
+        const minsMatch = text.match(/(?:^|\s)(\d+)\s*(?:m|min|mins|minutes)(?:\s|$)/i);
+        if (minsMatch) {
+          const mins = parseInt(minsMatch[1], 10);
+          const auMinutes = preferences.attentionUnitMinutes || 15;
+          detectedAU = Math.round(mins / auMinutes * 10) / 10;
+          text = text.replace(minsMatch[0], ' ');
+        }
+      }
+    }
+
+    return {
+      cleanedText: text.replace(/\s+/g, ' ').trim(),
+      detectedNodeType,
+      detectedDemand,
+      detectedAU,
+    };
+  };
+
   const handleFinishEditing = () => {
     setIsEditing(false);
-    const trimmed = editText.trim();
-    if (trimmed && trimmed !== node.text) {
-      onTextChange(trimmed);
-    } else if (!trimmed) {
+    const { cleanedText, detectedNodeType, detectedDemand, detectedAU } = parseInlineTokens(editText);
+    const finalText = cleanedText || node.text;
+
+    const hasChanges =
+      finalText !== node.text ||
+      (detectedNodeType && detectedNodeType !== node.nodeType) ||
+      (detectedDemand && detectedDemand !== node.cognitiveDemand) ||
+      (detectedAU !== undefined && detectedAU !== node.estimatedAU);
+
+    if (hasChanges && updateNode) {
+      updateNode({
+        ...node,
+        text: finalText,
+        ...(detectedNodeType ? { nodeType: detectedNodeType } : {}),
+        ...(detectedDemand ? { cognitiveDemand: detectedDemand } : {}),
+        ...(detectedAU !== undefined ? { estimatedAU: detectedAU } : {}),
+      }).catch(() => {});
+    } else if (cleanedText && cleanedText !== node.text) {
+      onTextChange(cleanedText);
+    } else if (!cleanedText) {
       setEditText(node.text);
     }
   };
@@ -175,6 +252,12 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       handleFinishEditing();
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      handleFinishEditing();
+      if (onQuickAppendChild) {
+        onQuickAppendChild();
+      }
     } else if (e.key === 'Escape') {
       setEditText(node.text);
       setIsEditing(false);
@@ -233,6 +316,15 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
     }
     if (isCurrentActive) {
       return 'border-amber-500 ring-2 ring-amber-500/50 shadow-amber-500/20 bg-amber-50/20 dark:bg-amber-950/25 shadow-md';
+    }
+    if (node.nodeType === 'spike') {
+      if (isCurrentActive) {
+        return 'border-purple-500 ring-2 ring-purple-500/50 shadow-purple-500/20 bg-purple-50/20 dark:bg-purple-950/25 shadow-md';
+      }
+      if (selected) {
+        return 'border-purple-500 ring-2 ring-purple-500/40 shadow-purple-950/20 dark:shadow-purple-950/80 bg-white dark:bg-slate-900/95';
+      }
+      return 'border-dashed border-2 border-purple-400/80 dark:border-purple-500/80 bg-purple-50/10 dark:bg-purple-950/15 shadow-sm hover:border-purple-500';
     }
     if (selected) return 'border-emerald-500 ring-2 ring-emerald-500/40 shadow-emerald-950/20 dark:shadow-emerald-950/80 bg-white dark:bg-slate-900/95';
     if (isEGN) {
@@ -958,6 +1050,63 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
             <span>{currentEnvironment === 'computer' ? '💻' : currentEnvironment === 'physical' ? '🏃' : '🔄'}</span>
             <span className="capitalize">{currentEnvironment}</span>
           </button>
+
+          {/* Spike Node Badge / Toggle */}
+          {!isEGN && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                const nextType = node.nodeType === 'spike' ? 'standard' : 'spike';
+                if (onNodeTypeChange) onNodeTypeChange(nextType);
+                if (updateNode) updateNode({ ...node, nodeType: nextType }).catch(() => {});
+              }}
+              onDoubleClick={(e) => e.stopPropagation()}
+              className={`flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-semibold border shrink-0 transition-colors cursor-pointer ${
+                node.nodeType === 'spike'
+                  ? 'bg-purple-500/15 dark:bg-purple-500/25 text-purple-700 dark:text-purple-300 border-purple-400/50'
+                  : 'text-slate-400 dark:text-slate-500 hover:text-purple-600 dark:hover:text-purple-400 border-transparent hover:border-purple-300 dark:hover:border-purple-800'
+              }`}
+              title={
+                node.nodeType === 'spike'
+                  ? 'Spike / Exploration Node: Output is discovery & emergent tasks. Click to revert to Standard.'
+                  : 'Click to convert to Spike / Exploration node (research/discovery)'
+              }
+            >
+              <Compass className={`w-3 h-3 ${node.nodeType === 'spike' ? 'text-purple-600 dark:text-purple-400' : ''}`} />
+              {node.nodeType === 'spike' && <span>Spike</span>}
+            </button>
+          )}
+
+          {/* Cognitive Demand Badge / Toggle */}
+          {node.cognitiveDemand && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                const nextDemand =
+                  node.cognitiveDemand === 'low'
+                    ? 'medium'
+                    : node.cognitiveDemand === 'medium'
+                    ? 'high'
+                    : 'low';
+                if (onCognitiveDemandChange) onCognitiveDemandChange(nextDemand);
+                if (updateNode) updateNode({ ...node, cognitiveDemand: nextDemand }).catch(() => {});
+              }}
+              onDoubleClick={(e) => e.stopPropagation()}
+              className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border shrink-0 transition-colors cursor-pointer ${
+                node.cognitiveDemand === 'high'
+                  ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800'
+                  : node.cognitiveDemand === 'low'
+                  ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
+                  : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800'
+              }`}
+              title={`Cognitive Demand: ${node.cognitiveDemand}. Click to cycle (Low → Med → High)`}
+            >
+              {node.cognitiveDemand}
+            </button>
+          )}
+
           {isEGN ? (
             <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold tracking-wide uppercase border border-emerald-500/30 shrink-0">
               <Target className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
@@ -1243,6 +1392,29 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
           )}
         </div>
       </div>
+
+      {/* Spike completion discovery banner */}
+      {node.nodeType === 'spike' && node.status === 'completed' && (
+        <div className="bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/60 rounded-xl p-2.5 flex items-center justify-between gap-2 animate-in fade-in duration-200">
+          <div className="flex items-center gap-1.5 text-purple-800 dark:text-purple-300 text-[11px] font-medium">
+            <Sparkles className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
+            <span>Spike complete! Discovered new tasks?</span>
+          </div>
+          {onQuickAppendChild && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onQuickAppendChild();
+              }}
+              className="px-2 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-semibold flex items-center gap-1 shrink-0 transition-colors cursor-pointer shadow-xs"
+            >
+              <Plus className="w-3 h-3" />
+              <span>Add Next Step</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Source handle (outgoing dependency). Not rendered for End Goal Node */}
       {!isEGN && (
