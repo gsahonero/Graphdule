@@ -100,4 +100,42 @@ describe('BonsaiService', () => {
     expect(nextState.leavesCount).toBeGreaterThanOrEqual(highState.leavesCount);
     expect(nextState.blossomCount).toBeGreaterThanOrEqual(highState.blossomCount);
   });
+
+  it('provides companion-specific stage names and metadata', () => {
+    expect(BonsaiService.getStageName(0, 'bonsai')).toBe('Seedling');
+    expect(BonsaiService.getStageName(1, 'bonsai')).toBe('Sprout');
+
+    expect(BonsaiService.getStageName(0, 'cat')).toBe('Sleepy Kitten');
+    expect(BonsaiService.getStageName(1, 'cat')).toBe('Playful Cat');
+    expect(BonsaiService.getStageName(4, 'cat')).toBe('Guardian Spirit');
+
+    expect(BonsaiService.getStageName(0, 'owl')).toBe('Owlet');
+    expect(BonsaiService.getStageName(3, 'owl')).toBe('Scholar Owl');
+
+    expect(BonsaiService.getStageName(0, 'fox')).toBe('Little Kit');
+    expect(BonsaiService.getStageName(4, 'fox')).toBe('Mystic Fox');
+
+    expect(BonsaiService.getStageName(0, 'turtle')).toBe('Hatchling');
+    expect(BonsaiService.getStageName(4, 'turtle')).toBe('World Turtle');
+
+    const meta = BonsaiService.getCompanionMeta('cat');
+    expect(meta.name).toBe('Neko');
+    expect(meta.emoji).toBe('🐱');
+  });
+
+  it('preserves companionType across growth updates', () => {
+    const catState: BonsaiState = {
+      companionType: 'cat',
+      growthPoints: 20,
+      stage: 0,
+      leavesCount: 3,
+      blossomCount: 1,
+      lastWateredDate: '2026-09-16',
+    };
+
+    const { nextState } = BonsaiService.calculateGrowth(catState, 1.5, 'purple');
+    expect(nextState.companionType).toBe('cat');
+    expect(nextState.growthPoints).toBe(35);
+  });
 });
+

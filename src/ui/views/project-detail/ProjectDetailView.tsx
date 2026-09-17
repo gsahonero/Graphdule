@@ -26,6 +26,8 @@ import {
 } from 'lucide-react';
 import { getProjectColorTheme, ProjectIconDisplay } from '../../utils/project-style';
 import { ProjectStylePicker } from '../../components/ProjectStylePicker';
+import { ProjectHealthService } from '../../../domain/services/project-health-service';
+import { getTodayString } from '../../../domain/utils/date';
 
 export const ProjectDetailView: React.FC = () => {
   const {
@@ -49,6 +51,7 @@ export const ProjectDetailView: React.FC = () => {
     activeWorkSession,
     isWholeProjectView,
     toggleWholeProjectView,
+    activityLog,
   } = useApp();
 
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -110,6 +113,16 @@ export const ProjectDetailView: React.FC = () => {
   }, [project, nodes]);
   const isArchived = summary.isArchived;
   const projectStatus = summary.status;
+
+  const healthSummary = useMemo(() => {
+    return ProjectHealthService.evaluateProjectHealth(
+      nodes,
+      activeProjectDoc.edges,
+      activityLog,
+      getTodayString(),
+      project.id
+    );
+  }, [nodes, activeProjectDoc.edges, activityLog, project.id]);
 
   const handleSaveTitle = async () => {
     const trimmed = titleInput.trim();
@@ -389,6 +402,34 @@ export const ProjectDetailView: React.FC = () => {
             <span className="hidden sm:inline">History</span>
           </button>
         </div>
+
+        {/* Project Health Radar Badge */}
+        {!isArchived && (
+          <div
+            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border shrink-0 transition-colors ${
+              healthSummary.health === 'flowing'
+                ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
+                : healthSummary.health === 'idle'
+                ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30'
+                : 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/30'
+            }`}
+            title={`Project Health: ${healthSummary.health}. Ready next steps: ${healthSummary.frontierCount}. ${healthSummary.recommendation}`}
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${
+                healthSummary.health === 'flowing'
+                  ? 'bg-emerald-500 animate-pulse'
+                  : healthSummary.health === 'idle'
+                  ? 'bg-amber-500'
+                  : 'bg-rose-500'
+              }`}
+            />
+            <span className="capitalize font-semibold">{healthSummary.health}</span>
+            <span className="text-[10px] opacity-75">
+              ({healthSummary.frontierCount} ready)
+            </span>
+          </div>
+        )}
 
         {/* Right: Undo/Redo, Progress, Archive/Restore & Export */}
         <div className="flex items-center space-x-1.5 sm:space-x-2 shrink-0">

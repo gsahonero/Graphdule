@@ -38,6 +38,7 @@ import { IdeaSeed, ProjectStyle, ProjectSummary } from '../../../domain/models/t
 import { getProjectColorTheme, ProjectIconDisplay } from '../../utils/project-style';
 import { ProjectStylePicker } from '../../components/ProjectStylePicker';
 import { ActivityLogService } from '../../../domain/services/activity-log-service';
+import { ProjectHealthService } from '../../../domain/services/project-health-service';
 
 export const ProjectsView: React.FC = () => {
   const {
@@ -1534,6 +1535,14 @@ export const ProjectsView: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredProjects.map((project) => {
             const theme = getProjectColorTheme(project.style?.color);
+            const projectNodes = allActiveNodes.filter((n) => n.projectId === project.id);
+            const health = ProjectHealthService.evaluateProjectHealth(
+              projectNodes,
+              [],
+              activityLog,
+              getTodayString(),
+              project.id
+            );
             return (
               <div
                 key={project.id}
@@ -1552,6 +1561,29 @@ export const ProjectsView: React.FC = () => {
                           <h3 className="font-bold text-slate-800 dark:text-slate-100 text-base group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors truncate">
                             {project.name}
                           </h3>
+                          {!project.isArchived && (
+                            <span
+                              className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider border flex items-center gap-1 shrink-0 ${
+                                health.health === 'flowing'
+                                  ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
+                                  : health.health === 'idle'
+                                  ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30'
+                                  : 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/30'
+                              }`}
+                              title={`Project Health: ${health.health}. ${health.recommendation}`}
+                            >
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  health.health === 'flowing'
+                                    ? 'bg-emerald-500'
+                                    : health.health === 'idle'
+                                    ? 'bg-amber-500'
+                                    : 'bg-rose-500'
+                                }`}
+                              />
+                              <span>{health.health}</span>
+                            </span>
+                          )}
                           {project.isAttention && !project.isArchived && (
                             <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center space-x-1 shrink-0">
                               <Zap className="w-2.5 h-2.5 fill-amber-500" />

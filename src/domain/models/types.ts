@@ -331,7 +331,10 @@ export type ColorPaletteId =
   | 'teal'
   | 'minimal';
 
+export type CompanionType = 'bonsai' | 'cat' | 'owl' | 'fox' | 'turtle';
+
 export interface BonsaiState {
+  readonly companionType?: CompanionType;
   readonly growthPoints: number;
   readonly stage: number; // 0: Seedling, 1: Sprout, 2: Sapling, 3: Cultivated, 4: Ancient
   readonly leavesCount: number;

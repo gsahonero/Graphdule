@@ -161,6 +161,7 @@ export const ActiveWorkSessionSchema = z.object({
 }).passthrough();
 
 export const BonsaiStateSchema = z.object({
+  companionType: z.enum(['bonsai', 'cat', 'owl', 'fox', 'turtle']).optional().default('bonsai'),
   growthPoints: z.number().nonnegative(),
   stage: z.number().int().min(0).max(4),
   leavesCount: z.number().int().nonnegative(),

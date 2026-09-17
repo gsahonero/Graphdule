@@ -2251,7 +2251,7 @@ export const MyDayView: React.FC = () => {
 
           {/* Bonsai Companion */}
           {preferences.bonsaiEnabled !== false && (preferences.bonsaiPlacement === 'my_day' || !preferences.bonsaiPlacement) && (
-            <div className="hidden sm:flex items-center">
+            <div className="flex items-center px-3 py-1 rounded-xl bg-slate-50/90 dark:bg-slate-900/70 border border-slate-200/80 dark:border-slate-800 shadow-2xs backdrop-blur-xs shrink-0">
               <BonsaiCompanion
                 state={preferences.bonsai}
                 variant={activeWorkSession?.sessionType === 'recovery' ? 'resting' : activeWorkSession ? 'focusing' : 'idle'}

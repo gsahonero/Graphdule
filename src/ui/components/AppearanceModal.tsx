@@ -6,6 +6,7 @@ import {
   getPalette,
 } from '../utils/palettes';
 import { ColorPaletteId } from '../../domain/models/types';
+import { COMPANIONS, DEFAULT_BONSAI_STATE } from '../../domain/services/bonsai-service';
 import {
   Palette,
   Sun,
@@ -252,29 +253,67 @@ export const AppearanceModal: React.FC = () => {
             </div>
 
             {preferences.bonsaiEnabled !== false && (
-              <div className="grid grid-cols-3 gap-2 pt-1">
-                {(
-                  [
-                    { id: 'my_day', label: 'My Day' },
-                    { id: 'header', label: 'Top Nav' },
-                    { id: 'receipt_only', label: 'Receipts Only' },
-                  ] as const
-                ).map((placement) => (
-                  <button
-                    key={placement.id}
-                    type="button"
-                    onClick={async () => {
-                      await updatePreferences({ bonsaiPlacement: placement.id });
-                    }}
-                    className={`py-1.5 px-2 text-xs rounded-lg border text-center transition-all cursor-pointer ${
-                      (preferences.bonsaiPlacement || 'my_day') === placement.id
-                        ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-500 text-emerald-700 dark:text-emerald-300 font-semibold shadow-xs'
-                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
-                    }`}
-                  >
-                    {placement.label}
-                  </button>
-                ))}
+              <div className="space-y-2.5 pt-1">
+                <div className="grid grid-cols-3 gap-2">
+                  {(
+                    [
+                      { id: 'my_day', label: 'My Day' },
+                      { id: 'header', label: 'Top Nav' },
+                      { id: 'receipt_only', label: 'Receipts Only' },
+                    ] as const
+                  ).map((placement) => (
+                    <button
+                      key={placement.id}
+                      type="button"
+                      onClick={async () => {
+                        await updatePreferences({ bonsaiPlacement: placement.id });
+                      }}
+                      className={`py-1.5 px-2 text-xs rounded-lg border text-center transition-all cursor-pointer ${
+                        (preferences.bonsaiPlacement || 'my_day') === placement.id
+                          ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-500 text-emerald-700 dark:text-emerald-300 font-semibold shadow-xs'
+                          : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      {placement.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Companion Pet Picker */}
+                <div className="pt-1.5 space-y-1.5">
+                  <div className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                    Focus Companion Pet
+                  </div>
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {Object.values(COMPANIONS).map((comp) => {
+                      const activeType = preferences.bonsai?.companionType || 'bonsai';
+                      const isSelected = comp.id === activeType;
+                      return (
+                        <button
+                          key={comp.id}
+                          type="button"
+                          onClick={async () => {
+                            await updatePreferences({
+                              bonsai: {
+                                ...(preferences.bonsai || DEFAULT_BONSAI_STATE),
+                                companionType: comp.id,
+                              },
+                            });
+                          }}
+                          className={`py-2 px-1 rounded-xl border flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                            isSelected
+                              ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-500 text-emerald-700 dark:text-emerald-300 font-bold ring-1 ring-emerald-500 shadow-xs'
+                              : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700'
+                          }`}
+                          title={`${comp.name} (${comp.species}): ${comp.tagline}`}
+                        >
+                          <span className="text-lg">{comp.emoji}</span>
+                          <span className="text-[10px] truncate max-w-full">{comp.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             )}
           </div>
