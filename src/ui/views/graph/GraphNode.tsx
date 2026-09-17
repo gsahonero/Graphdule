@@ -608,8 +608,8 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
                   type="button"
                   onClick={cycleEnvironment}
                   onDoubleClick={(e) => e.stopPropagation()}
-                  className="nodrag nowheel nopan flex items-center space-x-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium border transition-colors cursor-pointer bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 shadow-2xs"
-                  title={`Task Environment: ${currentEnvironment} (Click to toggle: Computer 💻 → Physical 🏃 → Mixed 🔄)`}
+                  className="nodrag nowheel nopan flex items-center justify-center space-x-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium border transition-colors cursor-pointer bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 shadow-2xs w-[80px] shrink-0"
+                  title={`Task Environment: ${currentEnvironment} (Click to toggle: Computer 💻 → Physical 🏃 → Mixed/Hybrid 🔄)`}
                   data-testid="graph-popover-environment-toggle"
                 >
                   <span>{currentEnvironment === 'computer' ? '💻' : currentEnvironment === 'physical' ? '🏃' : '🔄'}</span>
@@ -1043,8 +1043,8 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
             type="button"
             onClick={cycleEnvironment}
             onDoubleClick={(e) => e.stopPropagation()}
-            className="nodrag nowheel nopan flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 shrink-0 transition-colors cursor-pointer"
-            title={`Task Environment: ${currentEnvironment} (Click to toggle: Computer 💻 → Physical 🏃 → Mixed 🔄)`}
+            className="nodrag nowheel nopan flex items-center justify-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 shrink-0 transition-colors cursor-pointer w-[80px]"
+            title={`Task Environment: ${currentEnvironment} (Click to toggle: Computer 💻 → Physical 🏃 → Mixed/Hybrid 🔄)`}
             data-testid="graph-node-environment-toggle-full"
           >
             <span>{currentEnvironment === 'computer' ? '💻' : currentEnvironment === 'physical' ? '🏃' : '🔄'}</span>

@@ -229,4 +229,18 @@ describe('Standalone Tasks Name Editing and Tooltip in MyDayView', () => {
     expect((input as HTMLInputElement).value).toBe('');
     expect(screen.getAllByTitle('Select due date (required)')[0].textContent).toContain('Pick date');
   });
+
+  it('renders environment buttons with constant size classes to prevent dynamic size shift', () => {
+    render(<MyDayView />);
+
+    const standaloneToggles = screen.getAllByTestId('myday-standalone-environment-toggle');
+    expect(standaloneToggles.length).toBeGreaterThan(0);
+    standaloneToggles.forEach((btn) => {
+      expect(btn.className).toContain('w-7');
+      expect(btn.className).toContain('sm:w-[86px]');
+    });
+
+    const pickerBtn = screen.getByTestId('standalone-environment-picker');
+    expect(pickerBtn.className).toContain('w-[92px]');
+  });
 });

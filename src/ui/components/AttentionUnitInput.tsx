@@ -103,8 +103,8 @@ export const AttentionUnitInput: React.FC<AttentionUnitInputProps> = ({
     const formattedTime = AttentionService.formatMinutes(totalMinutes);
     return (
       <div
-        className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/10 dark:bg-amber-500/15 text-amber-600 dark:text-amber-300 font-medium select-none cursor-default ${
-          compact ? 'text-[10px]' : 'text-xs'
+        className={`inline-flex items-center justify-center gap-1.5 px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/10 dark:bg-amber-500/15 text-amber-600 dark:text-amber-300 font-medium select-none cursor-default shrink-0 ${
+          compact ? 'w-[136px] text-[10px]' : 'w-[144px] text-xs'
         } ${className}`}
         title={`Parent task estimated attention is automatically derived from the sum of its subtasks (${value !== undefined ? Math.round(value * 100) / 100 : 0} AU = ${formattedTime}). Manual edit disabled.`}
       >
@@ -183,40 +183,42 @@ export const AttentionUnitInput: React.FC<AttentionUnitInputProps> = ({
     <div
       ref={containerRef}
       onDoubleClick={(e) => e.stopPropagation()}
-      className={`relative inline-block ${isOpen ? 'z-50' : ''} ${className}`}
+      className={`relative inline-block shrink-0 ${isOpen ? 'z-50' : ''} ${className}`}
     >
       {/* Trigger button / Input badge */}
       <div
         onClick={togglePopover}
         onDoubleClick={(e) => e.stopPropagation()}
-        className={`group inline-flex items-center gap-1.5 rounded-lg border transition-all cursor-pointer select-none whitespace-nowrap shrink-0 ${
+        className={`group inline-flex items-center justify-between rounded-lg border transition-all cursor-pointer select-none shrink-0 ${
           disabled
             ? 'opacity-50 cursor-not-allowed border-slate-700/40 bg-slate-800/20 text-slate-500'
             : value !== undefined && value > 0
             ? 'border-amber-500/40 bg-amber-500/10 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 hover:border-amber-500/70'
             : 'border-slate-300 dark:border-slate-700/60 bg-slate-100/70 dark:bg-slate-800/40 text-slate-500 dark:text-slate-400 hover:border-amber-500/40 hover:text-amber-500'
-        } ${compact ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-xs'}`}
+        } ${compact ? 'w-[136px] px-1.5 py-0.5 text-xs' : 'w-[144px] px-2 py-1 text-xs'}`}
         title={
           value !== undefined && value > 0
             ? `${Math.round(value * 100) / 100} AU equals ${formattedMinutes} of focused attention (1 AU = ${effectiveAuMinutes}m). Click to edit.`
             : `Set estimated attention in AU (1 AU = ${effectiveAuMinutes}m)`
         }
       >
-        <Clock className={`flex-shrink-0 ${compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} text-amber-500/80`} />
+        <div className="flex items-center gap-1 min-w-0 flex-1">
+          <Clock className={`shrink-0 ${compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} text-amber-500/80`} />
 
-        {value !== undefined && value > 0 ? (
-          <span className="inline-flex items-center gap-1 font-mono whitespace-nowrap">
-            <span className="font-semibold">{Math.round(value * 100) / 100} AU</span>
-            <span className="text-[11px] opacity-75 font-normal">· {formattedMinutes}</span>
-          </span>
-        ) : (
-          <span className="text-slate-400 dark:text-slate-500 whitespace-nowrap">{placeholder}</span>
-        )}
+          {value !== undefined && value > 0 ? (
+            <span className="inline-flex items-center gap-1 font-mono whitespace-nowrap min-w-0 overflow-hidden">
+              <span className="font-semibold text-[11px] shrink-0">{Math.round(value * 100) / 100} AU</span>
+              <span className="text-[10px] opacity-75 font-normal truncate">· {formattedMinutes}</span>
+            </span>
+          ) : (
+            <span className="text-slate-400 dark:text-slate-500 whitespace-nowrap font-mono text-[11px]">{placeholder}</span>
+          )}
+        </div>
 
         {/* Quick Stepper +/- controls directly visible when not compact or hovered */}
         {!disabled && (
           <div
-            className="inline-flex items-center ml-0.5 border-l border-slate-300/40 dark:border-slate-700/60 pl-1 gap-0.5"
+            className="inline-flex items-center shrink-0 ml-1 border-l border-slate-300/40 dark:border-slate-700/60 pl-1 gap-0.5"
             onClick={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
           >
@@ -224,7 +226,7 @@ export const AttentionUnitInput: React.FC<AttentionUnitInputProps> = ({
               type="button"
               onClick={(e) => handleStep(-0.5, e)}
               onDoubleClick={(e) => e.stopPropagation()}
-              className="p-0.5 hover:text-amber-500 hover:bg-amber-500/20 rounded transition-colors"
+              className="p-0.5 hover:text-amber-500 hover:bg-amber-500/20 rounded transition-colors cursor-pointer"
               title="Decrease by 0.5 AU"
             >
               <Minus className="w-2.5 h-2.5" />
@@ -233,7 +235,7 @@ export const AttentionUnitInput: React.FC<AttentionUnitInputProps> = ({
               type="button"
               onClick={(e) => handleStep(0.5, e)}
               onDoubleClick={(e) => e.stopPropagation()}
-              className="p-0.5 hover:text-amber-500 hover:bg-amber-500/20 rounded transition-colors"
+              className="p-0.5 hover:text-amber-500 hover:bg-amber-500/20 rounded transition-colors cursor-pointer"
               title="Increase by 0.5 AU"
             >
               <Plus className="w-2.5 h-2.5" />

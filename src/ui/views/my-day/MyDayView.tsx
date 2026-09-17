@@ -1083,8 +1083,8 @@ export const MyDayView: React.FC = () => {
                 const nextEnv: TaskEnvironment = curEnv === 'computer' ? 'physical' : curEnv === 'physical' ? 'mixed' : 'computer';
                 updateNode({ ...task, environment: nextEnv });
               }}
-              className="inline-flex items-center space-x-1 text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
-              title={`Task Environment: ${task.environment || 'computer'} (Click to switch: Computer 💻 → Physical 🏃 → Mixed 🔄)`}
+              className="inline-flex items-center justify-center space-x-1 text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer w-7 sm:w-[86px] shrink-0"
+              title={`Task Environment: ${task.environment || 'computer'} (Click to switch: Computer 💻 → Physical 🏃 → Mixed/Hybrid 🔄)`}
               data-testid="myday-task-environment-toggle"
             >
               <span>{(task.environment || 'computer') === 'computer' ? '💻' : task.environment === 'physical' ? '🏃' : '🔄'}</span>
@@ -1202,8 +1202,8 @@ export const MyDayView: React.FC = () => {
                 const nextEnv: TaskEnvironment = curEnv === 'computer' ? 'physical' : curEnv === 'physical' ? 'mixed' : 'computer';
                 updateStandaloneTask({ ...task, environment: nextEnv });
               }}
-              className="inline-flex items-center space-x-1 text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
-              title={`Task Environment: ${task.environment || 'computer'} (Click to switch: Computer 💻 → Physical 🏃 → Mixed 🔄)`}
+              className="inline-flex items-center justify-center space-x-1 text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer w-7 sm:w-[86px] shrink-0"
+              title={`Task Environment: ${task.environment || 'computer'} (Click to switch: Computer 💻 → Physical 🏃 → Mixed/Hybrid 🔄)`}
               data-testid="myday-standalone-environment-toggle"
             >
               <span>{(task.environment || 'computer') === 'computer' ? '💻' : task.environment === 'physical' ? '🏃' : '🔄'}</span>
@@ -1397,8 +1397,8 @@ export const MyDayView: React.FC = () => {
                 const nextEnv: TaskEnvironment = curEnv === 'computer' ? 'physical' : curEnv === 'physical' ? 'mixed' : 'computer';
                 updateNode({ ...task, environment: nextEnv });
               }}
-              className="inline-flex items-center space-x-1 text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
-              title={`Task Environment: ${task.environment || 'computer'} (Click to switch: Computer 💻 → Physical 🏃 → Mixed 🔄)`}
+              className="inline-flex items-center justify-center space-x-1 text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer w-7 sm:w-[86px] shrink-0"
+              title={`Task Environment: ${task.environment || 'computer'} (Click to switch: Computer 💻 → Physical 🏃 → Mixed/Hybrid 🔄)`}
               data-testid="myday-task-environment-toggle"
             >
               <span>{(task.environment || 'computer') === 'computer' ? '💻' : task.environment === 'physical' ? '🏃' : '🔄'}</span>
@@ -1501,8 +1501,8 @@ export const MyDayView: React.FC = () => {
                 const nextEnv: TaskEnvironment = curEnv === 'computer' ? 'physical' : curEnv === 'physical' ? 'mixed' : 'computer';
                 updateStandaloneTask({ ...task, environment: nextEnv });
               }}
-              className="inline-flex items-center space-x-1 text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
-              title={`Task Environment: ${task.environment || 'computer'} (Click to switch: Computer 💻 → Physical 🏃 → Mixed 🔄)`}
+              className="inline-flex items-center justify-center space-x-1 text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer w-7 sm:w-[86px] shrink-0"
+              title={`Task Environment: ${task.environment || 'computer'} (Click to switch: Computer 💻 → Physical 🏃 → Mixed/Hybrid 🔄)`}
               data-testid="myday-standalone-environment-toggle"
             >
               <span>{(task.environment || 'computer') === 'computer' ? '💻' : task.environment === 'physical' ? '🏃' : '🔄'}</span>
@@ -2015,8 +2015,8 @@ export const MyDayView: React.FC = () => {
                     : 'computer';
                 setNewStandaloneEnvironment(nextEnv);
               }}
-              className="flex items-center space-x-1 px-2 py-1 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-850 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shadow-2xs cursor-pointer"
-              title={`Task Environment: ${newStandaloneEnvironment} (Click to switch)`}
+              className="flex items-center justify-center space-x-1 px-2 py-1 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-850 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shadow-2xs cursor-pointer w-[92px] shrink-0"
+              title={`Task Environment: ${newStandaloneEnvironment} (Click to switch: Computer 💻 → Physical 🏃 → Mixed/Hybrid 🔄)`}
               data-testid="standalone-environment-picker"
             >
               <span>{newStandaloneEnvironment === 'computer' ? '💻' : newStandaloneEnvironment === 'physical' ? '🏃' : '🔄'}</span>

@@ -141,4 +141,46 @@ describe('AttentionUnitInput - Arbitrary AU numeric entry and live minutes', () 
     fireEvent.doubleClick(badge);
     expect(onCardDoubleClick).not.toHaveBeenCalled();
   });
+
+  it('maintains constant width across undefined, small, and large AU values', () => {
+    // Render compact with undefined value
+    const { rerender } = render(
+      <AttentionUnitInput value={undefined} onChange={onChangeMock} compact={true} />
+    );
+    const triggerUndefined = screen.getByText('AU').closest('.group');
+    expect(triggerUndefined?.className).toContain('w-[136px]');
+
+    // Rerender with 0.5 AU
+    rerender(<AttentionUnitInput value={0.5} onChange={onChangeMock} compact={true} />);
+    const triggerSmall = screen.getByText('0.5 AU').closest('.group');
+    expect(triggerSmall?.className).toContain('w-[136px]');
+
+    // Rerender with 12.5 AU
+    rerender(<AttentionUnitInput value={12.5} onChange={onChangeMock} compact={true} />);
+    const triggerLarge = screen.getByText('12.5 AU').closest('.group');
+    expect(triggerLarge?.className).toContain('w-[136px]');
+
+    // Standard mode with undefined and defined values
+    rerender(<AttentionUnitInput value={undefined} onChange={onChangeMock} compact={false} />);
+    const triggerStandardUndefined = screen.getByText('AU').closest('.group');
+    expect(triggerStandardUndefined?.className).toContain('w-[144px]');
+
+    rerender(<AttentionUnitInput value={3} onChange={onChangeMock} compact={false} />);
+    const triggerStandardDefined = screen.getByText('3 AU').closest('.group');
+    expect(triggerStandardDefined?.className).toContain('w-[144px]');
+  });
+
+  it('maintains constant width for parent-derived display', () => {
+    const { rerender } = render(
+      <AttentionUnitInput value={5} onChange={onChangeMock} isParentDerived={true} compact={true} />
+    );
+    const derivedCompact = screen.getByText('5 AU').closest('div');
+    expect(derivedCompact?.className).toContain('w-[136px]');
+
+    rerender(
+      <AttentionUnitInput value={5} onChange={onChangeMock} isParentDerived={true} compact={false} />
+    );
+    const derivedStandard = screen.getByText('5 AU').closest('div');
+    expect(derivedStandard?.className).toContain('w-[144px]');
+  });
 });

@@ -160,6 +160,7 @@ describe('GraphNode Environment Toggle Button', () => {
       expect(fullToggleBtn).toBeInTheDocument();
       expect(fullToggleBtn).toHaveTextContent('🏃');
       expect(fullToggleBtn).toHaveTextContent('physical');
+      expect(fullToggleBtn.className).toContain('w-[80px]');
 
       fireEvent.click(fullToggleBtn);
       expect(onEnvironmentChangeMock).toHaveBeenCalledWith('mixed');
@@ -175,6 +176,7 @@ describe('GraphNode Environment Toggle Button', () => {
       expect(popoverToggleBtn).toBeInTheDocument();
       expect(popoverToggleBtn).toHaveTextContent('🔄');
       expect(popoverToggleBtn).toHaveTextContent('mixed');
+      expect(popoverToggleBtn.className).toContain('w-[80px]');
 
       fireEvent.click(popoverToggleBtn);
       expect(onEnvironmentChangeMock).toHaveBeenCalledWith('computer');
