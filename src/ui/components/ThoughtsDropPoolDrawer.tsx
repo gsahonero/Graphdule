@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import {
-  Sparkles,
+  Waves,
   X,
   Plus,
   Trash2,
@@ -124,7 +124,7 @@ export const ThoughtsDropPoolDrawer: React.FC = () => {
         <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-950/60">
           <div className="flex items-center space-x-2.5">
             <div className="w-8 h-8 rounded-lg bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center border border-teal-500/20">
-              <Sparkles className="w-4 h-4" />
+              <Waves className="w-4 h-4" />
             </div>
             <div>
               <div className="flex items-center space-x-2">
@@ -221,7 +221,7 @@ export const ThoughtsDropPoolDrawer: React.FC = () => {
           {activeTab === 'inbox' ? (
             inboxThoughts.length === 0 ? (
               <div className="text-center py-16 text-slate-400 dark:text-slate-500 text-xs space-y-2">
-                <Sparkles className="w-10 h-10 mx-auto stroke-1 text-slate-300 dark:text-slate-600 mb-1" />
+                <Waves className="w-10 h-10 mx-auto stroke-1 text-slate-300 dark:text-slate-600 mb-1" />
                 <p className="font-medium text-slate-600 dark:text-slate-400">Your Thoughts Pool is clear!</p>
                 <p className="text-[11px] max-w-xs mx-auto text-slate-400 dark:text-slate-500">
                   When you're executing a task and an intrusive idea arises, drop it here to keep your deep flow intact.

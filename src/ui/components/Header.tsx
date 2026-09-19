@@ -19,7 +19,7 @@ import {
   Heart,
   Palette,
   Keyboard,
-  Sparkles,
+  Waves,
 } from 'lucide-react';
 import { BonsaiCompanion } from './BonsaiCompanion';
 
@@ -211,7 +211,7 @@ export const Header: React.FC = () => {
           title="Thoughts Drop Pool (Quick capture & triage)"
           className="flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/50"
         >
-          <Sparkles className="w-3.5 h-3.5 shrink-0" />
+          <Waves className="w-3.5 h-3.5 shrink-0" />
           <span>Pool</span>
           {inboxThoughtsCount > 0 && (
             <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-teal-500 text-white leading-tight">

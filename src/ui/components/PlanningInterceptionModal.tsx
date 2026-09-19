@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
-import { Sparkles, Brain, Clock, ArrowRight, X } from 'lucide-react';
+import { Droplet, Brain, Clock, ArrowRight, X } from 'lucide-react';
 
 export const PlanningInterceptionModal: React.FC = () => {
   const {
@@ -107,7 +107,7 @@ export const PlanningInterceptionModal: React.FC = () => {
                 type="submit"
                 className="px-3 py-2 rounded-lg font-semibold bg-brand-600 hover:bg-brand-500 text-white transition-colors cursor-pointer shrink-0 shadow-xs flex items-center space-x-1"
               >
-                <Sparkles className="w-3.5 h-3.5" />
+                <Droplet className="w-3.5 h-3.5" />
                 <span>Drop & Keep Focus</span>
               </button>
             </div>

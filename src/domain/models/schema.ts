@@ -195,7 +195,7 @@ export const UserPreferencesSchema = z.object({
   bonsai: BonsaiStateSchema.optional(),
   bonsaiEnabled: z.boolean().optional().default(true),
   bonsaiPlacement: z.enum(['my_day', 'header', 'receipt_only']).optional().default('my_day'),
-  zenCurtainEnabled: z.boolean().optional().default(false),
+  zenCurtainEnabled: z.boolean().optional().default(true),
 }).passthrough();
 
 export const IdeaSeedSchema = z.object({

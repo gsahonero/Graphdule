@@ -1,6 +1,6 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
-import { FolderKanban, Sun, Clock, CalendarDays, Sparkles } from 'lucide-react';
+import { FolderKanban, Sun, Clock, CalendarDays, Waves } from 'lucide-react';
 
 export const BottomNav: React.FC = () => {
   const {
@@ -99,7 +99,7 @@ export const BottomNav: React.FC = () => {
           title="Thoughts Drop Pool"
         >
           <div className="relative">
-            <Sparkles className="w-5 h-5 transition-transform" />
+            <Waves className="w-5 h-5 transition-transform" />
             {inboxThoughtsCount > 0 && (
               <span className="absolute -top-1 -right-1 px-1 py-0.2 rounded-full text-[9px] font-bold bg-teal-500 text-white leading-tight">
                 {inboxThoughtsCount}

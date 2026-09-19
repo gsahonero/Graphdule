@@ -10,7 +10,7 @@ import {
   PictureInPicture2,
   Minimize2,
   Heart,
-  Sparkles,
+  Droplet,
   Trash2,
   Coffee,
   Eye,
@@ -776,7 +776,7 @@ export const ActiveWorkBar: React.FC<ActiveWorkBarProps> = ({ mode = 'desktop' }
               className="flex items-center gap-1 hover:text-teal-600 dark:hover:text-teal-400 cursor-pointer"
               title="Capture stray thought without losing focus"
             >
-              <Sparkles className="w-3 h-3 text-teal-500" />
+              <Droplet className="w-3 h-3 text-teal-500" />
               <span>Drop Thought</span>
             </button>
 

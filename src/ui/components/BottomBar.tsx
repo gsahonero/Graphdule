@@ -10,7 +10,7 @@ import {
   Upload,
   HelpCircle,
   Smartphone,
-  Sparkles,
+  Waves,
 } from 'lucide-react';
 import { SyncStatusIndicator } from './SyncStatusIndicator';
 import { ProjectService } from '../../domain/services/project-service';
@@ -111,7 +111,7 @@ export const BottomBar: React.FC = () => {
   return (
     <footer
       aria-label="Desktop Utility Bottom Bar"
-      className="hidden md:flex fixed bottom-0 left-0 right-0 z-30 h-9 bg-white/95 dark:bg-slate-900/95 border-t border-slate-200 dark:border-slate-800 px-3 sm:px-4 items-center justify-between text-xs backdrop-blur-md select-none transition-colors duration-150"
+      className="hidden md:flex fixed bottom-0 left-0 right-0 z-[45] h-9 bg-white/95 dark:bg-slate-900/95 border-t border-slate-200 dark:border-slate-800 px-3 sm:px-4 items-center justify-between text-xs backdrop-blur-md select-none transition-colors duration-150"
     >
       {/* Hidden File Input for Import */}
       <input
@@ -230,7 +230,7 @@ export const BottomBar: React.FC = () => {
           data-testid="bottombar-thoughts-pool-button"
           className="flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium text-teal-700 dark:text-teal-300 hover:bg-teal-50 dark:hover:bg-teal-950/50 border border-teal-200 dark:border-teal-800/60 transition-all cursor-pointer"
         >
-          <Sparkles className="w-3.5 h-3.5 text-teal-500 shrink-0" />
+          <Waves className="w-3.5 h-3.5 text-teal-500 shrink-0" />
           <span>Thoughts Pool</span>
           {inboxThoughtsCount > 0 && (
             <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-teal-500 text-white">

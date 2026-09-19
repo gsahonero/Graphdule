@@ -56,6 +56,18 @@ describe('ZenFocusCurtain - Distraction-Free Focus Island', () => {
     expect(container.firstChild).toBeNull();
   });
 
+  it('renders Focus Island by default when zenCurtainEnabled is undefined (defaults to true) and has z-40', () => {
+    mockContext.preferences.zenCurtainEnabled = undefined as any;
+    mockContext.activeWorkSession = {
+      ...mockContext.activeWorkSession,
+      sessionType: 'execution',
+    };
+    const { container } = render(<ZenFocusCurtain />);
+    expect(screen.getByText('Zen Focus Mode')).toBeInTheDocument();
+    const backdrop = container.firstChild as HTMLElement;
+    expect(backdrop).toHaveClass('z-40');
+  });
+
   it('renders nothing when activeWorkSession is not execution (e.g. planning or null)', () => {
     mockContext.preferences.zenCurtainEnabled = true;
     mockContext.activeWorkSession = {

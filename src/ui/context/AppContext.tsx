@@ -352,6 +352,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       preferredStorageProvider: 'browser',
       attentionSystemEnabled: false,
       attentionUnitMinutes: 15,
+      zenCurtainEnabled: true,
     };
   });
 
@@ -1775,6 +1776,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     checkAndTriggerProjectPlanningRef.current = checkAndTriggerProjectPlanning;
   }, [checkAndTriggerProjectPlanning]);
 
+  const pendingPlanningMutationRef = useRef<(() => Promise<void>) | null>(null);
+
+  const shouldInterceptPlanningMutation = useCallback(
+    (_projectId?: string): boolean => {
+      if (!preferences.attentionSystemEnabled) return false;
+      const currentSession = activeWorkSessionRef.current || activeWorkSession;
+      return Boolean(
+        currentSession &&
+        currentSession.sessionType === 'execution'
+      );
+    },
+    [preferences.attentionSystemEnabled, activeWorkSession]
+  );
+
+  const interceptPlanningMutation = useCallback(
+    (projectId: string, projectName: string, reason: string, mutation: () => Promise<void>) => {
+      pendingPlanningMutationRef.current = mutation;
+      setPlanningInterception({
+        isOpen: true,
+        projectId,
+        projectName,
+        reason,
+      });
+    },
+    []
+  );
+
   const [isWholeProjectView, setIsWholeProjectView] = useState<boolean>(false);
   const toggleWholeProjectView = useCallback(() => {
     setIsWholeProjectView((prev) => !prev);
@@ -2152,10 +2180,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       cognitiveDemand?: CognitiveDemand,
       nodeType?: NodeType
     ): Promise<Node | null> => {
-      if (!activeProjectDoc) return null;
+      const currentDoc = activeProjectDocRef.current || activeProjectDoc;
+      if (!currentDoc) return null;
+
+      const pId = currentDoc.project.id;
+      const pName = currentDoc.project.name;
+
+      if (shouldInterceptPlanningMutation(pId)) {
+        interceptPlanningMutation(pId, pName, 'add_node', async () => {
+          await addNode(text, dueDate, parentNodeId, position, estimatedAU, environment, cognitiveDemand, nodeType);
+        });
+        return null;
+      }
+
       const effectiveDueDate = dueDate ?? '';
       const newNode = ProjectService.createNode(
-        activeProjectDoc.project.id,
+        currentDoc.project.id,
         text,
         effectiveDueDate,
         parentNodeId,
@@ -2166,30 +2206,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         nodeType || 'standard'
       );
       const updatedDoc: ProjectDocument = {
-        ...activeProjectDoc,
+        ...currentDoc,
         project: {
-          ...activeProjectDoc.project,
+          ...currentDoc.project,
           lastActiveNodeId: newNode.id,
         },
-        nodes: [...activeProjectDoc.nodes, newNode],
+        nodes: [...currentDoc.nodes, newNode],
       };
       await saveProjectDoc(updatedDoc);
 
       logActivityEvent('task_created', newNode.id, {
         entityText: newNode.text,
-        projectId: activeProjectDoc.project.id,
-        projectName: activeProjectDoc.project.name,
+        projectId: currentDoc.project.id,
+        projectName: currentDoc.project.name,
         metadata: estimatedAU !== undefined ? { estimatedAU } : undefined,
       }).catch(() => {});
       if (estimatedAU !== undefined && estimatedAU > 0) {
         logActivityEvent('estimate_changed', newNode.id, {
           entityText: newNode.text,
-          projectId: activeProjectDoc.project.id,
+          projectId: currentDoc.project.id,
           metadata: { newAU: estimatedAU },
         }).catch(() => {});
       }
 
-      recordActiveNode(newNode, activeProjectDoc.project.id).catch(() => {});
+      recordActiveNode(newNode, currentDoc.project.id).catch(() => {});
 
       if (newNode.dueDate) {
         GCalendarSync.syncTaskDateChange({
@@ -2197,14 +2237,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           newDueDate: newNode.dueDate,
           taskText: newNode.text,
           status: newNode.status,
-          projectId: activeProjectDoc.project.id,
-          projectName: activeProjectDoc.project.name,
+          projectId: currentDoc.project.id,
+          projectName: currentDoc.project.name,
         }).catch((err) => console.warn('[AppContext] Calendar sync on addNode failed:', err));
       }
-      checkAndTriggerProjectPlanningRef.current(activeProjectDoc.project.id, activeProjectDoc.project.name, 'add_node').catch(() => {});
+      checkAndTriggerProjectPlanningRef.current(currentDoc.project.id, currentDoc.project.name, 'add_node').catch(() => {});
       return newNode;
     },
-    [activeProjectDoc, saveProjectDoc, logActivityEvent, recordActiveNode]
+    [activeProjectDoc, saveProjectDoc, logActivityEvent, recordActiveNode, shouldInterceptPlanningMutation, interceptPlanningMutation]
   );
 
   const updateNode = useCallback(
@@ -2361,6 +2401,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const currentDoc = activeProjectDocRef.current || activeProjectDoc;
       if (!currentDoc) return;
 
+      const pId = currentDoc.project.id;
+      const pName = currentDoc.project.name;
+
+      if (shouldInterceptPlanningMutation(pId)) {
+        interceptPlanningMutation(pId, pName, 'delete_node', async () => {
+          await deleteNode(nodeId);
+        });
+        return;
+      }
+
       // If active work session is on this node or one of its descendants, stop work immediately!
       const session = activeWorkSessionRef.current || activeWorkSession;
       if (
@@ -2393,7 +2443,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       checkAndTriggerProjectPlanningRef.current(currentDoc.project.id, currentDoc.project.name, 'delete_node').catch(() => {});
     },
-    [activeProjectDoc, selectedNode, saveProjectDoc, activeWorkSession, stopWork]
+    [activeProjectDoc, selectedNode, saveProjectDoc, activeWorkSession, stopWork, shouldInterceptPlanningMutation, interceptPlanningMutation]
   );
 
   const updateNodePositions = useCallback(
@@ -2947,6 +2997,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const currentDoc = activeProjectDocRef.current || activeProjectDoc;
       if (!currentDoc) return { success: false, error: 'No active project' };
 
+      const pId = currentDoc.project.id;
+      const pName = currentDoc.project.name;
+
+      if (shouldInterceptPlanningMutation(pId)) {
+        interceptPlanningMutation(pId, pName, 'add_edge', async () => {
+          await addEdge(fromNodeId, toNodeId);
+        });
+        return { success: false, error: 'Intercepted for planning' };
+      }
+
       const result = ProjectService.createEdge(
         currentDoc.project.id,
         fromNodeId,
@@ -2967,31 +3027,53 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       checkAndTriggerProjectPlanningRef.current(currentDoc.project.id, currentDoc.project.name, 'add_edge').catch(() => {});
       return { success: true };
     },
-    [activeProjectDoc, saveProjectDoc]
+    [activeProjectDoc, saveProjectDoc, shouldInterceptPlanningMutation, interceptPlanningMutation]
   );
 
   const deleteEdge = useCallback(
     async (edgeId: string) => {
       const currentDoc = activeProjectDocRef.current || activeProjectDoc;
       if (!currentDoc) return;
+
+      const pId = currentDoc.project.id;
+      const pName = currentDoc.project.name;
+
+      if (shouldInterceptPlanningMutation(pId)) {
+        interceptPlanningMutation(pId, pName, 'delete_edge', async () => {
+          await deleteEdge(edgeId);
+        });
+        return;
+      }
+
       SyncCoordinator.recordEdgeDeletion(edgeId);
       const updatedDoc = ProjectService.deleteEdgeFromProject(currentDoc, edgeId);
       await saveProjectDoc(updatedDoc);
       checkAndTriggerProjectPlanningRef.current(currentDoc.project.id, currentDoc.project.name, 'delete_edge').catch(() => {});
     },
-    [activeProjectDoc, saveProjectDoc]
+    [activeProjectDoc, saveProjectDoc, shouldInterceptPlanningMutation, interceptPlanningMutation]
   );
 
   const deleteEdges = useCallback(
     async (edgeIds: string[]) => {
       const currentDoc = activeProjectDocRef.current || activeProjectDoc;
       if (!currentDoc || edgeIds.length === 0) return;
+
+      const pId = currentDoc.project.id;
+      const pName = currentDoc.project.name;
+
+      if (shouldInterceptPlanningMutation(pId)) {
+        interceptPlanningMutation(pId, pName, 'delete_edges', async () => {
+          await deleteEdges(edgeIds);
+        });
+        return;
+      }
+
       SyncCoordinator.recordEdgeDeletions(edgeIds);
       const updatedDoc = ProjectService.deleteEdgesFromProject(currentDoc, edgeIds);
       await saveProjectDoc(updatedDoc);
       checkAndTriggerProjectPlanningRef.current(currentDoc.project.id, currentDoc.project.name, 'delete_edges').catch(() => {});
     },
-    [activeProjectDoc, saveProjectDoc]
+    [activeProjectDoc, saveProjectDoc, shouldInterceptPlanningMutation, interceptPlanningMutation]
   );
 
   const reconnectEdge = useCallback(
@@ -3002,6 +3084,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     ): Promise<{ success: boolean; error?: string }> => {
       const currentDoc = activeProjectDocRef.current || activeProjectDoc;
       if (!currentDoc) return { success: false, error: 'No active project' };
+
+      const pId = currentDoc.project.id;
+      const pName = currentDoc.project.name;
+
+      if (shouldInterceptPlanningMutation(pId)) {
+        interceptPlanningMutation(pId, pName, 'reconnect_edge', async () => {
+          await reconnectEdge(edgeId, newFromNodeId, newToNodeId);
+        });
+        return { success: false, error: 'Intercepted for planning' };
+      }
 
       const result = ProjectService.reconnectEdge(
         currentDoc,
@@ -3018,7 +3110,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       checkAndTriggerProjectPlanningRef.current(currentDoc.project.id, currentDoc.project.name, 'reconnect_edge').catch(() => {});
       return { success: true };
     },
-    [activeProjectDoc, saveProjectDoc]
+    [activeProjectDoc, saveProjectDoc, shouldInterceptPlanningMutation, interceptPlanningMutation]
   );
 
   const spliceNodeIntoEdge = useCallback(
@@ -3029,6 +3121,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     ): Promise<{ success: boolean; error?: string }> => {
       const currentDoc = activeProjectDocRef.current || activeProjectDoc;
       if (!currentDoc) return { success: false, error: 'No active project' };
+
+      const pId = currentDoc.project.id;
+      const pName = currentDoc.project.name;
+
+      if (shouldInterceptPlanningMutation(pId)) {
+        interceptPlanningMutation(pId, pName, 'splice_node', async () => {
+          await spliceNodeIntoEdge(nodeId, edgeId, newPosition);
+        });
+        return { success: false, error: 'Intercepted for planning' };
+      }
 
       const origNode = currentDoc.nodes.find((n) => n.id === nodeId);
       const result = ProjectService.spliceNodeIntoEdge(currentDoc, nodeId, edgeId, newPosition);
@@ -3056,7 +3158,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       checkAndTriggerProjectPlanningRef.current(currentDoc.project.id, currentDoc.project.name, 'splice_node').catch(() => {});
       return { success: true };
     },
-    [activeProjectDoc, saveProjectDoc]
+    [activeProjectDoc, saveProjectDoc, shouldInterceptPlanningMutation, interceptPlanningMutation]
   );
 
   const nestNode = useCallback(
@@ -3065,6 +3167,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       targetParentId: string
     ): Promise<{ success: boolean; error?: string }> => {
       if (!activeProjectDoc) return { success: false, error: 'No active project' };
+
+      const pId = activeProjectDoc.project.id;
+      const pName = activeProjectDoc.project.name;
+
+      if (shouldInterceptPlanningMutation(pId)) {
+        interceptPlanningMutation(pId, pName, 'nest_node', async () => {
+          await nestNode(sourceNodeId, targetParentId);
+        });
+        return { success: false, error: 'Intercepted for planning' };
+      }
 
       const sourceNode = activeProjectDoc.nodes.find((n) => n.id === sourceNodeId);
       const targetParent = activeProjectDoc.nodes.find((n) => n.id === targetParentId);
@@ -3092,12 +3204,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       checkAndTriggerProjectPlanningRef.current(activeProjectDoc.project.id, activeProjectDoc.project.name, 'nest_node').catch(() => {});
       return { success: true };
     },
-    [activeProjectDoc, saveProjectDoc, logActivityEvent, debouncedCloudSync]
+    [activeProjectDoc, saveProjectDoc, logActivityEvent, debouncedCloudSync, shouldInterceptPlanningMutation, interceptPlanningMutation]
   );
 
   const decomposeNode = useCallback(
     async (parentNodeId: string, subtasks: { text: string; dueDate?: string; estimatedAU?: number }[]) => {
       if (!activeProjectDoc) return;
+
+      const pId = activeProjectDoc.project.id;
+      const pName = activeProjectDoc.project.name;
+
+      if (shouldInterceptPlanningMutation(pId)) {
+        interceptPlanningMutation(pId, pName, 'decompose_node', async () => {
+          await decomposeNode(parentNodeId, subtasks);
+        });
+        return;
+      }
+
       const parentNode = activeProjectDoc.nodes.find((n) => n.id === parentNodeId);
       if (!parentNode) return;
 
@@ -3110,7 +3233,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
       checkAndTriggerProjectPlanningRef.current(activeProjectDoc.project.id, activeProjectDoc.project.name, 'decompose_node').catch(() => {});
     },
-    [activeProjectDoc, saveProjectDoc]
+    [activeProjectDoc, saveProjectDoc, shouldInterceptPlanningMutation, interceptPlanningMutation]
   );
 
   const addNote = useCallback(
@@ -3513,8 +3636,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Planning Interception Guardrail Resolver
   const resolvePlanningInterception = useCallback(
     async (choice: 'drop_thought' | 'switch_to_planning' | 'cancel', thoughtText?: string) => {
-      if (!planningInterception) return;
-      const { projectId, projectName } = planningInterception;
+      const interception = planningInterception;
+      const pendingMutation = pendingPlanningMutationRef.current;
+      pendingPlanningMutationRef.current = null;
+      setPlanningInterception(null);
+
+      if (!interception) return;
+      const { projectId, projectName } = interception;
 
       if (choice === 'drop_thought') {
         if (thoughtText && thoughtText.trim()) {
@@ -3528,17 +3656,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         } else {
           setIsThoughtsPoolOpen(true);
         }
-        setPlanningInterception(null);
       } else if (choice === 'switch_to_planning') {
-        setPlanningInterception(null);
         if (projectId) {
+          await stopWork();
           await startProjectPlanning(projectId, projectName);
         }
+        if (pendingMutation) {
+          try {
+            await pendingMutation();
+          } catch (err) {
+            console.error('[AppContext] Failed to execute pending planning mutation:', err);
+          }
+        }
       } else {
-        setPlanningInterception(null);
+        // cancel: pending mutation is cleared and discarded!
       }
     },
-    [planningInterception, activeWorkSession, addDroppedThought, startProjectPlanning]
+    [planningInterception, activeWorkSession, addDroppedThought, stopWork, startProjectPlanning, setIsThoughtsPoolOpen]
   );
 
   // Zen Focus Curtain
@@ -4203,7 +4337,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         convertDroppedThought,
         planningInterception,
         resolvePlanningInterception,
-        zenCurtainEnabled: preferences.zenCurtainEnabled ?? false,
+        zenCurtainEnabled: preferences.zenCurtainEnabled !== false,
         setZenCurtainEnabled,
         parkProject,
         unparkProject,

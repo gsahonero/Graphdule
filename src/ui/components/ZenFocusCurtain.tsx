@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import {
   Brain,
   Eye,
-  Sparkles,
+  Droplet,
   Minimize2,
   Calendar,
   Clock,
@@ -31,9 +31,9 @@ export const ZenFocusCurtain: React.FC = () => {
   const [justDropped, setJustDropped] = useState(false);
   const peekTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Active only if user enabled Zen Curtain and an execution session is running
+  // Active by default if an execution session is running (unless explicitly disabled)
   const isCurtainActive =
-    Boolean(preferences.zenCurtainEnabled) &&
+    preferences.zenCurtainEnabled !== false &&
     Boolean(activeWorkSession) &&
     activeWorkSession?.sessionType === 'execution';
 
@@ -78,7 +78,7 @@ export const ZenFocusCurtain: React.FC = () => {
   return (
     <div
       onDoubleClick={handleDoubleClickBackdrop}
-      className={`fixed inset-0 z-25 flex items-center justify-center p-4 transition-all duration-300 select-none ${
+      className={`fixed inset-0 z-40 flex items-center justify-center p-4 pb-14 md:pb-12 transition-all duration-300 select-none ${
         isPeeking
           ? 'bg-slate-950/5 backdrop-blur-[0px] pointer-events-none'
           : 'bg-slate-950/60 backdrop-blur-md pointer-events-auto'
@@ -180,7 +180,7 @@ export const ZenFocusCurtain: React.FC = () => {
           <form onSubmit={handleQuickDrop} className="space-y-1.5 pt-2 border-t border-slate-100 dark:border-slate-800">
             <div className="flex items-center justify-between text-[11px]">
               <span className="font-medium text-slate-600 dark:text-slate-300 flex items-center space-x-1">
-                <Sparkles className="w-3.5 h-3.5 text-teal-500" />
+                <Droplet className="w-3.5 h-3.5 text-teal-500" />
                 <span>Distracting thought? Park it in the Pool:</span>
               </span>
               <button
