@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import React from 'react';
 import { KeyboardShortcutsModal } from '../../src/ui/components/KeyboardShortcutsModal';
 import { BottomBar } from '../../src/ui/components/BottomBar';
 import { AppContext } from '../../src/ui/context/AppContext';

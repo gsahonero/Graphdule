@@ -10,7 +10,6 @@ import {
 import { ColorPaletteId } from '../../src/domain/models/types';
 import { AppContext } from '../../src/ui/context/AppContext';
 import { AppearanceModal } from '../../src/ui/components/AppearanceModal';
-import { Header } from '../../src/ui/components/Header';
 import { BottomBar } from '../../src/ui/components/BottomBar';
 
 describe('Science-Backed Color Palettes Utility', () => {
