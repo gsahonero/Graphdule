@@ -11,6 +11,7 @@ import { ColorPaletteId } from '../../src/domain/models/types';
 import { AppContext } from '../../src/ui/context/AppContext';
 import { AppearanceModal } from '../../src/ui/components/AppearanceModal';
 import { Header } from '../../src/ui/components/Header';
+import { BottomBar } from '../../src/ui/components/BottomBar';
 
 describe('Science-Backed Color Palettes Utility', () => {
   beforeEach(() => {
@@ -242,11 +243,11 @@ describe('Header Appearance Controls', () => {
 
     render(
       <AppContext.Provider value={mockContext}>
-        <Header />
+        <BottomBar />
       </AppContext.Provider>
     );
 
-    const appearanceBtn = screen.getByTestId('header-appearance-button');
+    const appearanceBtn = screen.getByTestId('bottombar-appearance-button');
     expect(appearanceBtn).toBeInTheDocument();
 
     fireEvent.click(appearanceBtn);

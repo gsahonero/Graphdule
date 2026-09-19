@@ -249,6 +249,8 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    e.stopPropagation();
+    e.nativeEvent?.stopImmediatePropagation?.();
     if (e.key === 'Enter') {
       e.preventDefault();
       handleFinishEditing();
@@ -259,6 +261,7 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
         onQuickAppendChild();
       }
     } else if (e.key === 'Escape') {
+      e.preventDefault();
       setEditText(node.text);
       setIsEditing(false);
     }
@@ -641,18 +644,23 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
           {/* Popover Task Title - Inline Canvas Editable */}
             <div className="font-semibold text-slate-800 dark:text-slate-100 text-xs leading-snug">
               {isEditing ? (
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={editText}
-                  onChange={(e) => setEditText(e.target.value)}
-                  onBlur={handleFinishEditing}
-                  onKeyDown={handleKeyDown}
-                  onClick={(e) => e.stopPropagation()}
-                  onDoubleClick={(e) => e.stopPropagation()}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  className="w-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-semibold px-2 py-1 rounded border border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-400 text-xs shadow-inner"
-                />
+                <div className="space-y-1">
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    value={editText}
+                    onChange={(e) => setEditText(e.target.value)}
+                    onBlur={handleFinishEditing}
+                    onKeyDown={handleKeyDown}
+                    onClick={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    className="w-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-semibold px-2 py-1 rounded border border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-400 text-xs shadow-inner"
+                  />
+                  <div className="flex items-center justify-between text-[9px] text-slate-400 dark:text-slate-500 font-normal px-0.5 leading-tight select-none">
+                    <span>↵ Enter save · Tab child · Esc cancel</span>
+                  </div>
+                </div>
               ) : (
                 <div
                   onDoubleClick={(e) => {
@@ -1135,18 +1143,24 @@ export const GraphNode: React.FC<NodeProps> = ({ data, selected }) => {
       {/* Node Text - Inline Canvas Editable */}
       <div className="font-semibold text-slate-800 dark:text-slate-100 text-xs leading-snug">
         {isEditing ? (
-          <input
-            ref={inputRef}
-            type="text"
-            value={editText}
-            onChange={(e) => setEditText(e.target.value)}
-            onBlur={handleFinishEditing}
-            onKeyDown={handleKeyDown}
-            onClick={(e) => e.stopPropagation()}
-            onDoubleClick={(e) => e.stopPropagation()}
-            onMouseDown={(e) => e.stopPropagation()}
-            className="w-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-semibold px-2 py-1 rounded border border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-400 text-xs shadow-inner"
-          />
+          <div className="space-y-1">
+            <input
+              ref={inputRef}
+              type="text"
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              onBlur={handleFinishEditing}
+              onKeyDown={handleKeyDown}
+              onClick={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              className="w-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-semibold px-2 py-1 rounded border border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-400 text-xs shadow-inner"
+            />
+            <div className="flex items-center justify-between text-[9px] text-slate-400 dark:text-slate-500 font-normal px-0.5 leading-tight select-none">
+              <span>↵ Enter save · Tab child · Esc cancel</span>
+              <span className="opacity-75 font-mono">!spike !high [1h]</span>
+            </div>
+          </div>
         ) : (
           <div
             onDoubleClick={(e) => {

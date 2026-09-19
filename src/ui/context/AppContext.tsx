@@ -115,6 +115,11 @@ interface AppContextType {
   updateNodeStatus: (nodeId: string, status: NodeStatus) => Promise<void>;
   moveNodeDate: (nodeId: string, newDueDate: string, force?: boolean) => Promise<void>;
   applyPendingCascade: () => Promise<void>;
+  batchMoveDates: (
+    items: { id: string; isStandalone?: boolean; projectId?: string }[],
+    newDueDate: string,
+    cascade?: boolean
+  ) => Promise<void>;
   addEdge: (fromNodeId: string, toNodeId: string) => Promise<{ success: boolean; error?: string }>;
   deleteEdge: (edgeId: string) => Promise<void>;
   deleteEdges: (edgeIds: string[]) => Promise<void>;
@@ -271,6 +276,10 @@ interface AppContextType {
   setColorPalette: (palette: ColorPaletteId) => Promise<void>;
   isAppearanceModalOpen: boolean;
   setIsAppearanceModalOpen: (open: boolean) => void;
+
+  // Keyboard Shortcuts Modal
+  isShortcutsModalOpen: boolean;
+  setIsShortcutsModalOpen: (open: boolean) => void;
 }
 
 export const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -312,6 +321,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [pendingCascade, setPendingCascade] = useState<CascadeImpactPreview | null>(null);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState(false);
+  const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
 
   // Idea Seeds and Activity Log states
   const [ideaSeeds, setIdeaSeeds] = useState<IdeaSeed[]>([]);
@@ -1064,10 +1074,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Global Keyboard Shortcuts for Undo (Ctrl+Z / Cmd+Z) and Redo (Ctrl+Y / Ctrl+Shift+Z / Cmd+Shift+Z)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent);
-      const isModifier = isMac ? e.metaKey : e.ctrlKey;
-      if (!isModifier) return;
-
       // Bypass when typing inside native inputs, textareas, or contentEditable elements
       const target = e.target as HTMLElement | null;
       const isInput =
@@ -1075,6 +1081,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         target?.tagName === 'TEXTAREA' ||
         target?.isContentEditable;
       if (isInput) return;
+
+      // Shortcuts modal toggle: ? (Shift+/) or Ctrl+/ (Cmd+/)
+      if (e.key === '?' || ((e.ctrlKey || e.metaKey) && e.key === '/')) {
+        e.preventDefault();
+        setIsShortcutsModalOpen((prev) => !prev);
+        return;
+      }
+
+      const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent);
+      const isModifier = isMac ? e.metaKey : e.ctrlKey;
+      if (!isModifier) return;
 
       const key = e.key.toLowerCase();
 
@@ -2569,7 +2586,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               nodeId,
               newDueDate,
               activeProjectDoc.nodes,
-              activeProjectDoc.edges
+              activeProjectDoc.edges,
+              activeProjectDoc.project.id
             );
 
             if (cascade) {
@@ -2609,7 +2627,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 nodeId,
                 newDueDate,
                 doc.nodes,
-                doc.edges
+                doc.edges,
+                doc.project.id
               );
 
               if (cascade) {
@@ -2669,26 +2688,194 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const applyPendingCascade = useCallback(async () => {
-    if (!activeProjectDoc || !pendingCascade) return;
-    const updatedNodes = TemporalService.applyCascadeShift(pendingCascade, activeProjectDoc.nodes);
-    await saveProjectDoc({
-      ...activeProjectDoc,
-      nodes: updatedNodes,
-    });
-    for (const node of updatedNodes) {
-      if (node.dueDate) {
-        GCalendarSync.syncTaskDateChange({
-          taskId: node.id,
-          newDueDate: node.dueDate,
-          taskText: node.text,
-          status: node.status,
-          projectId: activeProjectDoc.project.id,
-          projectName: activeProjectDoc.project.name,
-        }).catch(() => {});
+    if (!pendingCascade) return;
+    try {
+      const activeDoc = activeProjectDocRef.current || activeProjectDoc;
+      if (activeDoc && activeDoc.nodes.some((n) => n.id === pendingCascade.targetNodeId)) {
+        const shifted = TemporalService.applyCascadeShift(pendingCascade, activeDoc.nodes);
+        const updatedNodes = TemporalService.syncParentDueDates(shifted);
+        await saveProjectDoc({
+          ...activeDoc,
+          nodes: updatedNodes,
+        });
+        for (const node of updatedNodes) {
+          if (node.dueDate) {
+            GCalendarSync.syncTaskDateChange({
+              taskId: node.id,
+              newDueDate: node.dueDate,
+              taskText: node.text,
+              status: node.status,
+              projectId: activeDoc.project.id,
+              projectName: activeDoc.project.name,
+            }).catch(() => {});
+          }
+        }
+      } else {
+        // Search across other projects
+        const projs = await storage.listProjects();
+        for (const p of projs) {
+          const doc = await storage.readProject(p.id);
+          if (
+            doc &&
+            (doc.nodes.some((n) => n.id === pendingCascade.targetNodeId) ||
+              (pendingCascade.projectId && doc.project.id === pendingCascade.projectId))
+          ) {
+            const shifted = TemporalService.applyCascadeShift(pendingCascade, doc.nodes);
+            const updatedNodes = TemporalService.syncParentDueDates(shifted);
+            const updatedDoc: ProjectDocument = { ...doc, nodes: updatedNodes };
+            await storage.writeProject(updatedDoc);
+            if (activeProjectDoc && activeProjectDoc.project.id === p.id) {
+              setActiveProjectDoc(updatedDoc);
+            }
+            for (const node of updatedNodes) {
+              if (node.dueDate) {
+                GCalendarSync.syncTaskDateChange({
+                  taskId: node.id,
+                  newDueDate: node.dueDate,
+                  taskText: node.text,
+                  status: node.status,
+                  projectId: doc.project.id,
+                  projectName: doc.project.name,
+                }).catch(() => {});
+              }
+            }
+            break;
+          }
+        }
       }
+    } finally {
+      setPendingCascade(null);
+      await refreshData();
     }
-    setPendingCascade(null);
-  }, [activeProjectDoc, pendingCascade, saveProjectDoc]);
+  }, [activeProjectDoc, pendingCascade, saveProjectDoc, storage, refreshData]);
+
+  const batchMoveDates = useCallback(
+    async (
+      items: { id: string; isStandalone?: boolean; projectId?: string }[],
+      newDueDate: string,
+      cascade = true
+    ) => {
+      if (!items.length || !newDueDate) return;
+
+      const standaloneIds = new Set(
+        items.filter((it) => it.isStandalone || it.projectId === 'standalone').map((it) => it.id)
+      );
+      const projectItems = items.filter((it) => !standaloneIds.has(it.id));
+
+      // 1. Handle standalone tasks
+      if (standaloneIds.size > 0) {
+        const standalones = await storage.readStandaloneTasks();
+        let changed = false;
+        const updatedStandalones = standalones.map((st) => {
+          if (standaloneIds.has(st.id)) {
+            changed = true;
+            return {
+              ...st,
+              dueDate: newDueDate,
+              updatedAt: new Date().toISOString(),
+            };
+          }
+          return st;
+        });
+
+        if (changed) {
+          await storage.writeStandaloneTasks(updatedStandalones);
+          setStandaloneTasks(updatedStandalones);
+          for (const st of updatedStandalones) {
+            if (standaloneIds.has(st.id)) {
+              GCalendarSync.syncTaskDateChange({
+                taskId: st.id,
+                newDueDate,
+                taskText: st.text,
+                status: st.status,
+                projectId: 'standalone',
+                projectName: 'Standalone Tasks',
+              }).catch(() => {});
+            }
+          }
+        }
+      }
+
+      // 2. Handle project nodes
+      if (projectItems.length > 0) {
+        const projectMap = new Map<string, string[]>();
+        const unassignedNodeIds: string[] = [];
+
+        for (const item of projectItems) {
+          if (item.projectId && item.projectId !== 'unknown' && item.projectId !== 'standalone') {
+            const list = projectMap.get(item.projectId) || [];
+            list.push(item.id);
+            projectMap.set(item.projectId, list);
+          } else {
+            unassignedNodeIds.push(item.id);
+          }
+        }
+
+        if (unassignedNodeIds.length > 0) {
+          const projs = await storage.listProjects();
+          for (const p of projs) {
+            const doc = await storage.readProject(p.id);
+            if (doc) {
+              const matchingNodes = doc.nodes.filter((n) => unassignedNodeIds.includes(n.id));
+              if (matchingNodes.length > 0) {
+                const list = projectMap.get(p.id) || [];
+                matchingNodes.forEach((n) => list.push(n.id));
+                projectMap.set(p.id, list);
+              }
+            }
+          }
+        }
+
+        const activeDoc = activeProjectDocRef.current || activeProjectDoc;
+
+        for (const [projId, nodeIds] of projectMap.entries()) {
+          const isCurrentActive = activeDoc && activeDoc.project.id === projId;
+          const currentDoc = isCurrentActive ? activeDoc : await storage.readProject(projId);
+          if (!currentDoc) continue;
+
+          const updatedNodes = TemporalService.batchShiftNodes(
+            nodeIds,
+            newDueDate,
+            currentDoc.nodes,
+            currentDoc.edges,
+            cascade
+          );
+
+          if (isCurrentActive) {
+            await saveProjectDoc({
+              ...currentDoc,
+              nodes: updatedNodes,
+            });
+          } else {
+            const updatedDoc: ProjectDocument = { ...currentDoc, nodes: updatedNodes };
+            await storage.writeProject(updatedDoc);
+            if (activeProjectDoc && activeProjectDoc.project.id === projId) {
+              setActiveProjectDoc(updatedDoc);
+            }
+          }
+
+          const originalDateMap = new Map<string, string | undefined>(
+            currentDoc.nodes.map((n) => [n.id, n.dueDate])
+          );
+          for (const node of updatedNodes) {
+            if (node.dueDate && node.dueDate !== originalDateMap.get(node.id)) {
+              GCalendarSync.syncTaskDateChange({
+                taskId: node.id,
+                newDueDate: node.dueDate,
+                taskText: node.text,
+                status: node.status,
+                projectId: currentDoc.project.id,
+                projectName: currentDoc.project.name,
+              }).catch(() => {});
+            }
+          }
+        }
+      }
+
+      await refreshData();
+    },
+    [activeProjectDoc, saveProjectDoc, storage, refreshData]
+  );
 
   const addEdge = useCallback(
     async (fromNodeId: string, toNodeId: string): Promise<{ success: boolean; error?: string }> => {
@@ -3713,6 +3900,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateNodeStatus,
         moveNodeDate,
         applyPendingCascade,
+        batchMoveDates,
         addEdge,
         deleteEdge,
         deleteEdges,
@@ -3829,6 +4017,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setColorPalette,
         isAppearanceModalOpen,
         setIsAppearanceModalOpen,
+        isShortcutsModalOpen,
+        setIsShortcutsModalOpen,
       }}
     >
       {children}

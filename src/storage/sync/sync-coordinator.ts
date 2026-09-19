@@ -358,16 +358,48 @@ export class SyncCoordinator {
     );
     const cloudProjectIds = new Set<string>();
 
+    const lastSyncStr = this.state.lastSyncedAt;
+    const lastSyncTime = lastSyncStr ? new Date(lastSyncStr).getTime() : 0;
+    const cloudFilesMap = new Map<string, (typeof cloudFiles)[0]>(cloudFiles.map((f) => [f.name, f]));
+
     for (const cf of cloudProjectFiles) {
       const projectId = cf.name.replace('project_', '').replace('.json', '');
       if (projectId === DEFAULT_SAMPLE_PROJECT_ID) continue;
       cloudProjectIds.add(projectId);
 
+      const deletedAt = projectTombstones[projectId];
+      const cfModified = cf.modifiedTime ? new Date(cf.modifiedTime).getTime() : 0;
+
+      // If project was deleted locally and cloud file modified time is older than or equal to deletion time
+      if (deletedAt && new Date(deletedAt).getTime() >= cfModified) {
+        await GDriveClient.deleteFile(cf.id);
+        continue;
+      }
+
+      const localDoc = localProjectDocs.get(projectId);
+
+      // DIRECTED SYNC OPTIMIZATION:
+      // If we have a local copy and a prior sync baseline:
+      if (localDoc && lastSyncTime > 0) {
+        const localTime = new Date(localDoc.project.updatedAt || localDoc.exportedAt || 0).getTime();
+
+        // 1. Neither local nor cloud modified since last sync -> skip download & upload
+        if (cfModified <= lastSyncTime && localTime <= lastSyncTime) {
+          continue;
+        }
+
+        // 2. Only local was modified since last sync -> upload our authoritative local edition without downloading the cloud file
+        if (cfModified <= lastSyncTime && localTime > lastSyncTime) {
+          await GDriveClient.uploadJson(cf.name, localDoc, folderId);
+          continue;
+        }
+      }
+
+      // 3. Cloud file was modified or no prior sync: download to inspect / reconcile
       const cloudDoc = await GDriveClient.downloadJson<ProjectDocument>(cf.id);
       if (!cloudDoc || !cloudDoc.project || cloudDoc.project.id === DEFAULT_SAMPLE_PROJECT_ID) continue;
 
-      const deletedAt = projectTombstones[projectId];
-      const cloudTime = new Date(cloudDoc.project.updatedAt || cloudDoc.exportedAt || cf.modifiedTime || 0).getTime();
+      const cloudTime = new Date(cloudDoc.project.updatedAt || cloudDoc.exportedAt || cfModified || 0).getTime();
 
       // If project was deleted locally and cloud copy has not been updated since deletion
       if (deletedAt && new Date(deletedAt).getTime() >= cloudTime) {
@@ -378,14 +410,11 @@ export class SyncCoordinator {
         this.clearProjectTombstone(projectId);
       }
 
-      const localDoc = localProjectDocs.get(projectId);
       if (!localDoc) {
         // Exists in cloud but not locally -> download to local IndexedDB
         await localProvider.writeProject(cloudDoc);
       } else {
         const localTime = new Date(localDoc.project.updatedAt || localDoc.exportedAt || 0).getTime();
-        const lastSyncStr = this.state.lastSyncedAt;
-        const lastSyncTime = lastSyncStr ? new Date(lastSyncStr).getTime() : 0;
 
         if (localTime === cloudTime) {
           // Both in sync
@@ -431,7 +460,7 @@ export class SyncCoordinator {
     // 2. Sync Standalone Tasks
     const localTasks = await localProvider.readStandaloneTasks();
     const taskTombstones = this.getTaskTombstones();
-    const cloudTasksFile = await GDriveClient.findFileByName('standalone_tasks.json', folderId);
+    const cloudTasksFile = cloudFilesMap.get('standalone_tasks.json') || (await GDriveClient.findFileByName('standalone_tasks.json', folderId));
 
     if (cloudTasksFile) {
       const cloudTasks = (await GDriveClient.downloadJson<StandaloneTask[]>(cloudTasksFile.id)) || [];
@@ -454,7 +483,7 @@ export class SyncCoordinator {
 
     // 3. Sync Preferences
     const localPrefs = await localProvider.readPreferences();
-    const cloudPrefsFile = await GDriveClient.findFileByName('preferences.json', folderId);
+    const cloudPrefsFile = cloudFilesMap.get('preferences.json') || (await GDriveClient.findFileByName('preferences.json', folderId));
 
     if (cloudPrefsFile) {
       const cloudPrefs = (await GDriveClient.downloadJson<UserPreferences>(cloudPrefsFile.id)) || localPrefs;
@@ -472,7 +501,7 @@ export class SyncCoordinator {
     // 4. Sync Idea Seeds
     if (localProvider.readIdeaSeeds && localProvider.writeIdeaSeeds) {
       const localSeeds = await localProvider.readIdeaSeeds();
-      const cloudSeedsFile = await GDriveClient.findFileByName('idea_seeds.json', folderId);
+      const cloudSeedsFile = cloudFilesMap.get('idea_seeds.json') || (await GDriveClient.findFileByName('idea_seeds.json', folderId));
 
       if (cloudSeedsFile) {
         const cloudSeeds = (await GDriveClient.downloadJson<IdeaSeed[]>(cloudSeedsFile.id)) || [];
@@ -491,7 +520,7 @@ export class SyncCoordinator {
     // 5. Sync Activity Log
     if (localProvider.readActivityLog && localProvider.appendActivityEvents) {
       const localLog = await localProvider.readActivityLog();
-      const cloudLogFile = await GDriveClient.findFileByName('activity_log.json', folderId);
+      const cloudLogFile = cloudFilesMap.get('activity_log.json') || (await GDriveClient.findFileByName('activity_log.json', folderId));
 
       if (cloudLogFile) {
         const cloudLog = (await GDriveClient.downloadJson<ActivityEvent[]>(cloudLogFile.id)) || [];
@@ -512,7 +541,7 @@ export class SyncCoordinator {
     // 6. Sync Attention Reviews
     if (localProvider.readAttentionReviews && localProvider.writeAttentionReviews) {
       const localReviews = await localProvider.readAttentionReviews();
-      const cloudReviewsFile = await GDriveClient.findFileByName('attention_reviews.json', folderId);
+      const cloudReviewsFile = cloudFilesMap.get('attention_reviews.json') || (await GDriveClient.findFileByName('attention_reviews.json', folderId));
 
       if (cloudReviewsFile) {
         const cloudReviews = (await GDriveClient.downloadJson<WeeklyAttentionReviewRecord[]>(cloudReviewsFile.id)) || [];
@@ -543,6 +572,8 @@ export class SyncCoordinator {
     }
 
     const projectTombstones = this.getProjectTombstones();
+    const lastSyncStr = this.state.lastSyncedAt;
+    const lastSyncTime = lastSyncStr ? new Date(lastSyncStr).getTime() : 0;
 
     // Identify project files in cloud (named project_{id}.json), excluding the default sample project
     const cloudProjectFiles = cloudFiles.filter(
@@ -558,11 +589,34 @@ export class SyncCoordinator {
       if (projectId === DEFAULT_SAMPLE_PROJECT_ID) continue;
       cloudProjectIds.add(projectId);
 
+      const deletedAt = projectTombstones[projectId];
+      const cfModified = cf.lastModifiedDateTime ? new Date(cf.lastModifiedDateTime).getTime() : 0;
+
+      if (deletedAt && new Date(deletedAt).getTime() >= cfModified) {
+        await OneDriveClient.deleteFile(cf.name).catch(() => {});
+        continue;
+      }
+
+      const localDoc = localProjectDocs.get(projectId);
+
+      // DIRECTED SYNC OPTIMIZATION:
+      if (localDoc && lastSyncTime > 0) {
+        const localTime = new Date(localDoc.project.updatedAt || localDoc.exportedAt || 0).getTime();
+
+        if (cfModified <= lastSyncTime && localTime <= lastSyncTime) {
+          continue;
+        }
+
+        if (cfModified <= lastSyncTime && localTime > lastSyncTime) {
+          await OneDriveClient.uploadJson(cf.name, localDoc);
+          continue;
+        }
+      }
+
       const cloudDoc = await OneDriveClient.downloadJson<ProjectDocument>(cf.name);
       if (!cloudDoc || !cloudDoc.project || cloudDoc.project.id === DEFAULT_SAMPLE_PROJECT_ID) continue;
 
-      const deletedAt = projectTombstones[projectId];
-      const cloudTime = new Date(cloudDoc.project.updatedAt || cloudDoc.exportedAt || cf.lastModifiedDateTime || 0).getTime();
+      const cloudTime = new Date(cloudDoc.project.updatedAt || cloudDoc.exportedAt || cfModified || 0).getTime();
 
       if (deletedAt && new Date(deletedAt).getTime() >= cloudTime) {
         await OneDriveClient.deleteFile(cf.name).catch(() => {});
@@ -571,13 +625,10 @@ export class SyncCoordinator {
         this.clearProjectTombstone(projectId);
       }
 
-      const localDoc = localProjectDocs.get(projectId);
       if (!localDoc) {
         await localProvider.writeProject(cloudDoc);
       } else {
         const localTime = new Date(localDoc.project.updatedAt || localDoc.exportedAt || 0).getTime();
-        const lastSyncStr = this.state.lastSyncedAt;
-        const lastSyncTime = lastSyncStr ? new Date(lastSyncStr).getTime() : 0;
 
         if (localTime === cloudTime) {
           // in sync

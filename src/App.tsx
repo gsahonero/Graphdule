@@ -20,6 +20,8 @@ import { AppearanceModal } from './ui/components/AppearanceModal';
 import { PostTaskReceiptModal } from './ui/components/PostTaskReceiptModal';
 import { RecoveryCurtainModal } from './ui/components/RecoveryCurtainModal';
 import { BottomNav } from './ui/components/BottomNav';
+import { BottomBar } from './ui/components/BottomBar';
+import { KeyboardShortcutsModal } from './ui/components/KeyboardShortcutsModal';
 
 const AppContent: React.FC = () => {
   const {
@@ -33,6 +35,8 @@ const AppContent: React.FC = () => {
     recoveryTargetMinutes,
     stopWork,
     activeWorkElapsedSeconds,
+    isShortcutsModalOpen,
+    setIsShortcutsModalOpen,
   } = useApp();
 
   return (
@@ -40,7 +44,7 @@ const AppContent: React.FC = () => {
       <Header />
       <StorageWarningBanner />
 
-      <main className="flex-1 flex overflow-hidden relative pb-14 md:pb-0">
+      <main className="flex-1 flex overflow-hidden relative pb-14 md:pb-9">
         {currentView === 'projects' && <ProjectsView />}
         {currentView === 'project_detail' && <ProjectDetailView />}
         {currentView === 'my_day' && <MyDayView />}
@@ -51,12 +55,19 @@ const AppContent: React.FC = () => {
       {/* Mobile Bottom Navigation (< md) */}
       <BottomNav />
 
+      {/* Desktop Bottom Utility Bar (>= md) */}
+      <BottomBar />
+
       {/* Global Modals, Drawers & Persistent Active Session Bar */}
       <ActiveWorkBar />
       <NotesDrawer />
       <CascadeModal />
       <OnboardingModal />
       <CloudSyncModal />
+      <KeyboardShortcutsModal
+        isOpen={isShortcutsModalOpen}
+        onClose={() => setIsShortcutsModalOpen(false)}
+      />
       <TaskWorkSessionsModal />
       <CapacityConfigModal />
       <WeeklyCapacityModal />

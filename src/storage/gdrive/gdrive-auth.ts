@@ -178,7 +178,17 @@ export class GDriveAuth {
             }
           };
 
-          client.requestAccessToken({ prompt: interactive ? 'consent' : '' });
+          const requestConfig: any = {};
+          if (this.user?.email) {
+            requestConfig.hint = this.user.email;
+          }
+          if (!interactive) {
+            requestConfig.prompt = '';
+          } else {
+            requestConfig.prompt = this.user?.email ? '' : 'select_account';
+          }
+
+          client.requestAccessToken(requestConfig);
           return;
         }
 
@@ -263,7 +273,15 @@ export class GDriveAuth {
           });
           this.tokenClient = client;
 
-          client.requestAccessToken({ prompt: 'consent' });
+          const loginConfig: any = {};
+          if (this.user?.email) {
+            loginConfig.hint = this.user.email;
+            loginConfig.prompt = '';
+          } else {
+            loginConfig.prompt = 'select_account';
+          }
+
+          client.requestAccessToken(loginConfig);
           return;
         } catch (err: any) {
           console.warn('Google Identity Services client error, falling back to popup flow:', err);
@@ -272,13 +290,16 @@ export class GDriveAuth {
 
       // 2. Fallback OAuth 2.0 Popup Flow
       const redirectUri = window.location.origin.replace(/\/$/, '');
+      const hintParam = this.user?.email ? `&login_hint=${encodeURIComponent(this.user.email)}` : '';
+      const promptParam = this.user?.email ? '' : '&prompt=select_account';
       const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
         `client_id=${encodeURIComponent(finalClientId)}&` +
         `redirect_uri=${encodeURIComponent(redirectUri)}&` +
         `response_type=token&` +
         `scope=${encodeURIComponent(SCOPES)}&` +
-        `include_granted_scopes=true&` +
-        `prompt=consent`;
+        `include_granted_scopes=true` +
+        hintParam +
+        promptParam;
 
       const width = 500;
       const height = 600;
@@ -373,6 +394,20 @@ export class GDriveAuth {
 }
 
 // Automatically schedule token refresh on startup if Google Drive is the active provider
-if (typeof window !== 'undefined' && localStorage.getItem(ACTIVE_CLOUD_PROVIDER_KEY) === 'google_drive') {
-  GDriveAuth.scheduleTokenRefresh();
+if (typeof window !== 'undefined') {
+  if (localStorage.getItem(ACTIVE_CLOUD_PROVIDER_KEY) === 'google_drive') {
+    GDriveAuth.scheduleTokenRefresh();
+  }
+
+  // Silently check and renew token when tab is refocused or becomes visible
+  window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && localStorage.getItem(ACTIVE_CLOUD_PROVIDER_KEY) === 'google_drive') {
+      GDriveAuth.getValidToken().catch(() => {});
+    }
+  });
+  window.addEventListener('focus', () => {
+    if (localStorage.getItem(ACTIVE_CLOUD_PROVIDER_KEY) === 'google_drive') {
+      GDriveAuth.getValidToken().catch(() => {});
+    }
+  });
 }

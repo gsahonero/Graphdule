@@ -18,6 +18,7 @@ import {
   Scale,
   Heart,
   Palette,
+  Keyboard,
 } from 'lucide-react';
 import { SyncStatusIndicator } from './SyncStatusIndicator';
 import { BonsaiCompanion } from './BonsaiCompanion';
@@ -42,6 +43,7 @@ export const Header: React.FC = () => {
     healthConfig,
     colorPalette,
     setIsAppearanceModalOpen,
+    setIsShortcutsModalOpen,
   } = useApp();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -216,91 +218,6 @@ export const Header: React.FC = () => {
         {/* Unified Cloud & Calendar Sync status indicator (always visible) */}
         <SyncStatusIndicator />
 
-        {/* Desktop-Only Action Buttons */}
-        <div className="hidden md:flex items-center space-x-1.5">
-          {/* Install Web App Button */}
-          {!isStandalone && (
-            <button
-              onClick={handleInstallApp}
-              title="Install Graphdule as App on your Desktop or Phone"
-              className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 transition-all cursor-pointer shadow-xs"
-            >
-              <Smartphone className="w-3.5 h-3.5" />
-              <span>Install App</span>
-            </button>
-          )}
-
-          {/* Export Full Backup */}
-          <button
-            onClick={exportAllData}
-            title="Download Full Backup (JSON)"
-            className="p-1.5 rounded-md text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors border border-transparent hover:border-slate-200 dark:hover:border-slate-700 cursor-pointer"
-          >
-            <Download className="w-4 h-4" />
-          </button>
-
-          {/* Import JSON */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            title="Import Project from JSON"
-            className="p-1.5 rounded-md text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors border border-transparent hover:border-slate-200 dark:hover:border-slate-700 cursor-pointer"
-          >
-            <Upload className="w-4 h-4" />
-          </button>
-
-          {/* Date Format Toggle */}
-          <button
-            onClick={toggleDateFormat}
-            title={`Date Format: ${preferences.dateFormat === 'MMM_D_YYYY' ? 'Month, Day (Year)' : 'DD/MM/YYYY'} (Click to switch)`}
-            className="flex items-center space-x-1.5 px-2 py-1 rounded-md text-[11px] font-mono font-medium text-slate-600 dark:text-slate-300 hover:text-brand-600 dark:hover:text-brand-400 bg-slate-100 dark:bg-slate-950/80 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 transition-colors cursor-pointer"
-          >
-            <Calendar className="w-3.5 h-3.5 text-brand-500 shrink-0" />
-            <span>{preferences.dateFormat === 'MMM_D_YYYY' ? 'Mon, DD (YYYY)' : 'DD/MM/YYYY'}</span>
-          </button>
-
-          {/* Daily AU Capacity & Reality Check Settings */}
-          <button
-            onClick={() => setIsCapacityConfigModalOpen(true)}
-            title="Daily AU Capacity & Reality Check Settings"
-            data-testid="header-capacity-button"
-            className="flex items-center space-x-1.5 px-2 py-1 rounded-md text-[11px] font-mono font-medium text-slate-600 dark:text-slate-300 hover:text-brand-600 dark:hover:text-brand-400 bg-slate-100 dark:bg-slate-950/80 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 transition-colors cursor-pointer"
-          >
-            <Scale className="w-3.5 h-3.5 text-brand-500 shrink-0" />
-            <span>Capacity</span>
-          </button>
-
-          {/* Health & Focus Settings */}
-          <button
-            onClick={() => setIsHealthConfigModalOpen(true)}
-            title="Health & Focus Settings (Screen breaks, posture, ergonomics)"
-            data-testid="header-health-button"
-            className="flex items-center space-x-1.5 px-2 py-1 rounded-md text-[11px] font-mono font-medium text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 bg-slate-100 dark:bg-slate-950/80 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 transition-colors cursor-pointer"
-          >
-            <Heart className="w-3.5 h-3.5 text-rose-500 shrink-0 fill-rose-500/20" />
-            <span>Health</span>
-          </button>
-
-          {/* Appearance & Color Palette Settings */}
-          <button
-            onClick={() => setIsAppearanceModalOpen(true)}
-            title="Appearance & Color Palette (Science-backed themes)"
-            data-testid="header-appearance-button"
-            className="flex items-center space-x-1.5 px-2 py-1 rounded-md text-[11px] font-mono font-medium text-slate-600 dark:text-slate-300 hover:text-brand-600 dark:hover:text-brand-400 bg-slate-100 dark:bg-slate-950/80 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 transition-colors cursor-pointer"
-          >
-            <Palette className="w-3.5 h-3.5 text-brand-500 shrink-0" />
-            <span>Palette</span>
-          </button>
-
-          {/* Onboarding Guide */}
-          <button
-            onClick={() => setIsOnboardingOpen(true)}
-            title="Welcome Tour & Guide"
-            className="p-1.5 rounded-md text-slate-500 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-          >
-            <HelpCircle className="w-4 h-4" />
-          </button>
-        </div>
-
         {/* Dark/Light mode toggle (visible on all screens) */}
         <button
           onClick={toggleTheme}
@@ -331,6 +248,22 @@ export const Header: React.FC = () => {
                 onClick={() => setIsMobileMenuOpen(false)}
               />
               <div className="absolute right-0 top-full mt-2 w-60 bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-200 dark:border-slate-800 py-1.5 z-50 animate-in fade-in zoom-in-95 text-xs">
+                {/* Keyboard Shortcuts */}
+                <button
+                  onClick={() => {
+                    setIsShortcutsModalOpen(true);
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className="w-full px-3.5 py-2.5 text-left text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between cursor-pointer border-b border-slate-100 dark:border-slate-800/80 mb-0.5"
+                >
+                  <span className="flex items-center space-x-2">
+                    <Keyboard className="w-4 h-4 text-emerald-500 shrink-0" />
+                    <span className="font-medium text-slate-800 dark:text-slate-200">Keyboard Shortcuts</span>
+                  </span>
+                  <kbd className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono text-[10px] text-slate-500">
+                    ?
+                  </kbd>
+                </button>
                 {/* Cloud & Calendar Sync */}
                 <button
                   onClick={() => {

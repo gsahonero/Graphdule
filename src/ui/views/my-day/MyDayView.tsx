@@ -79,6 +79,7 @@ export const MyDayView: React.FC = () => {
     updateNode,
     updateNodeStatus,
     moveNodeDate,
+    batchMoveDates,
     addStandaloneTask,
     updateStandaloneTask,
     updateStandaloneTaskStatus,
@@ -173,11 +174,6 @@ export const MyDayView: React.FC = () => {
 
     return (
       <div className="flex items-center space-x-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-        <WorkButton
-          taskId={task.id}
-          taskText={task.text}
-          projectId={task.projectId}
-        />
         <AttentionUnitInput
           value={task.estimatedAU}
           onChange={(newAU) => updateTaskEstimate(task.id, newAU, isNode)}
@@ -352,14 +348,12 @@ export const MyDayView: React.FC = () => {
   };
 
   const handleRescheduleBatchToToday = async (tasks: (Node | StandaloneTask)[]) => {
-    for (const task of tasks) {
-      if ('projectId' in task && (task as Node).projectId) {
-        await moveNodeDate(task.id, today, true);
-      } else {
-        await updateStandaloneTask({ ...(task as StandaloneTask), dueDate: today });
-      }
-    }
-    await refreshData();
+    const items = tasks.map((task) => ({
+      id: task.id,
+      isStandalone: !('projectId' in task && (task as Node).projectId),
+      projectId: 'projectId' in task ? (task as Node).projectId : undefined,
+    }));
+    await batchMoveDates(items, today, false);
   };
 
   const handleOpenTriageAllLate = () => {
@@ -384,18 +378,18 @@ export const MyDayView: React.FC = () => {
   };
 
   const handleApplyTriageDelay = async (taskIds: string[], newDate: string, cascade: boolean) => {
-    for (const taskId of taskIds) {
-      const isStandalone = standaloneTasks.some((t) => t.id === taskId);
-      if (isStandalone) {
-        const target = standaloneTasks.find((t) => t.id === taskId);
-        if (target) {
-          await updateStandaloneTask({ ...target, dueDate: newDate });
-        }
-      } else {
-        await moveNodeDate(taskId, newDate, !cascade);
-      }
-    }
-    await refreshData();
+    const items = taskIds.map((id) => {
+      const triageItem = triageTasks.find((t) => t.id === id);
+      const isStandalone = triageItem
+        ? !triageItem.isNode
+        : standaloneTasks.some((s) => s.id === id);
+      return {
+        id,
+        isStandalone,
+        projectId: triageItem?.projectId,
+      };
+    });
+    await batchMoveDates(items, newDate, cascade);
   };
 
   // Hierarchy grouping for late tasks: projects with root tasks & subtask chains
@@ -1018,6 +1012,7 @@ export const MyDayView: React.FC = () => {
           </div>
 
           <div className="flex items-center space-x-1.5 shrink-0 ml-1" onClick={(e) => e.stopPropagation()}>
+            <WorkButton taskId={task.id} taskText={task.text} projectId={task.projectId} />
             {/* Quick Move to Today Button */}
             <button
               onClick={() => moveNodeDate(task.id, today, true)}
@@ -1162,6 +1157,7 @@ export const MyDayView: React.FC = () => {
           </div>
 
           <div className="flex items-center space-x-1.5 shrink-0 ml-1" onClick={(e) => e.stopPropagation()}>
+            <WorkButton taskId={task.id} taskText={task.text} />
             <button
               onClick={() => updateStandaloneTask({ ...task, dueDate: today })}
               className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 transition-colors cursor-pointer"

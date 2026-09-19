@@ -1152,11 +1152,16 @@ const GraphCanvas: React.FC = () => {
   useEffect(() => {
     const handleCanvasKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement;
+      const targetEl = e.target as HTMLElement | null;
       if (
-        activeEl &&
-        (activeEl.tagName === 'INPUT' ||
-          activeEl.tagName === 'TEXTAREA' ||
-          (activeEl as HTMLElement).isContentEditable)
+        (activeEl &&
+          (activeEl.tagName === 'INPUT' ||
+            activeEl.tagName === 'TEXTAREA' ||
+            (activeEl as HTMLElement).isContentEditable)) ||
+        (targetEl &&
+          (targetEl.tagName === 'INPUT' ||
+            targetEl.tagName === 'TEXTAREA' ||
+            targetEl.isContentEditable))
       ) {
         return;
       }
@@ -1882,6 +1887,19 @@ const GraphCanvas: React.FC = () => {
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* Instant Shortcut Teaching Hint Strip for selected node */}
+      {selectedNode && !isWholeProjectView && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 hidden sm:flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-900/90 dark:bg-slate-800/95 text-slate-200 border border-slate-700/80 shadow-xl text-[11px] backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 pointer-events-none select-none">
+          <span className="font-semibold text-emerald-400">"{selectedNode.text.slice(0, 22)}{selectedNode.text.length > 22 ? '…' : ''}"</span>
+          <span className="opacity-30">|</span>
+          <span className="flex items-center gap-1">Press <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 font-mono text-[10px] text-white">Tab</kbd> child</span>
+          <span className="opacity-30">·</span>
+          <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 font-mono text-[10px] text-white">Enter</kbd> sibling</span>
+          <span className="opacity-30">·</span>
+          <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 font-mono text-[10px] text-white">Del</kbd> delete</span>
         </div>
       )}
 

@@ -396,6 +396,7 @@ export interface DerivedTemporal {
 }
 
 export interface CascadeImpactPreview {
+  readonly projectId?: string;
   readonly targetNodeId: string;
   readonly targetNodeText: string;
   readonly oldDueDate: string;

@@ -312,6 +312,89 @@ describe('Graphdule Domain Invariants and Services', () => {
       expect(updatedNodeB?.dueDate).toBe('2026-09-24'); // Shifted proportionally
     });
 
+    it('batchShiftNodes cascades connected downstream successors and preserves chronology', () => {
+      const { project } = ProjectService.createProject('Test Project', 'Finish work', '2026-12-31');
+      const nodeA = ProjectService.createNode(project.id, 'Task A', '2026-09-01');
+      const nodeB = ProjectService.createNode(project.id, 'Task B', '2026-09-10');
+      const nodeC = ProjectService.createNode(project.id, 'Task C', '2026-09-20');
+
+      const nodes = [nodeA, nodeB, nodeC];
+      const edges: Edge[] = [
+        { id: 'e1', projectId: project.id, fromNodeId: nodeA.id, toNodeId: nodeB.id, createdAt: '' },
+        { id: 'e2', projectId: project.id, fromNodeId: nodeB.id, toNodeId: nodeC.id, createdAt: '' },
+      ];
+
+      // Batch shift A and B to 2026-09-15 with cascade: true
+      const updated = TemporalService.batchShiftNodes(
+        [nodeA.id, nodeB.id],
+        '2026-09-15',
+        nodes,
+        edges,
+        true
+      );
+
+      const upA = updated.find((n) => n.id === nodeA.id);
+      const upB = updated.find((n) => n.id === nodeB.id);
+      const upC = updated.find((n) => n.id === nodeC.id);
+
+      expect(upA?.dueDate).toBe('2026-09-15');
+      expect(upB?.dueDate).toBe('2026-09-24'); // Shifted by +14 days from original 2026-09-10 to maintain offset
+      expect(upC?.dueDate).toBe('2026-10-04'); // Shifted by +14 days from original 2026-09-20
+    });
+
+    it('batchShiftNodes with cascade false moves only target tasks', () => {
+      const { project } = ProjectService.createProject('Test Project', 'Finish work', '2026-12-31');
+      const nodeA = ProjectService.createNode(project.id, 'Task A', '2026-09-01');
+      const nodeB = ProjectService.createNode(project.id, 'Task B', '2026-09-10');
+      const nodeC = ProjectService.createNode(project.id, 'Task C', '2026-09-20');
+
+      const nodes = [nodeA, nodeB, nodeC];
+      const edges: Edge[] = [
+        { id: 'e1', projectId: project.id, fromNodeId: nodeA.id, toNodeId: nodeB.id, createdAt: '' },
+        { id: 'e2', projectId: project.id, fromNodeId: nodeB.id, toNodeId: nodeC.id, createdAt: '' },
+      ];
+
+      const updated = TemporalService.batchShiftNodes(
+        [nodeA.id],
+        '2026-09-15',
+        nodes,
+        edges,
+        false
+      );
+
+      const upA = updated.find((n) => n.id === nodeA.id);
+      const upB = updated.find((n) => n.id === nodeB.id);
+      const upC = updated.find((n) => n.id === nodeC.id);
+
+      expect(upA?.dueDate).toBe('2026-09-15');
+      expect(upB?.dueDate).toBe('2026-09-10'); // Unchanged
+      expect(upC?.dueDate).toBe('2026-09-20'); // Unchanged
+    });
+
+    it('batchShiftNodes synchronizes decomposed parent due dates when children are shifted', () => {
+      const { project } = ProjectService.createProject('Test Project', 'Finish work', '2026-12-31');
+      const parentTask = ProjectService.createNode(project.id, 'Parent Group', '2026-09-10');
+      const subtask1 = ProjectService.createNode(project.id, 'Sub 1', '2026-09-05', parentTask.id);
+      const subtask2 = ProjectService.createNode(project.id, 'Sub 2', '2026-09-08', parentTask.id);
+
+      const nodes = [parentTask, subtask1, subtask2];
+      const edges: Edge[] = [];
+
+      const updated = TemporalService.batchShiftNodes(
+        [subtask2.id],
+        '2026-09-25',
+        nodes,
+        edges,
+        true
+      );
+
+      const upParent = updated.find((n) => n.id === parentTask.id);
+      const upSub2 = updated.find((n) => n.id === subtask2.id);
+
+      expect(upSub2?.dueDate).toBe('2026-09-25');
+      expect(upParent?.dueDate).toBe('2026-09-25'); // Parent automatically synced to latest child
+    });
+
     it('derives start dates and durations for decomposed parent nodes without altering explicit deadline', () => {
       const { project } = ProjectService.createProject('Test', 'Goal', '2026-12-31');
       const parentTask = ProjectService.createNode(project.id, 'Write Paper', '2026-10-30');

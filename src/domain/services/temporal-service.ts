@@ -30,7 +30,8 @@ export class TemporalService {
     targetNodeId: string,
     newDueDate: string,
     nodes: readonly Node[],
-    edges: readonly Edge[]
+    edges: readonly Edge[],
+    projectId?: string
   ): CascadeImpactPreview | null {
     const nodeMap = new Map<string, Node>(nodes.map((n) => [n.id, n]));
     const targetNode = nodeMap.get(targetNodeId);
@@ -96,6 +97,7 @@ export class TemporalService {
     }
 
     return {
+      projectId: projectId || targetNode.projectId,
       targetNodeId,
       targetNodeText: targetNode.text,
       oldDueDate,
@@ -103,6 +105,108 @@ export class TemporalService {
       shiftDays,
       affectedSuccessors,
     };
+  }
+
+  /**
+   * Batch shifts multiple nodes in a project to a new due date,
+   * optionally cascading shifts to downstream successors to preserve chronology.
+   */
+  public static batchShiftNodes(
+    targetNodeIds: readonly string[],
+    newDueDate: string,
+    nodes: readonly Node[],
+    edges: readonly Edge[],
+    cascade: boolean
+  ): Node[] {
+    if (!newDueDate || targetNodeIds.length === 0 || nodes.length === 0) {
+      return [...nodes];
+    }
+
+    const targetSet = new Set(targetNodeIds);
+
+    if (!cascade) {
+      const now = new Date().toISOString();
+      const directUpdated = nodes.map((n) =>
+        targetSet.has(n.id)
+          ? { ...n, dueDate: newDueDate, updatedAt: now }
+          : n
+      );
+      return TemporalService.syncParentDueDates(directUpdated);
+    }
+
+    // Topological ordering (predecessors before successors)
+    const inDegree = new Map<string, number>();
+    const adj = new Map<string, string[]>();
+
+    for (const node of nodes) {
+      inDegree.set(node.id, 0);
+      adj.set(node.id, []);
+    }
+
+    for (const edge of edges) {
+      if (inDegree.has(edge.toNodeId) && adj.has(edge.fromNodeId)) {
+        inDegree.set(edge.toNodeId, (inDegree.get(edge.toNodeId) || 0) + 1);
+        adj.get(edge.fromNodeId)!.push(edge.toNodeId);
+      }
+    }
+
+    const queue: string[] = [];
+    inDegree.forEach((deg, id) => {
+      if (deg === 0) queue.push(id);
+    });
+
+    const topoOrder: string[] = [];
+    while (queue.length > 0) {
+      const u = queue.shift()!;
+      topoOrder.push(u);
+      for (const v of adj.get(u) || []) {
+        const nextDeg = (inDegree.get(v) || 1) - 1;
+        inDegree.set(v, nextDeg);
+        if (nextDeg === 0) {
+          queue.push(v);
+        }
+      }
+    }
+
+    // Append any nodes not reached (e.g. cycles if any)
+    for (const node of nodes) {
+      if (!topoOrder.includes(node.id)) {
+        topoOrder.push(node.id);
+      }
+    }
+
+    let currentNodes = [...nodes];
+    const now = new Date().toISOString();
+
+    for (const nodeId of topoOrder) {
+      if (!targetSet.has(nodeId)) continue;
+
+      const node = currentNodes.find((n) => n.id === nodeId);
+      if (!node) continue;
+
+      // If already shifted by a predecessor cascade to >= newDueDate, keep the preserved offset
+      if (node.dueDate && !isAfter(newDueDate, node.dueDate)) {
+        continue;
+      }
+
+      const impact = TemporalService.calculateCascadeImpact(
+        nodeId,
+        newDueDate,
+        currentNodes,
+        edges,
+        node.projectId
+      );
+
+      if (impact) {
+        currentNodes = TemporalService.applyCascadeShift(impact, currentNodes);
+      } else {
+        currentNodes = currentNodes.map((n) =>
+          n.id === nodeId ? { ...n, dueDate: newDueDate, updatedAt: now } : n
+        );
+      }
+    }
+
+    return TemporalService.syncParentDueDates(currentNodes);
   }
 
   /**
