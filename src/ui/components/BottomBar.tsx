@@ -17,6 +17,7 @@ import { ProjectService } from '../../domain/services/project-service';
 import { ProjectHealthService } from '../../domain/services/project-health-service';
 import { getProjectColorTheme, ProjectIconDisplay } from '../utils/project-style';
 import { getTodayString } from '../../domain/utils/date';
+import { ActiveWorkBar } from './ActiveWorkBar';
 
 export const BottomBar: React.FC = () => {
   const {
@@ -202,6 +203,9 @@ export const BottomBar: React.FC = () => {
             </div>
           </>
         )}
+
+        {/* Minimal Focus / Active Work Session Cue with Rich Hover Detail */}
+        <ActiveWorkBar mode="desktop" />
       </div>
 
       {/* Center: Essential Utilities & Shortcuts */}

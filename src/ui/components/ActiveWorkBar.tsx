@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { AttentionService } from '../../domain/services/attention-service';
 import {
@@ -7,10 +7,8 @@ import {
   Square,
   ExternalLink,
   Check,
-  GripVertical,
   PictureInPicture2,
   Minimize2,
-  RotateCcw,
   Heart,
   Sparkles,
   Trash2,
@@ -24,9 +22,11 @@ import {
 } from './PictureInPicturePortal';
 import { TaskEnvironment } from '../../domain/health/types';
 
-const STORAGE_KEY_POS = 'graphdule_active_bar_pos';
+export interface ActiveWorkBarProps {
+  mode?: 'desktop' | 'mobile';
+}
 
-export const ActiveWorkBar: React.FC = () => {
+export const ActiveWorkBar: React.FC<ActiveWorkBarProps> = ({ mode = 'desktop' }) => {
   const {
     activeWorkSession,
     activeWorkElapsedSeconds,
@@ -50,7 +50,6 @@ export const ActiveWorkBar: React.FC = () => {
     activeHealthNotification,
     acknowledgeHealthIntervention,
     dismissHealthIntervention,
-    setIsThoughtsPoolOpen,
     addDroppedThought,
     zenCurtainEnabled,
     setZenCurtainEnabled,
@@ -67,40 +66,6 @@ export const ActiveWorkBar: React.FC = () => {
     }
   }, [isQuickDropOpen]);
 
-  // Position & Dragging State
-  const [position, setPosition] = useState<{ x: number; y: number } | null>(() => {
-    if (typeof window === 'undefined') return null;
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_POS);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (
-          typeof parsed.x === 'number' &&
-          !isNaN(parsed.x) &&
-          typeof parsed.y === 'number' &&
-          !isNaN(parsed.y)
-        ) {
-          return parsed;
-        }
-      }
-    } catch (_) {}
-    return null;
-  });
-
-  const currentPosRef = useRef<{ x: number; y: number } | null>(position);
-  useEffect(() => {
-    currentPosRef.current = position;
-  }, [position]);
-
-  const [isDragging, setIsDragging] = useState(false);
-  const barRef = useRef<HTMLElement>(null);
-  const dragStateRef = useRef<{
-    startX: number;
-    startY: number;
-    initialX: number;
-    initialY: number;
-  } | null>(null);
-
   // Picture-in-Picture State
   const [pipWindow, setPipWindow] = useState<Window | null>(null);
   const [isPiPActive, setIsPiPActive] = useState(false);
@@ -113,111 +78,6 @@ export const ActiveWorkBar: React.FC = () => {
       setIsPiPActive(false);
     }
   }, [activeWorkSession, pipWindow]);
-
-  // Keep saved position clamped within screen viewport on resize
-  useEffect(() => {
-    const handleResize = () => {
-      if (!position) return;
-      const barRect = barRef.current?.getBoundingClientRect();
-      const width = barRect && barRect.width > 0 ? barRect.width : 380;
-      const height = barRect && barRect.height > 0 ? barRect.height : 60;
-      const viewWidth = typeof window !== 'undefined' ? window.innerWidth || 1024 : 1024;
-      const viewHeight = typeof window !== 'undefined' ? window.innerHeight || 768 : 768;
-
-      const maxX = Math.max(8, viewWidth - width - 8);
-      const maxY = Math.max(8, viewHeight - height - 8);
-
-      const clampedX = Math.min(Math.max(8, position.x), maxX);
-      const clampedY = Math.min(Math.max(8, position.y), maxY);
-
-      if (clampedX !== position.x || clampedY !== position.y) {
-        const updated = { x: Math.round(clampedX), y: Math.round(clampedY) };
-        currentPosRef.current = updated;
-        setPosition(updated);
-        try {
-          localStorage.setItem(STORAGE_KEY_POS, JSON.stringify(updated));
-        } catch (_) {}
-      }
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [position]);
-
-  // Drag Handlers using Pointer Events
-  const handlePointerDown = useCallback((e: React.PointerEvent) => {
-    const target = e.target as HTMLElement;
-    // Do not initiate drag if clicking buttons, links or interactive elements
-    if (target.closest('button') || target.closest('a') || target.closest('input')) {
-      return;
-    }
-
-    const rect = barRef.current?.getBoundingClientRect();
-    const clientX = typeof e.clientX === 'number' && !isNaN(e.clientX) ? e.clientX : 0;
-    const clientY = typeof e.clientY === 'number' && !isNaN(e.clientY) ? e.clientY : 0;
-    const initialX = rect && typeof rect.left === 'number' && !isNaN(rect.left) ? rect.left : 0;
-    const initialY = rect && typeof rect.top === 'number' && !isNaN(rect.top) ? rect.top : 0;
-
-    dragStateRef.current = {
-      startX: clientX,
-      startY: clientY,
-      initialX,
-      initialY,
-    };
-    setIsDragging(true);
-    try {
-      (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-    } catch (_) {}
-  }, []);
-
-  const handlePointerMove = useCallback((e: React.PointerEvent) => {
-    if (!dragStateRef.current) return;
-    const { startX, startY, initialX, initialY } = dragStateRef.current;
-    const clientX = typeof e.clientX === 'number' && !isNaN(e.clientX) ? e.clientX : 0;
-    const clientY = typeof e.clientY === 'number' && !isNaN(e.clientY) ? e.clientY : 0;
-    const deltaX = clientX - startX;
-    const deltaY = clientY - startY;
-
-    const barRect = barRef.current?.getBoundingClientRect();
-    const width = barRect && barRect.width > 0 ? barRect.width : 380;
-    const height = barRect && barRect.height > 0 ? barRect.height : 60;
-    const viewWidth = typeof window !== 'undefined' ? window.innerWidth || 1024 : 1024;
-    const viewHeight = typeof window !== 'undefined' ? window.innerHeight || 768 : 768;
-
-    const targetX = initialX + deltaX;
-    const targetY = initialY + deltaY;
-
-    const clampedX = Math.max(8, Math.min(viewWidth - width - 8, targetX));
-    const clampedY = Math.max(8, Math.min(viewHeight - height - 8, targetY));
-
-    const nextPos = { x: Math.round(clampedX), y: Math.round(clampedY) };
-    currentPosRef.current = nextPos;
-    setPosition(nextPos);
-  }, []);
-
-  const handlePointerUp = useCallback((e: React.PointerEvent) => {
-    if (dragStateRef.current) {
-      dragStateRef.current = null;
-      setIsDragging(false);
-      try {
-        (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
-      } catch (_) {}
-
-      if (currentPosRef.current) {
-        try {
-          localStorage.setItem(STORAGE_KEY_POS, JSON.stringify(currentPosRef.current));
-        } catch (_) {}
-      }
-    }
-  }, []);
-
-  const handleResetPosition = () => {
-    currentPosRef.current = null;
-    setPosition(null);
-    try {
-      localStorage.removeItem(STORAGE_KEY_POS);
-    } catch (_) {}
-  };
 
   // Picture-in-Picture toggle
   const handleOpenPiP = async () => {
@@ -251,8 +111,6 @@ export const ActiveWorkBar: React.FC = () => {
       setIsPiPActive(false);
     }
   };
-
-  const isRunaway = activeWorkElapsedSeconds > 7200; // > 2 hours continuous
 
   const activeTask = useMemo(() => {
     if (!activeWorkSession) return null;
@@ -293,7 +151,6 @@ export const ActiveWorkBar: React.FC = () => {
   const clampedProgressWidth = progressPercent !== null ? Math.min(100, Math.max(0, progressPercent)) : null;
   const isOverEstimated = progressRatio !== null && progressRatio > 1.0;
   const isPlanning = activeWorkSession?.sessionType === 'planning';
-  const isRecovery = activeWorkSession?.sessionType === 'recovery';
 
   const handleNavigateToTask = () => {
     if (typeof window !== 'undefined' && window.focus) {
@@ -451,656 +308,587 @@ export const ActiveWorkBar: React.FC = () => {
           </button>
         )}
 
-        {isPlanning ? (
-          <>
-            <button
-              onClick={() => stopProjectPlanning()}
-              className="flex-1 py-1.5 px-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium text-xs flex items-center justify-center gap-1 transition-all cursor-pointer"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Finish</span>
-            </button>
+        <button
+          onClick={() => completeAndStopWork()}
+          title="Mark task completed and stop work session"
+          className="flex-1 py-1.5 px-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium text-xs flex items-center justify-center gap-1 transition-all cursor-pointer"
+        >
+          <Check className="w-3.5 h-3.5" />
+          <span>Complete</span>
+        </button>
 
-            <button
-              onClick={() => discardActiveWorkSession()}
-              className="py-1.5 px-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-rose-300 rounded-lg font-medium text-xs flex items-center justify-center gap-1 transition-all border border-slate-700/60 cursor-pointer"
-              title="Discard planning session"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
-          </>
-        ) : (
-          <>
-            <button
-              onClick={() => completeAndStopWork()}
-              className="flex-1 py-1.5 px-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium text-xs flex items-center justify-center gap-1 transition-all cursor-pointer"
-            >
-              <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-              <span>Complete</span>
-            </button>
-
-            <button
-              onClick={() => stopWork()}
-              className="py-1.5 px-2.5 bg-rose-600/90 hover:bg-rose-500 text-white rounded-lg font-medium text-xs flex items-center justify-center gap-1 transition-all cursor-pointer"
-              title="Stop clock"
-            >
-              <Square className="w-3.5 h-3.5 fill-current" />
-              <span>Stop</span>
-            </button>
-          </>
-        )}
+        <button
+          onClick={() => stopWork()}
+          title="Stop work clock without completing task"
+          className="py-1.5 px-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-medium text-xs flex items-center justify-center transition-all border border-slate-700/60 cursor-pointer"
+        >
+          <Square className="w-3 h-3 fill-current" />
+        </button>
       </div>
     </div>
   );
 
-  // When PiP is active, show docked placeholder pill in the main window
-  if (isPiPActive) {
+  // Mobile View (< md screens): Compact bottom docked banner above BottomNav
+  if (mode === 'mobile') {
     return (
-      <>
-        <aside
-          ref={barRef}
-          aria-label="Active focus work session in Picture-in-Picture"
-          style={
-            position
-              ? {
-                  position: 'fixed',
-                  left: `${position.x}px`,
-                  top: `${position.y}px`,
-                  bottom: 'auto',
-                  right: 'auto',
-                  margin: 0,
-                  zIndex: 50,
-                }
-              : undefined
-          }
-          className={`fixed ${
-            !position
-              ? 'bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))] md:bottom-6 left-3 right-3 md:left-auto md:right-6'
-              : ''
-          } z-50 flex items-center justify-between gap-3 px-3.5 py-2 bg-slate-900/95 border border-amber-500/50 backdrop-blur-md rounded-2xl shadow-2xl text-slate-100 text-xs sm:text-sm animate-in fade-in duration-150`}
-        >
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500" />
-            </span>
-            <span className="text-slate-300 truncate">
-              Focusing in Picture-in-Picture:{' '}
-              <strong className="text-white font-semibold">
-                {activeWorkSession.taskText}
-              </strong>
-            </span>
-            <span className="font-mono text-amber-400 font-bold ml-1 shrink-0">
-              {formatTimer(activeWorkElapsedSeconds)}
-            </span>
+      <aside
+        role="complementary"
+        aria-label="Active focus work session"
+        data-testid="mobile-active-work-bar"
+        className="md:hidden fixed bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px))] left-2 right-2 z-40 bg-slate-900/95 border border-slate-700/60 rounded-xl px-3 py-2 shadow-xl backdrop-blur-md text-white flex items-center justify-between gap-2 animate-in slide-in-from-bottom-2 duration-150 select-none"
+      >
+        <div className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer" onClick={handleNavigateToTask}>
+          <span
+            className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+              activeWorkSession.isPaused
+                ? 'bg-amber-400'
+                : isPlanning
+                ? 'bg-indigo-400 animate-pulse'
+                : 'bg-emerald-400 animate-pulse'
+            }`}
+          />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-bold text-slate-100 truncate">{activeWorkSession.taskText}</p>
+            <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+              <span className="font-mono font-bold text-white">{formatTimer(activeWorkElapsedSeconds)}</span>
+              <span>•</span>
+              <span className="text-amber-400">{Math.round(currentAU * 100) / 100} AU</span>
+            </div>
           </div>
+        </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
+          {isPlanning ? (
             <button
-              onClick={handleClosePiP}
-              className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg font-semibold text-xs transition-colors flex items-center gap-1 cursor-pointer shadow-sm"
-              title="Bring status bar back to main window"
+              onClick={() => stopProjectPlanning()}
+              data-testid="mobile-finish-planning-btn"
+              className="p-1.5 bg-indigo-600 text-white rounded-lg text-xs cursor-pointer"
+              title="Finish Planning"
             >
-              <Minimize2 className="w-3.5 h-3.5" />
-              <span>Bring Back</span>
+              <Check className="w-4 h-4" />
             </button>
-          </div>
-        </aside>
-
-        {/* Portal into the OS PiP Window */}
-        <PictureInPicturePortal pipWindow={pipWindow}>
-          {pipContent}
-        </PictureInPicturePortal>
-      </>
+          ) : (
+            <>
+              {activeWorkSession.isPaused ? (
+                <button
+                  onClick={() => resumeWork()}
+                  aria-label="Resume"
+                  className="p-1.5 bg-emerald-600 text-white rounded-lg cursor-pointer"
+                  title="Resume"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                </button>
+              ) : (
+                <button
+                  onClick={() => pauseWork()}
+                  aria-label="Pause"
+                  className="p-1.5 bg-slate-800 text-slate-200 border border-slate-700 rounded-lg cursor-pointer"
+                  title="Pause"
+                >
+                  <Pause className="w-3.5 h-3.5 fill-current" />
+                </button>
+              )}
+              <button
+                onClick={() => completeAndStopWork()}
+                title="Mark task completed and stop work session"
+                className="p-1.5 bg-emerald-950 text-emerald-300 border border-emerald-800 rounded-lg cursor-pointer"
+              >
+                <Check className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => stopWork()}
+                title="Stop work clock without completing task"
+                className="p-1.5 bg-slate-800 text-slate-300 rounded-lg cursor-pointer"
+              >
+                <Square className="w-3 h-3 fill-current" />
+              </button>
+            </>
+          )}
+        </div>
+      </aside>
     );
   }
 
-  // Regular In-Page Movable Status Bar
+  // Desktop View (Default): Minimalist cue docked on BottomBar with rich hover popover
   return (
     <>
-      <aside
-        ref={barRef}
+      <span className="text-slate-300 dark:text-slate-700">|</span>
+
+      <div
+        role="complementary"
         aria-label="Active focus work session"
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        style={
-          position
-            ? {
-                position: 'fixed',
-                left: `${position.x}px`,
-                top: `${position.y}px`,
-                bottom: 'auto',
-                right: 'auto',
-                margin: 0,
-                zIndex: 50,
-                userSelect: isDragging ? 'none' : undefined,
-              }
-            : undefined
-        }
-        className={`fixed ${
-          !position
-            ? 'bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))] md:bottom-6 left-3 right-3 md:left-auto md:right-6'
-            : ''
-        } z-50 flex flex-col p-0 bg-slate-900/95 dark:bg-slate-900/95 border ${
-          activeHealthNotification && activeHealthNotification.taskId === activeWorkSession.taskId
-            ? 'border-rose-500/60 shadow-rose-950/40'
-            : isDragging
-            ? 'border-amber-400 shadow-amber-500/20 scale-[1.01]'
-            : isPlanning
-            ? 'border-indigo-500/60 shadow-indigo-950/30'
-            : 'border-amber-500/40 dark:border-amber-500/40 shadow-amber-950/20'
-        } shadow-2xl backdrop-blur-md rounded-2xl text-slate-100 sm:max-w-md md:max-w-lg lg:max-w-xl transition-shadow duration-150 overflow-hidden ${
-          isDragging ? 'cursor-grabbing' : ''
-        }`}
+        data-testid="bottombar-focus-indicator"
+        className="relative group flex items-center space-x-1.5 px-2 py-0.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
       >
-        {/* Subtle Health Intervention Notification */}
-        {activeHealthNotification && activeHealthNotification.taskId === activeWorkSession.taskId && (
+        {/* Pulse Status Dot */}
+        <span className="relative flex h-2 w-2 shrink-0">
+          <span
+            className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+              activeWorkSession.isPaused
+                ? 'bg-amber-400'
+                : isPlanning
+                ? 'bg-indigo-400'
+                : 'bg-emerald-400'
+            }`}
+          />
+          <span
+            className={`relative inline-flex rounded-full h-2 w-2 ${
+              activeWorkSession.isPaused
+                ? 'bg-amber-500'
+                : isPlanning
+                ? 'bg-indigo-500'
+                : 'bg-emerald-500'
+            }`}
+          />
+        </span>
+
+        {/* Quick Play/Pause button on the bottom bar */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            activeWorkSession.isPaused ? resumeWork() : pauseWork();
+          }}
+          title={activeWorkSession.isPaused ? 'Resume focus work session' : 'Pause focus work session'}
+          aria-label={activeWorkSession.isPaused ? 'Resume' : 'Pause'}
+          className="p-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors cursor-pointer shrink-0"
+        >
+          {activeWorkSession.isPaused ? (
+            <Play className="w-3 h-3 fill-current text-amber-500" />
+          ) : (
+            <Pause className="w-3 h-3 fill-current text-emerald-500" />
+          )}
+        </button>
+
+        {/* Minimal Label */}
+        <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
+          Focus
+        </span>
+
+        {/* Truncated Task Title */}
+        <span
+          className="text-[11px] font-semibold text-slate-700 dark:text-slate-200 max-w-[100px] lg:max-w-[150px] truncate"
+          title={activeWorkSession.taskText}
+        >
+          {activeWorkSession.taskText}
+        </span>
+
+        {/* Monospace Timer */}
+        <span className="text-[10px] font-mono font-bold text-slate-800 dark:text-slate-100 shrink-0">
+          {formatTimer(activeWorkElapsedSeconds)}
+        </span>
+
+        {/* AU mini progress track or badge */}
+        {estimatedAU !== undefined && estimatedAU > 0 ? (
           <div
-            data-testid="active-health-notification-banner"
-            className="w-full bg-rose-950/95 border-b border-rose-500/40 px-3 py-1.5 flex items-center justify-between gap-2 text-xs text-rose-100 shadow-md backdrop-blur-md animate-in fade-in slide-in-from-top-1 duration-150"
-          >
-            <div className="flex items-center gap-1.5 min-w-0">
-              <Heart className="w-3.5 h-3.5 text-rose-400 fill-rose-400/40 shrink-0 animate-pulse" />
-              <span className="font-semibold text-rose-300 shrink-0 text-[11px]">
-                {activeHealthNotification.intervention.name}:
-              </span>
-              <span className="truncate text-[11px] text-rose-100">
-                {activeHealthNotification.decision.message || activeHealthNotification.intervention.message}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-1.5 shrink-0">
-              <button
-                onClick={() => acknowledgeHealthIntervention(activeHealthNotification.intervention.id)}
-                data-testid="health-acknowledge-btn"
-                className="px-2 py-0.5 bg-rose-600 hover:bg-rose-500 active:scale-95 text-white rounded font-medium text-[10px] sm:text-[11px] transition-all cursor-pointer shadow-xs"
-                title="Acknowledge rest break and reset continuous screen focus timer"
-              >
-                Rest ({activeHealthNotification.remainingSeconds}s)
-              </button>
-              <button
-                onClick={() => dismissHealthIntervention(activeHealthNotification.intervention.id)}
-                data-testid="health-dismiss-btn"
-                className="px-1.5 py-0.5 bg-slate-800/80 hover:bg-slate-700 active:scale-95 text-slate-300 hover:text-white rounded text-[10px] sm:text-[11px] transition-all cursor-pointer"
-                title="Dismiss reminder without losing focus"
-              >
-                Dismiss
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Project Planning Auto-Trigger Notification Banner */}
-        {planningToast && isPlanning && (
-          <div
-            data-testid="planning-toast-banner"
-            className="w-full bg-indigo-950/95 border-b border-indigo-500/40 px-3 py-1.5 flex items-center justify-between gap-2 text-xs text-indigo-100 shadow-md backdrop-blur-md animate-in fade-in slide-in-from-top-1 duration-150"
-          >
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span className="font-semibold text-indigo-300 shrink-0 text-[11px] flex items-center gap-1">
-                🧠 Planning Mode:
-              </span>
-              <span className="truncate text-[11px] text-indigo-100">
-                {planningToast.projectName ? `Tracking planning on "${planningToast.projectName}"` : 'Tracking project planning session'}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-1.5 shrink-0">
-              <button
-                onClick={() => discardActiveWorkSession()}
-                data-testid="planning-toast-discard-btn"
-                className="px-2 py-0.5 bg-rose-600/80 hover:bg-rose-600 active:scale-95 text-white rounded font-medium text-[10px] sm:text-[11px] transition-all cursor-pointer shadow-xs"
-                title="Discard this planning session without saving"
-              >
-                Discard
-              </button>
-              <button
-                onClick={() => dismissPlanningToast()}
-                data-testid="planning-toast-dismiss-btn"
-                className="px-1.5 py-0.5 bg-slate-800/80 hover:bg-slate-700 active:scale-95 text-slate-300 hover:text-white rounded text-[10px] sm:text-[11px] transition-all cursor-pointer"
-                title="Keep tracking planning work"
-              >
-                Got it
-              </button>
-            </div>
-          </div>
-        )}
-
-        <div className="relative w-full flex items-center justify-between gap-2 sm:gap-3 px-2.5 sm:px-3.5 py-2 sm:py-2.5">
-        {/* Visual Attention Progress Track (at bottom edge of the bar) */}
-        {clampedProgressWidth !== null && (
-          <div
-            className="absolute bottom-0 left-0 right-0 h-1 bg-slate-800/80"
-            title={`Attention Progress: ${progressPercent}% of ${
-              estimatedAU !== undefined ? Math.round(estimatedAU * 100) / 100 : 0
-            } AU estimated`}
+            className="w-12 sm:w-16 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden shrink-0"
+            title={`${progressPercent}% of ${Math.round(estimatedAU * 100) / 100} AU`}
           >
             <div
-              className={`h-full transition-all duration-300 ${
-                isPlanning ? 'bg-indigo-500' : isOverEstimated ? 'bg-amber-400' : 'bg-emerald-500'
+              className={`h-full transition-all duration-300 rounded-full ${
+                isOverEstimated ? 'bg-amber-500' : isPlanning ? 'bg-indigo-500' : 'bg-emerald-500'
               }`}
               style={{ width: `${clampedProgressWidth}%` }}
             />
           </div>
+        ) : (
+          <span className="text-[10px] font-mono font-bold text-amber-600 dark:text-amber-400 shrink-0">
+            {Math.round(currentAU * 100) / 100} AU
+          </span>
         )}
 
-        {/* Drag Grip Handle */}
-        <div
-          className="flex items-center justify-center cursor-grab active:cursor-grabbing text-slate-500 hover:text-slate-200 transition-colors px-1 py-1 -ml-1 touch-none"
-          title="Drag to reposition status bar anywhere on page • Double-click to reset"
-          onDoubleClick={handleResetPosition}
-          data-testid="drag-handle"
-        >
-          <GripVertical className="w-4 h-4 shrink-0" />
-        </div>
-
-        {/* Left: Status indicator & Task details */}
-        <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
-          {/* Pulse Status Indicator */}
-          <div
-            className="relative flex items-center justify-center flex-shrink-0 cursor-pointer"
-            onClick={handleNavigateToTask}
-            title={
-              activeWorkSession.isPaused
-                ? 'Work session is paused. Click to jump to task.'
-                : isPlanning
-                ? 'Project planning session in progress.'
-                : 'Focus work session in progress. Click to jump to task.'
-            }
-          >
-            <span
-              className={`h-3 w-3 rounded-full ${
-                activeWorkSession.isPaused
-                  ? 'bg-amber-400'
-                  : isPlanning
-                  ? 'bg-indigo-500 animate-ping opacity-75'
-                  : 'bg-emerald-500 animate-ping opacity-75'
-              }`}
-            />
-            <span
-              className={`absolute h-2.5 w-2.5 rounded-full ${
-                activeWorkSession.isPaused
-                  ? 'bg-amber-400'
-                  : isPlanning
-                  ? 'bg-indigo-500'
-                  : 'bg-emerald-500'
-              }`}
-            />
+        {/* PiP indicator on the bottom bar */}
+        {isPiPActive && (
+          <div className="flex items-center gap-1 shrink-0">
+            <span className="text-[10px] text-teal-600 dark:text-teal-400 font-medium truncate">
+              Focusing in Picture-in-Picture...
+            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleClosePiP();
+              }}
+              aria-label="Bring Back"
+              title="Return to Graphdule main window"
+              className="px-1.5 py-0.5 bg-teal-600 hover:bg-teal-500 active:scale-95 text-white rounded text-[10px] font-semibold transition-colors cursor-pointer flex items-center gap-0.5"
+            >
+              <Minimize2 className="w-2.5 h-2.5" />
+              <span>Bring Back</span>
+            </button>
           </div>
+        )}
 
-          {/* Task & Project Information */}
-          <div className="min-w-0 flex-1">
-            {/* Row 1: Task text */}
-            <div className="flex items-center gap-1 min-w-0">
-              <button
-                onClick={handleNavigateToTask}
-                className="text-xs sm:text-sm font-semibold text-slate-100 truncate hover:text-amber-400 transition-colors flex items-center gap-1 text-left min-w-0 cursor-pointer"
-                title={`Jump to task: "${activeWorkSession.taskText}"`}
-              >
-                <span className="truncate">{activeWorkSession.taskText}</span>
-                <ExternalLink className="w-3 h-3 flex-shrink-0 opacity-40 hover:opacity-100 transition-opacity" />
-              </button>
+        {/* Full Detail Hover Popover (Similar behavior as the progress bar) */}
+        <div
+          data-testid="focus-hover-popover"
+          className="absolute bottom-full left-0 mb-1.5 w-84 sm:w-96 p-3.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl z-50 hidden group-hover:flex flex-col gap-2.5 pointer-events-auto animate-in fade-in zoom-in-95 duration-150 text-left cursor-default before:content-[''] before:absolute before:top-full before:left-0 before:right-0 before:h-2.5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header Row: Task Name & Jump Link */}
+          <div className="flex items-start justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span
+                  className={`w-2 h-2 rounded-full shrink-0 ${
+                    activeWorkSession.isPaused
+                      ? 'bg-amber-500'
+                      : isPlanning
+                      ? 'bg-indigo-500 animate-pulse'
+                      : 'bg-emerald-500 animate-pulse'
+                  }`}
+                />
+                <button
+                  onClick={handleNavigateToTask}
+                  className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate hover:text-brand-600 dark:hover:text-brand-400 transition-colors flex items-center gap-1 text-left min-w-0 cursor-pointer"
+                  title={`Jump to task: "${activeWorkSession.taskText}"`}
+                >
+                  <span className="truncate">{activeWorkSession.taskText}</span>
+                  <ExternalLink className="w-3 h-3 shrink-0 opacity-50" />
+                </button>
+              </div>
+
+              {/* Badges: Project, Planning, Environment */}
+              <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400 mt-1 flex-wrap">
+                <span className="font-medium truncate max-w-[130px] text-brand-600 dark:text-brand-400">
+                  {activeWorkSession.projectName || 'Standalone'}
+                </span>
+                <span>•</span>
+                {isPlanning && (
+                  <span
+                    data-testid="workbar-planning-badge"
+                    className="px-1.5 py-0.2 rounded font-semibold bg-indigo-500/10 border border-indigo-500/30 text-indigo-500 dark:text-indigo-400"
+                  >
+                    🧠 Planning
+                  </span>
+                )}
+                <span
+                  data-testid="workbar-environment-badge"
+                  className="px-1.5 py-0.2 rounded font-medium border bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 capitalize"
+                  title={`Task Environment: ${taskEnvironment}`}
+                >
+                  {taskEnvironment === 'physical' ? '🏃 physical' : taskEnvironment === 'mixed' ? '🔄 mixed' : '💻 computer'}
+                </span>
+              </div>
             </div>
 
-            {/* Row 2: Context badges (Project + Planning + Timer + AU + Progress %) */}
-            <div className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-[11px] text-slate-400 mt-0.5 whitespace-nowrap overflow-hidden">
-              {isPlanning && (
-                <span
-                  data-testid="workbar-planning-badge"
-                  className="px-1.5 py-0.2 rounded text-[9px] sm:text-[10px] font-semibold border shrink-0 flex items-center gap-1 bg-indigo-500/20 border-indigo-500/40 text-indigo-300"
-                  title="Deliberate project planning session (cognitive design work)"
-                >
-                  <span>🧠</span>
-                  <span>Planning</span>
-                </span>
-              )}
-
-              {activeWorkSession.projectName ? (
-                <span
-                  className="truncate max-w-[80px] sm:max-w-[130px] text-amber-300/80 font-medium shrink-0"
-                  title={`Project: ${activeWorkSession.projectName}`}
-                >
-                  {activeWorkSession.projectName}
-                </span>
-              ) : (
-                <span className="text-slate-400 shrink-0">Standalone</span>
-              )}
-
-              <span className="text-slate-600 shrink-0">•</span>
-
-              {/* Environment Badge */}
-              <span
-                data-testid="workbar-environment-badge"
-                className={`px-1.5 py-0.2 rounded text-[9px] sm:text-[10px] font-medium border shrink-0 flex items-center gap-1 ${
-                  taskEnvironment === 'physical'
-                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                    : taskEnvironment === 'mixed'
-                    ? 'bg-blue-500/10 border-blue-500/30 text-blue-300'
-                    : 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300'
-                }`}
-                title={`Task Environment: ${taskEnvironment}`}
-              >
-                <span>{taskEnvironment === 'physical' ? '🏃' : taskEnvironment === 'mixed' ? '🔄' : '💻'}</span>
-                <span className="capitalize hidden sm:inline">{taskEnvironment}</span>
-              </span>
-
-              <span className="text-slate-600 shrink-0">•</span>
-
-              {/* Timer & AU Badge */}
+            {/* Quick Popover Tools: Zen Curtain & PiP */}
+            <div className="flex items-center gap-1 shrink-0">
               <button
-                onClick={() => openWorkSessionsModal(activeWorkSession.taskId)}
-                className="inline-flex items-center gap-1 font-mono text-slate-300 shrink-0 hover:text-white hover:bg-slate-800/80 px-1.5 py-0.5 rounded transition-colors cursor-pointer"
-                title="Click to view and edit recorded work sessions for this task"
+                onClick={() => setZenCurtainEnabled(!zenCurtainEnabled)}
+                data-testid="zen-curtain-toggle-btn"
+                title={zenCurtainEnabled ? 'Exit Zen Focus Curtain' : 'Enter Zen Focus Curtain (Distraction-Free Focus Island)'}
+                className={`p-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
+                  zenCurtainEnabled
+                    ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/40'
+                    : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400'
+                }`}
               >
-                <span className="font-semibold text-slate-200">
+                {zenCurtainEnabled ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              </button>
+              <button
+                onClick={handleOpenPiP}
+                aria-label="Open Picture-in-Picture"
+                title={isPiPActive ? 'Return to Graphdule main window' : 'Open Picture-in-Picture window'}
+                className={`p-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
+                  isPiPActive
+                    ? 'bg-teal-500/20 text-teal-600 dark:text-teal-400 border border-teal-500/40'
+                    : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400'
+                }`}
+              >
+                <PictureInPicture2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Health Notification Banner in Popover */}
+          {activeHealthNotification && activeHealthNotification.taskId === activeWorkSession.taskId && (
+            <div
+              data-testid="active-health-notification-banner"
+              className="bg-rose-50 dark:bg-rose-950/80 border border-rose-300 dark:border-rose-800/80 rounded-lg p-2 flex items-center justify-between gap-2 text-xs text-rose-800 dark:text-rose-200"
+            >
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Heart className="w-3.5 h-3.5 text-rose-500 fill-rose-500/30 shrink-0 animate-pulse" />
+                <span className="font-semibold text-rose-700 dark:text-rose-300 shrink-0 text-[11px]">
+                  {activeHealthNotification.intervention.name}:
+                </span>
+                <span className="truncate text-[11px]">
+                  {activeHealthNotification.decision.message || activeHealthNotification.intervention.message}
+                </span>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={() => acknowledgeHealthIntervention(activeHealthNotification.intervention.id)}
+                  data-testid="health-acknowledge-btn"
+                  className="px-2 py-0.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-[10px] font-semibold transition-colors cursor-pointer"
+                >
+                  Rest ({activeHealthNotification.remainingSeconds}s)
+                </button>
+                <button
+                  onClick={() => dismissHealthIntervention(activeHealthNotification.intervention.id)}
+                  data-testid="health-dismiss-btn"
+                  className="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded text-[10px] transition-colors cursor-pointer"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Planning Toast Banner in Popover */}
+          {planningToast && isPlanning && (
+            <div
+              data-testid="planning-toast-banner"
+              className="bg-indigo-50 dark:bg-indigo-950/80 border border-indigo-300 dark:border-indigo-800/80 rounded-lg p-2 flex items-center justify-between gap-2 text-xs text-indigo-800 dark:text-indigo-200"
+            >
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="font-semibold text-[11px] shrink-0">🧠 Planning:</span>
+                <span className="truncate text-[11px]">
+                  {planningToast.projectName ? `Tracking planning on "${planningToast.projectName}"` : 'Tracking planning session'}
+                </span>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={() => discardActiveWorkSession()}
+                  data-testid="planning-toast-discard-btn"
+                  className="px-2 py-0.5 bg-rose-600/80 hover:bg-rose-600 text-white rounded text-[10px] font-semibold transition-colors cursor-pointer"
+                >
+                  Discard
+                </button>
+                <button
+                  onClick={() => dismissPlanningToast()}
+                  data-testid="planning-toast-dismiss-btn"
+                  className="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded text-[10px] transition-colors cursor-pointer"
+                >
+                  Got it
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Timer & AU Detail */}
+          <div className="space-y-1.5">
+            <div className="flex items-baseline justify-between">
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-mono font-bold tracking-tight text-slate-900 dark:text-slate-100">
                   {formatTimer(activeWorkElapsedSeconds)}
                 </span>
-                <span className="text-slate-600">·</span>
-                <span className="text-amber-400 font-bold">
-                  {Math.round(currentAU * 100) / 100} AU
-                </span>
-                {estimatedAU !== undefined && estimatedAU > 0 && (
-                  <span
-                    className={`font-mono text-[9px] sm:text-[10px] px-1 py-0.2 rounded font-semibold ${
-                      isOverEstimated
-                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                    }`}
-                    title={`${progressPercent}% of ${
-                      Math.round(estimatedAU * 100) / 100
-                    } AU estimated`}
-                  >
-                    {progressPercent}%
-                  </span>
-                )}
-                {isRunaway && (
-                  <span
-                    className="ml-1 px-1 py-0.2 rounded text-[9px] font-semibold bg-rose-500/30 text-rose-300 border border-rose-500/40"
-                    title="Timer running > 2 hours. Click to manage or adjust."
-                  >
-                    &gt;2h
-                  </span>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Right: Responsive Action Controls */}
-        <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0 pl-1.5 sm:pl-2 border-l border-slate-700/60">
-          {/* Pause / Resume */}
-          {activeWorkSession.isPaused ? (
-            <button
-              onClick={() => resumeWork()}
-              className="p-1.5 sm:px-2.5 bg-emerald-600/90 hover:bg-emerald-500 active:scale-95 text-white rounded-lg transition-all flex items-center gap-1 text-xs font-medium shadow-sm cursor-pointer"
-              title="Resume focus work session"
-            >
-              <Play className="w-3.5 h-3.5 fill-current" />
-              <span className="hidden sm:inline">Resume</span>
-            </button>
-          ) : (
-            <button
-              onClick={() => pauseWork()}
-              className="p-1.5 sm:px-2 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 rounded-lg transition-all flex items-center gap-1 text-xs font-medium border border-slate-700/40 shadow-sm cursor-pointer"
-              title="Pause focus work session"
-            >
-              <Pause className="w-3.5 h-3.5 fill-current" />
-              <span className="hidden sm:inline">Pause</span>
-            </button>
-          )}
-
-          {isPlanning ? (
-            <>
-              {/* Finish Planning */}
-              <button
-                onClick={() => stopProjectPlanning()}
-                data-testid="workbar-finish-planning-btn"
-                className="p-1.5 sm:px-2.5 bg-indigo-600/90 hover:bg-indigo-500 active:scale-95 text-white rounded-lg transition-all flex items-center gap-1 text-xs font-medium shadow-sm cursor-pointer"
-                title="Finish and save project planning session"
+                <button
+                  onClick={() => openWorkSessionsModal(activeWorkSession.taskId)}
+                  className="text-[11px] font-mono text-slate-500 dark:text-slate-400 hover:underline cursor-pointer"
+                  title="Click to view and edit recorded work sessions for this task"
+                >
+                  {Math.round(currentAU * 100) / 100} AU {estimatedAU !== undefined ? `/ ${estimatedAU} AU` : ''}
+                </button>
+              </div>
+              <span
+                className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                  activeWorkSession.isPaused
+                    ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800'
+                    : isPlanning
+                    ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800'
+                    : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800'
+                }`}
               >
-                <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                <span className="hidden sm:inline">Finish Planning</span>
-              </button>
+                {activeWorkSession.isPaused ? 'Paused' : isPlanning ? 'Planning' : 'Focusing'}
+              </span>
+            </div>
 
-              {/* Discard Planning */}
+            {clampedProgressWidth !== null && (
+              <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                <div
+                  className={`h-full transition-all duration-300 rounded-full ${
+                    isOverEstimated ? 'bg-amber-500' : isPlanning ? 'bg-indigo-500' : 'bg-emerald-500'
+                  }`}
+                  style={{ width: `${clampedProgressWidth}%` }}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Primary Action Buttons */}
+          <div className="grid grid-cols-3 gap-1.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+            {isPlanning ? (
+              <>
+                <button
+                  onClick={() => stopProjectPlanning()}
+                  data-testid="workbar-finish-planning-btn"
+                  className="col-span-2 py-1.5 px-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Finish Planning</span>
+                </button>
+                <button
+                  onClick={() => discardActiveWorkSession()}
+                  data-testid="workbar-discard-planning-btn"
+                  className="py-1.5 px-2 bg-slate-100 dark:bg-slate-800 hover:bg-rose-100 dark:hover:bg-rose-950/40 text-slate-700 dark:text-slate-300 hover:text-rose-600 rounded-lg text-xs font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Discard</span>
+                </button>
+              </>
+            ) : (
+              <>
+                {activeWorkSession.isPaused ? (
+                  <button
+                    onClick={() => resumeWork()}
+                    aria-label="Resume"
+                    className="py-1.5 px-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    <span>Resume</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => pauseWork()}
+                    aria-label="Pause"
+                    className="py-1.5 px-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-slate-200 dark:border-slate-700"
+                  >
+                    <Pause className="w-3.5 h-3.5 fill-current" />
+                    <span>Pause</span>
+                  </button>
+                )}
+
+                <button
+                  onClick={() => completeAndStopWork()}
+                  title="Mark task completed and stop work session"
+                  className="py-1.5 px-2.5 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Complete</span>
+                </button>
+
+                <button
+                  onClick={() => stopWork()}
+                  title="Stop work clock without completing task"
+                  className="py-1.5 px-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                >
+                  <Square className="w-3 h-3 fill-current" />
+                  <span>Stop</span>
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* Secondary Actions: Quick Drop & Breaks */}
+          <div className="flex items-center justify-between pt-1 text-[11px] text-slate-500 dark:text-slate-400">
+            <button
+              onClick={() => setIsQuickDropOpen(!isQuickDropOpen)}
+              className="flex items-center gap-1 hover:text-teal-600 dark:hover:text-teal-400 cursor-pointer"
+              title="Capture stray thought without losing focus"
+            >
+              <Sparkles className="w-3 h-3 text-teal-500" />
+              <span>Drop Thought</span>
+            </button>
+
+            <div className="relative">
+              <button
+                onClick={() => setIsBreakMenuOpen(!isBreakMenuOpen)}
+                className="flex items-center gap-1 hover:text-amber-600 dark:hover:text-amber-400 cursor-pointer"
+                title="Take a recovery break"
+              >
+                <Coffee className="w-3 h-3 text-amber-500" />
+                <span>Break</span>
+              </button>
+              {isBreakMenuOpen && (
+                <div className="absolute right-0 bottom-full mb-1.5 w-36 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg py-1 z-50 text-xs">
+                  <button
+                    onClick={() => {
+                      startRecoverySession(2);
+                      openRecoveryCurtain();
+                      setIsBreakMenuOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer"
+                  >
+                    Micro Break (2m)
+                  </button>
+                  <button
+                    onClick={() => {
+                      startRecoverySession(5);
+                      openRecoveryCurtain();
+                      setIsBreakMenuOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer"
+                  >
+                    Short Rest (5m)
+                  </button>
+                  <button
+                    onClick={() => {
+                      startRecoverySession(15);
+                      openRecoveryCurtain();
+                      setIsBreakMenuOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer"
+                  >
+                    Full Reset (15m)
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {!isPlanning && (
               <button
                 onClick={() => discardActiveWorkSession()}
-                data-testid="workbar-discard-planning-btn"
-                className="p-1.5 sm:px-2 bg-rose-600/90 hover:bg-rose-500 active:scale-95 text-white rounded-lg transition-all flex items-center gap-1 text-xs font-medium shadow-sm cursor-pointer"
-                title="Discard planning session without saving"
+                title="Discard this work session without saving telemetry"
+                className="flex items-center gap-1 hover:text-rose-600 dark:hover:text-rose-400 cursor-pointer"
               >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Discard</span>
+                <Trash2 className="w-3 h-3 text-slate-400 hover:text-rose-500" />
+                <span>Discard</span>
               </button>
-            </>
-          ) : isRecovery ? (
-            <>
-              {/* Expand Rest Screen */}
+            )}
+          </div>
+
+          {/* Quick Drop Composer Input */}
+          {isQuickDropOpen && (
+            <div className="pt-1 flex items-center gap-1.5">
+              <input
+                ref={quickDropInputRef}
+                type="text"
+                value={quickDropText}
+                onChange={(e) => setQuickDropText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && quickDropText.trim()) {
+                    e.preventDefault();
+                    addDroppedThought(quickDropText.trim(), {
+                      originTaskId: activeWorkSession.taskId,
+                      projectId: activeWorkSession.projectId,
+                      projectName: activeWorkSession.projectName,
+                    });
+                    setQuickDropText('');
+                    setIsQuickDropOpen(false);
+                  } else if (e.key === 'Escape') {
+                    setIsQuickDropOpen(false);
+                  }
+                }}
+                placeholder="Drop thought... (Enter to save)"
+                className="flex-1 px-2.5 py-1 text-xs bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-hidden focus:ring-1 focus:ring-teal-500"
+              />
               <button
-                onClick={() => openRecoveryCurtain()}
-                className="p-1.5 sm:px-2.5 bg-emerald-600/90 hover:bg-emerald-500 active:scale-95 text-white rounded-lg transition-all flex items-center gap-1 text-xs font-medium shadow-sm cursor-pointer"
-                title="Expand recovery rest curtain"
+                onClick={() => {
+                  if (quickDropText.trim()) {
+                    addDroppedThought(quickDropText.trim(), {
+                      originTaskId: activeWorkSession.taskId,
+                      projectId: activeWorkSession.projectId,
+                      projectName: activeWorkSession.projectName,
+                    });
+                    setQuickDropText('');
+                    setIsQuickDropOpen(false);
+                  }
+                }}
+                className="px-2 py-1 bg-teal-600 hover:bg-teal-500 text-white rounded-md text-xs font-semibold cursor-pointer"
               >
-                <Coffee className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Rest Screen</span>
+                Drop
               </button>
-
-              {/* End Break */}
-              <button
-                onClick={() => stopWork()}
-                className="p-1.5 sm:px-2 bg-slate-700 hover:bg-slate-600 active:scale-95 text-white rounded-lg transition-all flex items-center gap-1 text-xs font-medium shadow-sm cursor-pointer"
-                title="End recovery break"
-              >
-                <Square className="w-3.5 h-3.5 fill-current" />
-                <span className="hidden sm:inline">End Break</span>
-              </button>
-            </>
-          ) : (
-            <>
-              {/* Complete & Stop */}
-              <button
-                onClick={() => completeAndStopWork()}
-                className="p-1.5 sm:px-2.5 bg-emerald-600/90 hover:bg-emerald-500 active:scale-95 text-white rounded-lg transition-all flex items-center gap-1 text-xs font-medium shadow-sm cursor-pointer"
-                title="Mark task completed and stop work session"
-              >
-                <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                <span className="hidden sm:inline md:hidden">Done</span>
-                <span className="hidden md:inline">Complete & Stop</span>
-              </button>
-
-              {/* Take a Break Button with Presets Dropdown */}
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setIsBreakMenuOpen((prev) => !prev)}
-                  className="p-1.5 sm:px-2 bg-amber-600/90 hover:bg-amber-500 active:scale-95 text-white rounded-lg transition-all flex items-center gap-1 text-xs font-medium shadow-sm cursor-pointer"
-                  title="Take an intentional recovery break"
-                >
-                  <Coffee className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Break</span>
-                </button>
-
-                {isBreakMenuOpen && (
-                  <div className="absolute bottom-full right-0 mb-2 w-44 bg-slate-900 border border-slate-700 rounded-xl shadow-xl p-1.5 z-50 text-xs space-y-1 animate-in fade-in zoom-in-95 duration-100">
-                    <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                      Recovery Break
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsBreakMenuOpen(false);
-                        startRecoverySession(15);
-                      }}
-                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-200 hover:text-emerald-400 transition-colors flex items-center justify-between cursor-pointer"
-                    >
-                      <span>15m Quick Rest</span>
-                      <span className="text-[10px] opacity-60">15m</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsBreakMenuOpen(false);
-                        startRecoverySession(30);
-                      }}
-                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-200 hover:text-emerald-400 transition-colors flex items-center justify-between cursor-pointer"
-                    >
-                      <span>30m Deep Rest</span>
-                      <span className="text-[10px] opacity-60">30m</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsBreakMenuOpen(false);
-                        startRecoverySession(60);
-                      }}
-                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-200 hover:text-emerald-400 transition-colors flex items-center justify-between cursor-pointer"
-                    >
-                      <span>60m Meal / Walk</span>
-                      <span className="text-[10px] opacity-60">60m</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsBreakMenuOpen(false);
-                        startRecoverySession(null);
-                      }}
-                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-200 hover:text-emerald-400 transition-colors flex items-center justify-between border-t border-slate-800 pt-1.5 cursor-pointer"
-                    >
-                      <span>Open-ended</span>
-                      <span className="text-[10px] opacity-60">∞</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Drop Thought Button with Quick Popover */}
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setIsQuickDropOpen((prev) => !prev)}
-                  className="p-1.5 sm:px-2 bg-teal-600/90 hover:bg-teal-500 active:scale-95 text-white rounded-lg transition-all flex items-center gap-1 text-xs font-medium shadow-sm cursor-pointer"
-                  title="Drop a fleeting thought into Thoughts Pool"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Drop Idea</span>
-                </button>
-
-                {isQuickDropOpen && (
-                  <div className="absolute bottom-full right-0 mb-2 w-64 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-2.5 z-50 text-xs space-y-2 animate-in fade-in zoom-in-95 duration-100">
-                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-300">
-                      <span className="flex items-center gap-1 text-teal-400">
-                        <Sparkles className="w-3 h-3" />
-                        <span>Quick Drop Thought</span>
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsQuickDropOpen(false);
-                          setIsThoughtsPoolOpen(true);
-                        }}
-                        className="text-[10px] text-teal-400 hover:underline cursor-pointer"
-                      >
-                        Open Pool
-                      </button>
-                    </div>
-
-                    <form
-                      onSubmit={async (e) => {
-                        e.preventDefault();
-                        if (!quickDropText.trim() || !activeWorkSession) return;
-                        await addDroppedThought(quickDropText.trim(), {
-                          projectId: activeWorkSession.projectId,
-                          projectName: activeWorkSession.projectName,
-                          originTaskId: activeWorkSession.taskId,
-                          originTaskText: activeWorkSession.taskText,
-                        });
-                        setQuickDropText('');
-                        setIsQuickDropOpen(false);
-                      }}
-                      className="space-y-1.5"
-                    >
-                      <input
-                        ref={quickDropInputRef}
-                        type="text"
-                        value={quickDropText}
-                        onChange={(e) => setQuickDropText(e.target.value)}
-                        placeholder="Drop a thought... (Enter)"
-                        className="w-full text-xs bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 placeholder-slate-400 focus:outline-none focus:border-teal-500 shadow-inner"
-                      />
-                      <div className="flex justify-end gap-1.5 pt-0.5">
-                        <button
-                          type="button"
-                          onClick={() => setIsQuickDropOpen(false)}
-                          className="px-2 py-1 text-[10px] rounded text-slate-400 hover:text-slate-200 cursor-pointer"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="submit"
-                          disabled={!quickDropText.trim()}
-                          className="px-2.5 py-1 text-[10px] font-semibold rounded bg-teal-600 hover:bg-teal-500 disabled:opacity-50 text-white cursor-pointer"
-                        >
-                          Drop
-                        </button>
-                      </div>
-                    </form>
-                  </div>
-                )}
-              </div>
-
-              {/* Zen Curtain Toggle */}
-              <button
-                type="button"
-                onClick={() => setZenCurtainEnabled(!zenCurtainEnabled)}
-                className={`p-1.5 rounded-lg transition-all flex items-center justify-center border text-xs cursor-pointer ${
-                  zenCurtainEnabled
-                    ? 'bg-brand-600/90 border-brand-500 text-white shadow-sm'
-                    : 'bg-slate-800 border-slate-700/60 text-slate-400 hover:text-slate-200'
-                }`}
-                title={`Zen Focus Curtain is ${zenCurtainEnabled ? 'Active' : 'Off'} (Click to toggle)`}
-                aria-label="Toggle Zen Focus Curtain"
-              >
-                {zenCurtainEnabled ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-              </button>
-
-              {/* Stop Clock */}
-              <button
-                onClick={() => stopWork()}
-                className="p-1.5 sm:px-2 bg-rose-600/90 hover:bg-rose-500 active:scale-95 text-white rounded-lg transition-all flex items-center gap-1 text-xs font-medium shadow-sm cursor-pointer"
-                title="Stop work clock without completing task"
-              >
-                <Square className="w-3.5 h-3.5 fill-current" />
-                <span className="hidden sm:inline">Stop</span>
-              </button>
-            </>
-          )}
-
-          {/* Picture-in-Picture Button */}
-          <button
-            onClick={handleOpenPiP}
-            className="p-1.5 bg-slate-800 hover:bg-slate-700 active:scale-95 text-amber-400 hover:text-amber-300 rounded-lg transition-all flex items-center justify-center border border-slate-700/40 shadow-sm cursor-pointer"
-            title="Pop up into OS Picture-in-Picture floating window"
-            aria-label="Open Picture-in-Picture"
-          >
-            <PictureInPicture2 className="w-3.5 h-3.5" />
-          </button>
-
-          {/* Reset Position (visible only when moved) */}
-          {position && (
-            <button
-              onClick={handleResetPosition}
-              className="p-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-slate-200 rounded-lg transition-all flex items-center justify-center cursor-pointer"
-              title="Reset position to bottom right"
-              aria-label="Reset bar position"
-            >
-              <RotateCcw className="w-3 h-3" />
-            </button>
+            </div>
           )}
         </div>
       </div>
-    </aside>
+
+      {/* Picture in Picture Portal */}
+      {isPiPActive && pipWindow && (
+        <PictureInPicturePortal pipWindow={pipWindow}>
+          {pipContent}
+        </PictureInPicturePortal>
+      )}
     </>
   );
 };
-

@@ -77,14 +77,15 @@ describe('ActiveWorkBar and PictureInPicture', () => {
       </AppContext.Provider>
     );
 
-    expect(screen.getByText('Refactor Graph Layout Engine')).toBeInTheDocument();
+    expect(screen.getAllByText('Refactor Graph Layout Engine')[0]).toBeInTheDocument();
     expect(screen.getByText('Graph Engine')).toBeInTheDocument();
-    expect(screen.getByText('02:00')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /pause/i })).toBeInTheDocument();
+    expect(screen.getAllByText('02:00')[0]).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /pause/i })[0]).toBeInTheDocument();
     expect(screen.getByTitle('Mark task completed and stop work session')).toBeInTheDocument();
     expect(screen.getByTitle('Stop work clock without completing task')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /open picture-in-picture/i })).toBeInTheDocument();
-    expect(screen.getByTestId('drag-handle')).toBeInTheDocument();
+    expect(screen.getByTestId('bottombar-focus-indicator')).toBeInTheDocument();
+    expect(screen.getByTestId('focus-hover-popover')).toBeInTheDocument();
   });
 
   it('triggers pauseWork when Pause is clicked', () => {
@@ -94,7 +95,7 @@ describe('ActiveWorkBar and PictureInPicture', () => {
       </AppContext.Provider>
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /pause/i }));
+    fireEvent.click(screen.getAllByRole('button', { name: /pause/i })[0]);
     expect(pauseWorkMock).toHaveBeenCalledTimes(1);
   });
 
@@ -113,7 +114,7 @@ describe('ActiveWorkBar and PictureInPicture', () => {
       </AppContext.Provider>
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /resume/i }));
+    fireEvent.click(screen.getAllByRole('button', { name: /resume/i })[0]);
     expect(resumeWorkMock).toHaveBeenCalledTimes(1);
   });
 
@@ -131,39 +132,23 @@ describe('ActiveWorkBar and PictureInPicture', () => {
     expect(stopWorkMock).toHaveBeenCalledTimes(1);
   });
 
-  it('handles drag and drop repositioning and double-click reset', () => {
+  it('renders docked bottom bar indicator and hover popover with interactive jump', () => {
     render(
       <AppContext.Provider value={baseContextValue}>
         <ActiveWorkBar />
       </AppContext.Provider>
     );
 
-    const bar = screen.getByRole('complementary', { name: /active focus work session/i });
-    const dragHandle = screen.getByTestId('drag-handle');
+    const indicator = screen.getByTestId('bottombar-focus-indicator');
+    const popover = screen.getByTestId('focus-hover-popover');
 
-    // Simulate pointer drag on the bar
-    act(() => {
-      fireEvent.pointerDown(bar, { clientX: 100, clientY: 100, pointerId: 1 });
-      fireEvent.pointerMove(bar, { clientX: 150, clientY: 180, pointerId: 1 });
-      fireEvent.pointerUp(bar, { clientX: 150, clientY: 180, pointerId: 1 });
-    });
+    expect(indicator).toBeInTheDocument();
+    expect(popover).toBeInTheDocument();
+    expect(screen.getAllByText('Refactor Graph Layout Engine')[0]).toBeInTheDocument();
 
-    // Should have saved the moved position
-    const saved = localStorage.getItem('graphdule_active_bar_pos');
-    expect(saved).not.toBeNull();
-    const parsed = JSON.parse(saved!);
-    expect(typeof parsed.x).toBe('number');
-    expect(typeof parsed.y).toBe('number');
-
-    // Reset button should now be visible
-    const resetBtn = screen.getByRole('button', { name: /reset bar position/i });
-    expect(resetBtn).toBeInTheDocument();
-
-    // Double clicking the drag handle resets position
-    act(() => {
-      fireEvent.doubleClick(dragHandle);
-    });
-    expect(localStorage.getItem('graphdule_active_bar_pos')).toBeNull();
+    const jumpBtn = screen.getByTitle('Jump to task: "Refactor Graph Layout Engine"');
+    fireEvent.click(jumpBtn);
+    expect(openProjectMock).toHaveBeenCalledWith('proj-1', 'task-1');
   });
 
   it('supports Picture-in-Picture window opening and closing', async () => {

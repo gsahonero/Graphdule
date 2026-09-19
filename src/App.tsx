@@ -76,7 +76,7 @@ const AppContent: React.FC = () => {
 
       {/* Global Modals, Drawers & Persistent Active Session Bar */}
       <ZenFocusCurtain />
-      <ActiveWorkBar />
+      <ActiveWorkBar mode="mobile" />
       <ThoughtsDropPoolDrawer />
       <PlanningInterceptionModal />
       <NotesDrawer />
