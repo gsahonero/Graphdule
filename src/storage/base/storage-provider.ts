@@ -6,6 +6,7 @@ import {
   UserPreferences,
   ProjectSummary,
   IdeaSeed,
+  DroppedThought,
   ActivityEvent,
   WeeklyAttentionReviewRecord,
   DailyCapacitySnapshot,
@@ -52,6 +53,10 @@ export interface IStorageProvider {
   readIdeaSeeds?(): Promise<IdeaSeed[]>;
   writeIdeaSeeds?(seeds: IdeaSeed[]): Promise<void>;
   deleteIdeaSeed?(seedId: string): Promise<void>;
+
+  readDroppedThoughts?(): Promise<DroppedThought[]>;
+  writeDroppedThoughts?(thoughts: DroppedThought[]): Promise<void>;
+  deleteDroppedThought?(thoughtId: string): Promise<void>;
 
   readActivityLog?(): Promise<ActivityEvent[]>;
   appendActivityEvents?(events: ActivityEvent[]): Promise<void>;

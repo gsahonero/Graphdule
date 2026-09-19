@@ -195,6 +195,7 @@ export const UserPreferencesSchema = z.object({
   bonsai: BonsaiStateSchema.optional(),
   bonsaiEnabled: z.boolean().optional().default(true),
   bonsaiPlacement: z.enum(['my_day', 'header', 'receipt_only']).optional().default('my_day'),
+  zenCurtainEnabled: z.boolean().optional().default(false),
 }).passthrough();
 
 export const IdeaSeedSchema = z.object({
@@ -205,6 +206,26 @@ export const IdeaSeedSchema = z.object({
   tags: z.array(z.string()).optional().default([]),
   createdAt: z.string(),
   updatedAt: z.string(),
+}).passthrough();
+
+export const DroppedThoughtStatusSchema = z.enum(['inbox', 'converted', 'dismissed']);
+export const DroppedThoughtConversionTargetSchema = z.enum(['node', 'project', 'standalone_task', 'seed', 'note']);
+
+export const DroppedThoughtSchema = z.object({
+  id: z.string().min(1),
+  text: z.string().min(1),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  status: DroppedThoughtStatusSchema.default('inbox'),
+  projectId: z.string().optional(),
+  projectName: z.string().optional(),
+  originTaskId: z.string().optional(),
+  originTaskText: z.string().optional(),
+  convertedTarget: z.object({
+    type: DroppedThoughtConversionTargetSchema,
+    entityId: z.string(),
+    entityText: z.string().optional(),
+  }).optional(),
 }).passthrough();
 
 /**

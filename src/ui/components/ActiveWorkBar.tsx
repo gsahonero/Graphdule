@@ -15,6 +15,9 @@ import {
   Sparkles,
   Trash2,
   Coffee,
+  Eye,
+  EyeOff,
+  MessageSquarePlus,
 } from 'lucide-react';
 import {
   requestPictureInPictureWindow,
@@ -48,9 +51,23 @@ export const ActiveWorkBar: React.FC = () => {
     activeHealthNotification,
     acknowledgeHealthIntervention,
     dismissHealthIntervention,
+    isThoughtsPoolOpen,
+    setIsThoughtsPoolOpen,
+    addDroppedThought,
+    zenCurtainEnabled,
+    setZenCurtainEnabled,
   } = useApp();
 
   const [isBreakMenuOpen, setIsBreakMenuOpen] = useState(false);
+  const [isQuickDropOpen, setIsQuickDropOpen] = useState(false);
+  const [quickDropText, setQuickDropText] = useState('');
+  const quickDropInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isQuickDropOpen) {
+      setTimeout(() => quickDropInputRef.current?.focus(), 50);
+    }
+  }, [isQuickDropOpen]);
 
   // Position & Dragging State
   const [position, setPosition] = useState<{ x: number; y: number } | null>(() => {
@@ -958,6 +975,96 @@ export const ActiveWorkBar: React.FC = () => {
                   </div>
                 )}
               </div>
+
+              {/* Drop Thought Button with Quick Popover */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsQuickDropOpen((prev) => !prev)}
+                  className="p-1.5 sm:px-2 bg-teal-600/90 hover:bg-teal-500 active:scale-95 text-white rounded-lg transition-all flex items-center gap-1 text-xs font-medium shadow-sm cursor-pointer"
+                  title="Drop a fleeting thought into Thoughts Pool"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Drop Idea</span>
+                </button>
+
+                {isQuickDropOpen && (
+                  <div className="absolute bottom-full right-0 mb-2 w-64 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-2.5 z-50 text-xs space-y-2 animate-in fade-in zoom-in-95 duration-100">
+                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-300">
+                      <span className="flex items-center gap-1 text-teal-400">
+                        <Sparkles className="w-3 h-3" />
+                        <span>Quick Drop Thought</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsQuickDropOpen(false);
+                          setIsThoughtsPoolOpen(true);
+                        }}
+                        className="text-[10px] text-teal-400 hover:underline cursor-pointer"
+                      >
+                        Open Pool
+                      </button>
+                    </div>
+
+                    <form
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        if (!quickDropText.trim() || !activeWorkSession) return;
+                        await addDroppedThought(quickDropText.trim(), {
+                          projectId: activeWorkSession.projectId,
+                          projectName: activeWorkSession.projectName,
+                          originTaskId: activeWorkSession.taskId,
+                          originTaskText: activeWorkSession.taskText,
+                        });
+                        setQuickDropText('');
+                        setIsQuickDropOpen(false);
+                      }}
+                      className="space-y-1.5"
+                    >
+                      <input
+                        ref={quickDropInputRef}
+                        type="text"
+                        value={quickDropText}
+                        onChange={(e) => setQuickDropText(e.target.value)}
+                        placeholder="Drop a thought... (Enter)"
+                        className="w-full text-xs bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 placeholder-slate-400 focus:outline-none focus:border-teal-500 shadow-inner"
+                      />
+                      <div className="flex justify-end gap-1.5 pt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => setIsQuickDropOpen(false)}
+                          className="px-2 py-1 text-[10px] rounded text-slate-400 hover:text-slate-200 cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={!quickDropText.trim()}
+                          className="px-2.5 py-1 text-[10px] font-semibold rounded bg-teal-600 hover:bg-teal-500 disabled:opacity-50 text-white cursor-pointer"
+                        >
+                          Drop
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                )}
+              </div>
+
+              {/* Zen Curtain Toggle */}
+              <button
+                type="button"
+                onClick={() => setZenCurtainEnabled(!zenCurtainEnabled)}
+                className={`p-1.5 rounded-lg transition-all flex items-center justify-center border text-xs cursor-pointer ${
+                  zenCurtainEnabled
+                    ? 'bg-brand-600/90 border-brand-500 text-white shadow-sm'
+                    : 'bg-slate-800 border-slate-700/60 text-slate-400 hover:text-slate-200'
+                }`}
+                title={`Zen Focus Curtain is ${zenCurtainEnabled ? 'Active' : 'Off'} (Click to toggle)`}
+                aria-label="Toggle Zen Focus Curtain"
+              >
+                {zenCurtainEnabled ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+              </button>
 
               {/* Stop Clock */}
               <button

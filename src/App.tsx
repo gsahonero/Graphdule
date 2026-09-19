@@ -19,6 +19,9 @@ import { HealthConfigModal } from './ui/components/HealthConfigModal';
 import { AppearanceModal } from './ui/components/AppearanceModal';
 import { PostTaskReceiptModal } from './ui/components/PostTaskReceiptModal';
 import { RecoveryCurtainModal } from './ui/components/RecoveryCurtainModal';
+import { ThoughtsDropPoolDrawer } from './ui/components/ThoughtsDropPoolDrawer';
+import { PlanningInterceptionModal } from './ui/components/PlanningInterceptionModal';
+import { ZenFocusCurtain } from './ui/components/ZenFocusCurtain';
 import { BottomNav } from './ui/components/BottomNav';
 import { BottomBar } from './ui/components/BottomBar';
 import { KeyboardShortcutsModal } from './ui/components/KeyboardShortcutsModal';
@@ -37,7 +40,20 @@ const AppContent: React.FC = () => {
     activeWorkElapsedSeconds,
     isShortcutsModalOpen,
     setIsShortcutsModalOpen,
+    setIsThoughtsPoolOpen,
   } = useApp();
+
+  // Global Alt+D shortcut to open Thoughts Drop Pool
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        setIsThoughtsPoolOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [setIsThoughtsPoolOpen]);
 
   return (
     <div className="h-[100dvh] min-h-[100dvh] w-screen flex flex-col dark:bg-slate-950 dark:text-slate-100 bg-slate-100 text-slate-900 overflow-hidden select-none transition-colors duration-150">
@@ -59,7 +75,10 @@ const AppContent: React.FC = () => {
       <BottomBar />
 
       {/* Global Modals, Drawers & Persistent Active Session Bar */}
+      <ZenFocusCurtain />
       <ActiveWorkBar />
+      <ThoughtsDropPoolDrawer />
+      <PlanningInterceptionModal />
       <NotesDrawer />
       <CascadeModal />
       <OnboardingModal />

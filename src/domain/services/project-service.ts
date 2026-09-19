@@ -12,6 +12,8 @@ import {
   TaskEnvironment,
   CognitiveDemand,
   NodeType,
+  DroppedThought,
+  DroppedThoughtConversionTarget,
 } from '../models/types';
 import { getTodayString, isAfter } from '../utils/date';
 import { GraphService } from './graph-service';
@@ -1219,5 +1221,75 @@ export class ProjectService {
       if (!b.deadline) return -1;
       return a.deadline.localeCompare(b.deadline);
     });
+  }
+
+  /**
+   * Creates a new DroppedThought entity in the Thoughts Drop Pool.
+   */
+  public static createDroppedThought(
+    text: string,
+    options?: {
+      projectId?: string;
+      projectName?: string;
+      originTaskId?: string;
+      originTaskText?: string;
+    }
+  ): DroppedThought {
+    const now = new Date().toISOString();
+    return {
+      id: this.generateId('thought'),
+      text: text.trim(),
+      createdAt: now,
+      updatedAt: now,
+      status: 'inbox',
+      projectId: options?.projectId,
+      projectName: options?.projectName,
+      originTaskId: options?.originTaskId,
+      originTaskText: options?.originTaskText,
+    };
+  }
+
+  /**
+   * Updates an existing DroppedThought.
+   */
+  public static updateDroppedThought(
+    thought: DroppedThought,
+    updates: Partial<Omit<DroppedThought, 'id' | 'createdAt'>>
+  ): DroppedThought {
+    return {
+      ...thought,
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Marks a DroppedThought as converted with its target entity reference.
+   */
+  public static markDroppedThoughtConverted(
+    thought: DroppedThought,
+    target: {
+      type: DroppedThoughtConversionTarget;
+      entityId: string;
+      entityText?: string;
+    }
+  ): DroppedThought {
+    return {
+      ...thought,
+      status: 'converted',
+      convertedTarget: target,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Marks a DroppedThought as dismissed.
+   */
+  public static markDroppedThoughtDismissed(thought: DroppedThought): DroppedThought {
+    return {
+      ...thought,
+      status: 'dismissed',
+      updatedAt: new Date().toISOString(),
+    };
   }
 }

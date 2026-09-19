@@ -162,6 +162,26 @@ export interface IdeaSeed {
   readonly updatedAt: string;
 }
 
+export type DroppedThoughtStatus = 'inbox' | 'converted' | 'dismissed';
+export type DroppedThoughtConversionTarget = 'node' | 'project' | 'standalone_task' | 'seed' | 'note';
+
+export interface DroppedThought {
+  readonly id: string;
+  readonly text: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly status: DroppedThoughtStatus;
+  readonly projectId?: string;
+  readonly projectName?: string;
+  readonly originTaskId?: string;
+  readonly originTaskText?: string;
+  readonly convertedTarget?: {
+    readonly type: DroppedThoughtConversionTarget;
+    readonly entityId: string;
+    readonly entityText?: string;
+  };
+}
+
 export type WorkSessionType = 'execution' | 'planning' | 'recovery';
 
 export const ACTIVITY_EVENT_TYPES = [
@@ -365,6 +385,7 @@ export interface UserPreferences {
   readonly bonsai?: BonsaiState;
   readonly bonsaiEnabled?: boolean;
   readonly bonsaiPlacement?: 'my_day' | 'header' | 'receipt_only';
+  readonly zenCurtainEnabled?: boolean;
 }
 
 export interface ProjectSummary {

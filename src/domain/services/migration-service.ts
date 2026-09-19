@@ -3,6 +3,7 @@ import {
   StandaloneTaskSchema,
   UserPreferencesSchema,
   IdeaSeedSchema,
+  DroppedThoughtSchema,
   ActivityEventSchema,
   WeeklyAttentionReviewRecordSchema,
   DailyCapacitySnapshotSchema,
@@ -12,6 +13,7 @@ import {
   StandaloneTask,
   UserPreferences,
   IdeaSeed,
+  DroppedThought,
   ActivityEvent,
   WeeklyAttentionReviewRecord,
   DailyCapacitySnapshot,
@@ -26,6 +28,7 @@ export type ParsedImportPayload =
       standaloneTasks?: StandaloneTask[];
       preferences?: UserPreferences;
       ideaSeeds?: IdeaSeed[];
+      droppedThoughts?: DroppedThought[];
       activityLog?: ActivityEvent[];
       attentionReviews?: WeeklyAttentionReviewRecord[];
       capacitySnapshots?: DailyCapacitySnapshot[];
@@ -165,6 +168,16 @@ export class MigrationService {
         }
       }
 
+      const validThoughts: DroppedThought[] = [];
+      if (Array.isArray(obj.droppedThoughts)) {
+        for (const thought of obj.droppedThoughts) {
+          const parsedThought = DroppedThoughtSchema.safeParse(thought);
+          if (parsedThought.success) {
+            validThoughts.push(parsedThought.data as DroppedThought);
+          }
+        }
+      }
+
       const validEvents: ActivityEvent[] = [];
       if (Array.isArray(obj.activityLog)) {
         for (const ev of obj.activityLog) {
@@ -205,6 +218,7 @@ export class MigrationService {
           standaloneTasks: validStandalones.length > 0 ? validStandalones : undefined,
           preferences: validPrefs,
           ideaSeeds: validSeeds.length > 0 ? validSeeds : undefined,
+          droppedThoughts: validThoughts.length > 0 ? validThoughts : undefined,
           activityLog: cleanEvents.length > 0 ? cleanEvents : undefined,
           attentionReviews: validReviews.length > 0 ? validReviews : undefined,
           capacitySnapshots: validCapacitySnapshots.length > 0 ? validCapacitySnapshots : undefined,

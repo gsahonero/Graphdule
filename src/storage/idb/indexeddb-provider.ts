@@ -8,6 +8,7 @@ import {
   UserPreferences,
   ProjectSummary,
   IdeaSeed,
+  DroppedThought,
   ActivityEvent,
   WeeklyAttentionReviewRecord,
   DailyCapacitySnapshot,
@@ -15,7 +16,7 @@ import {
 import { ProjectService } from '../../domain/services/project-service';
 
 const DB_NAME = 'graphdule_db';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 export class IndexedDBProvider implements IStorageProvider {
   private db: IDBPDatabase | null = null;
@@ -59,6 +60,11 @@ export class IndexedDBProvider implements IStorageProvider {
         if (!db.objectStoreNames.contains('capacity_snapshots')) {
           const capStore = db.createObjectStore('capacity_snapshots', { keyPath: 'id' });
           capStore.createIndex('by_date', 'date');
+        }
+        if (!db.objectStoreNames.contains('thought_drops')) {
+          const thoughtStore = db.createObjectStore('thought_drops', { keyPath: 'id' });
+          thoughtStore.createIndex('by_status', 'status');
+          thoughtStore.createIndex('by_created_at', 'createdAt');
         }
       },
     });
@@ -182,6 +188,27 @@ export class IndexedDBProvider implements IStorageProvider {
   public async deleteIdeaSeed(seedId: string): Promise<void> {
     const db = await this.getDB();
     await db.delete('idea_seeds', seedId);
+  }
+
+  public async readDroppedThoughts(): Promise<DroppedThought[]> {
+    const db = await this.getDB();
+    const thoughts: DroppedThought[] = await db.getAll('thought_drops');
+    return thoughts.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  public async writeDroppedThoughts(thoughts: DroppedThought[]): Promise<void> {
+    const db = await this.getDB();
+    const tx = db.transaction('thought_drops', 'readwrite');
+    await tx.store.clear();
+    for (const t of thoughts) {
+      await tx.store.put(t);
+    }
+    await tx.done;
+  }
+
+  public async deleteDroppedThought(thoughtId: string): Promise<void> {
+    const db = await this.getDB();
+    await db.delete('thought_drops', thoughtId);
   }
 
   public async readActivityLog(): Promise<ActivityEvent[]> {

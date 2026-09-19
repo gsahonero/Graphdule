@@ -19,6 +19,7 @@ import {
   Heart,
   Palette,
   Keyboard,
+  Sparkles,
 } from 'lucide-react';
 import { SyncStatusIndicator } from './SyncStatusIndicator';
 import { BonsaiCompanion } from './BonsaiCompanion';
@@ -44,7 +45,11 @@ export const Header: React.FC = () => {
     colorPalette,
     setIsAppearanceModalOpen,
     setIsShortcutsModalOpen,
+    setIsThoughtsPoolOpen,
+    droppedThoughts,
   } = useApp();
+
+  const inboxThoughtsCount = droppedThoughts ? droppedThoughts.filter((t) => t.status === 'inbox').length : 0;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [deferredPrompt, setDeferredPrompt] = React.useState<any>(null);
@@ -197,6 +202,22 @@ export const Header: React.FC = () => {
           <span>Attention</span>
           {activeWorkSession && (
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse ml-0.5" />
+          )}
+        </button>
+
+        {/* Thoughts Drop Pool Button */}
+        <button
+          onClick={() => setIsThoughtsPoolOpen(true)}
+          data-testid="header-thoughts-pool-button"
+          title="Thoughts Drop Pool (Quick capture & triage)"
+          className="flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/50"
+        >
+          <Sparkles className="w-3.5 h-3.5 shrink-0" />
+          <span>Pool</span>
+          {inboxThoughtsCount > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-teal-500 text-white leading-tight">
+              {inboxThoughtsCount}
+            </span>
           )}
         </button>
       </nav>

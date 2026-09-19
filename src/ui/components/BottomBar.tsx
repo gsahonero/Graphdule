@@ -10,6 +10,7 @@ import {
   Upload,
   HelpCircle,
   Smartphone,
+  Sparkles,
 } from 'lucide-react';
 import { SyncStatusIndicator } from './SyncStatusIndicator';
 
@@ -24,7 +25,11 @@ export const BottomBar: React.FC = () => {
     setIsOnboardingOpen,
     exportAllData,
     importProjectJson,
+    setIsThoughtsPoolOpen,
+    droppedThoughts,
   } = useApp();
+
+  const inboxThoughtsCount = droppedThoughts ? droppedThoughts.filter((t) => t.status === 'inbox').length : 0;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -125,6 +130,22 @@ export const BottomBar: React.FC = () => {
           <kbd className="px-1 py-0.2 rounded bg-slate-200 dark:bg-slate-800 font-mono text-[9px] text-slate-500 dark:text-slate-400">
             ?
           </kbd>
+        </button>
+
+        {/* Thoughts Drop Pool */}
+        <button
+          onClick={() => setIsThoughtsPoolOpen(true)}
+          title="Thoughts Drop Pool (Press Alt+D)"
+          data-testid="bottombar-thoughts-pool-button"
+          className="flex items-center space-x-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium text-teal-700 dark:text-teal-300 hover:bg-teal-50 dark:hover:bg-teal-950/50 border border-teal-200 dark:border-teal-800/60 transition-all cursor-pointer"
+        >
+          <Sparkles className="w-3.5 h-3.5 text-teal-500 shrink-0" />
+          <span>Thoughts Pool</span>
+          {inboxThoughtsCount > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-teal-500 text-white">
+              {inboxThoughtsCount}
+            </span>
+          )}
         </button>
 
         {/* Daily AU Capacity */}

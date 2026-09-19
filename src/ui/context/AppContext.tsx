@@ -13,6 +13,9 @@ import {
   RecurrenceRule,
   CascadeImpactPreview,
   IdeaSeed,
+  DroppedThought,
+  DroppedThoughtStatus,
+  DroppedThoughtConversionTarget,
   ActivityEvent,
   ActivityEventType,
   ActiveWorkSession,
@@ -280,6 +283,43 @@ interface AppContextType {
   // Keyboard Shortcuts Modal
   isShortcutsModalOpen: boolean;
   setIsShortcutsModalOpen: (open: boolean) => void;
+
+  // Thoughts Drop Pool
+  droppedThoughts: DroppedThought[];
+  isThoughtsPoolOpen: boolean;
+  setIsThoughtsPoolOpen: (open: boolean) => void;
+  addDroppedThought: (
+    text: string,
+    options?: {
+      projectId?: string;
+      projectName?: string;
+      originTaskId?: string;
+      originTaskText?: string;
+    }
+  ) => Promise<DroppedThought>;
+  updateDroppedThought: (id: string, updates: Partial<Omit<DroppedThought, 'id' | 'createdAt'>>) => Promise<void>;
+  deleteDroppedThought: (id: string) => Promise<void>;
+  convertDroppedThought: (
+    id: string,
+    target: {
+      type: DroppedThoughtConversionTarget;
+      targetId?: string;
+      targetTitle?: string;
+    }
+  ) => Promise<void>;
+
+  // Planning Interception Guardrail
+  planningInterception: {
+    isOpen: boolean;
+    projectId?: string;
+    projectName?: string;
+    reason?: string;
+  } | null;
+  resolvePlanningInterception: (choice: 'drop_thought' | 'switch_to_planning' | 'cancel', thoughtText?: string) => Promise<void>;
+
+  // Zen Focus Curtain
+  zenCurtainEnabled: boolean;
+  setZenCurtainEnabled: (enabled: boolean) => Promise<void>;
 }
 
 export const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -326,6 +366,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Idea Seeds and Activity Log states
   const [ideaSeeds, setIdeaSeeds] = useState<IdeaSeed[]>([]);
   const [activityLog, setActivityLog] = useState<ActivityEvent[]>([]);
+
+  // Thoughts Drop Pool & Guardrail states
+  const [droppedThoughts, setDroppedThoughts] = useState<DroppedThought[]>([]);
+  const [isThoughtsPoolOpen, setIsThoughtsPoolOpen] = useState(false);
+  const [planningInterception, setPlanningInterception] = useState<{
+    isOpen: boolean;
+    projectId?: string;
+    projectName?: string;
+    reason?: string;
+  } | null>(null);
 
   // Attention Measurement & Active Work Session state
   const [activeWorkSession, setActiveWorkSession] = useState<ActiveWorkSession | null>(() => {
@@ -732,6 +782,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (storage.readIdeaSeeds) {
       const seeds = await storage.readIdeaSeeds();
       setIdeaSeeds(seeds);
+    }
+    if (storage.readDroppedThoughts) {
+      const thoughts = await storage.readDroppedThoughts();
+      setDroppedThoughts(thoughts);
     }
     if (storage.readActivityLog) {
       const events = await storage.readActivityLog();
@@ -1689,8 +1743,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return;
       }
 
-      // If currently working on an execution task, do not interrupt
+      // If currently working on an execution task, trigger the Mindful Speed Bump
       if (currentSession && currentSession.sessionType !== 'planning') {
+        const doc =
+          activeProjectDoc?.project.id === projectId
+            ? activeProjectDoc
+            : await storage.readProject(projectId);
+        const effectiveName = projectName || doc?.project.name || 'Project';
+
+        setPlanningInterception({
+          isOpen: true,
+          projectId,
+          projectName: effectiveName,
+          reason: _reason,
+        });
         return;
       }
 
@@ -3310,6 +3376,176 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [standaloneTasks, storage, debouncedCloudSync]
   );
 
+  // Thoughts Drop Pool Methods
+  const addDroppedThought = useCallback(
+    async (
+      text: string,
+      options?: {
+        projectId?: string;
+        projectName?: string;
+        originTaskId?: string;
+        originTaskText?: string;
+      }
+    ) => {
+      const newThought = ProjectService.createDroppedThought(text, options);
+      const updated = [newThought, ...droppedThoughts];
+      setDroppedThoughts(updated);
+      if (storage.writeDroppedThoughts) {
+        await storage.writeDroppedThoughts(updated);
+      }
+      return newThought;
+    },
+    [droppedThoughts, storage]
+  );
+
+  const updateDroppedThought = useCallback(
+    async (id: string, updates: Partial<Omit<DroppedThought, 'id' | 'createdAt'>>) => {
+      const existing = droppedThoughts.find((t) => t.id === id);
+      if (!existing) return;
+      const updatedThought = ProjectService.updateDroppedThought(existing, updates);
+      const updated = droppedThoughts.map((t) => (t.id === id ? updatedThought : t));
+      setDroppedThoughts(updated);
+      if (storage.writeDroppedThoughts) {
+        await storage.writeDroppedThoughts(updated);
+      }
+    },
+    [droppedThoughts, storage]
+  );
+
+  const deleteDroppedThought = useCallback(
+    async (id: string) => {
+      const updated = droppedThoughts.filter((t) => t.id !== id);
+      setDroppedThoughts(updated);
+      if (storage.deleteDroppedThought) {
+        await storage.deleteDroppedThought(id);
+      } else if (storage.writeDroppedThoughts) {
+        await storage.writeDroppedThoughts(updated);
+      }
+    },
+    [droppedThoughts, storage]
+  );
+
+  const convertDroppedThought = useCallback(
+    async (
+      id: string,
+      target: {
+        type: DroppedThoughtConversionTarget;
+        targetId?: string;
+        targetTitle?: string;
+      }
+    ) => {
+      const thought = droppedThoughts.find((t) => t.id === id);
+      if (!thought) return;
+
+      let createdEntityId = target.targetId || '';
+      let createdEntityText = target.targetTitle || thought.text;
+
+      if (target.type === 'node') {
+        const targetProjectId = target.targetId || thought.projectId || activeProjectDoc?.project.id;
+        if (targetProjectId) {
+          const doc =
+            activeProjectDoc?.project.id === targetProjectId
+              ? activeProjectDoc
+              : await storage.readProject(targetProjectId);
+          if (doc) {
+            const newNode = ProjectService.createNode(
+              thought.text,
+              getTodayString(),
+              null,
+              undefined,
+              undefined,
+              'computer',
+              'medium',
+              'standard'
+            );
+            const updatedDoc = ProjectService.addNodeToProject(doc, newNode);
+            await storage.writeProject(updatedDoc);
+            if (activeProjectDoc?.project.id === targetProjectId) {
+              setActiveProjectDoc(updatedDoc);
+            }
+            createdEntityId = newNode.id;
+            createdEntityText = newNode.text;
+          }
+        }
+      } else if (target.type === 'note') {
+        const targetNodeId = target.targetId || thought.originTaskId;
+        if (targetNodeId) {
+          await addNote(targetNodeId, thought.text);
+          createdEntityId = targetNodeId;
+        }
+      } else if (target.type === 'standalone_task') {
+        await addStandaloneTask(thought.text, getTodayString());
+        createdEntityId = ProjectService.generateId('task');
+      } else if (target.type === 'seed') {
+        const seed = await addIdeaSeed(thought.text, {
+          rawNotes: `Captured in Thoughts Drop Pool on ${new Date().toLocaleDateString()}`,
+        });
+        createdEntityId = seed.id;
+      } else if (target.type === 'project') {
+        await createProject(thought.text, thought.text, getTodayString());
+        createdEntityId = ProjectService.generateId('proj');
+      }
+
+      const updatedThought = ProjectService.markDroppedThoughtConverted(thought, {
+        type: target.type,
+        entityId: createdEntityId,
+        entityText: createdEntityText,
+      });
+      const updated = droppedThoughts.map((t) => (t.id === id ? updatedThought : t));
+      setDroppedThoughts(updated);
+      if (storage.writeDroppedThoughts) {
+        await storage.writeDroppedThoughts(updated);
+      }
+
+      try {
+        playSound('milestone');
+      } catch {
+        // audio optional
+      }
+      await refreshData();
+    },
+    [droppedThoughts, activeProjectDoc, storage, addNote, addStandaloneTask, addIdeaSeed, createProject, refreshData]
+  );
+
+  // Planning Interception Guardrail Resolver
+  const resolvePlanningInterception = useCallback(
+    async (choice: 'drop_thought' | 'switch_to_planning' | 'cancel', thoughtText?: string) => {
+      if (!planningInterception) return;
+      const { projectId, projectName } = planningInterception;
+
+      if (choice === 'drop_thought') {
+        if (thoughtText && thoughtText.trim()) {
+          const currentSession = activeWorkSessionRef.current || activeWorkSession;
+          await addDroppedThought(thoughtText.trim(), {
+            projectId,
+            projectName,
+            originTaskId: currentSession?.taskId,
+            originTaskText: currentSession?.taskText,
+          });
+        } else {
+          setIsThoughtsPoolOpen(true);
+        }
+        setPlanningInterception(null);
+      } else if (choice === 'switch_to_planning') {
+        setPlanningInterception(null);
+        if (projectId) {
+          await startProjectPlanning(projectId, projectName);
+        }
+      } else {
+        setPlanningInterception(null);
+      }
+    },
+    [planningInterception, activeWorkSession, addDroppedThought, startProjectPlanning]
+  );
+
+  // Zen Focus Curtain
+  const setZenCurtainEnabled = useCallback(
+    async (enabled: boolean) => {
+      await updatePreferences({ zenCurtainEnabled: enabled });
+    },
+    [updatePreferences]
+  );
+
   const completeAndStopWork = useCallback(async () => {
     const session = activeWorkSessionRef.current || activeWorkSession;
     if (!session) return;
@@ -3617,6 +3853,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const standalones = await storage.readStandaloneTasks();
     const prefs = await storage.readPreferences();
     const seeds = storage.readIdeaSeeds ? await storage.readIdeaSeeds() : [];
+    const thoughts = storage.readDroppedThoughts ? await storage.readDroppedThoughts() : [];
     const log = storage.readActivityLog ? await storage.readActivityLog() : [];
     const reviews = storage.readAttentionReviews ? await storage.readAttentionReviews() : [];
     const capSnaps = storage.readCapacitySnapshots ? await storage.readCapacitySnapshots() : [];
@@ -3626,6 +3863,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       standaloneTasks: standalones,
       preferences: prefs,
       ideaSeeds: seeds,
+      droppedThoughts: thoughts,
       activityLog: log,
       attentionReviews: reviews,
       capacitySnapshots: capSnaps,
@@ -3679,6 +3917,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const combined = [...existingFiltered, ...payload.ideaSeeds];
           await storage.writeIdeaSeeds(combined);
           setIdeaSeeds(combined);
+        }
+
+        if (payload.droppedThoughts && payload.droppedThoughts.length > 0 && storage.writeDroppedThoughts) {
+          const currentThoughts = storage.readDroppedThoughts ? await storage.readDroppedThoughts() : [];
+          const mergedIds = new Set(payload.droppedThoughts.map((t: DroppedThought) => t.id));
+          const existingFiltered = currentThoughts.filter((t: DroppedThought) => !mergedIds.has(t.id));
+          const combined = [...existingFiltered, ...payload.droppedThoughts];
+          await storage.writeDroppedThoughts(combined);
+          setDroppedThoughts(combined);
         }
 
         if (payload.activityLog && payload.activityLog.length > 0 && storage.appendActivityEvents) {
@@ -3944,6 +4191,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateIdeaSeed,
         deleteIdeaSeed,
         germinateIdeaSeed,
+        droppedThoughts,
+        isThoughtsPoolOpen,
+        setIsThoughtsPoolOpen,
+        addDroppedThought,
+        updateDroppedThought,
+        deleteDroppedThought,
+        convertDroppedThought,
+        planningInterception,
+        resolvePlanningInterception,
+        zenCurtainEnabled: preferences.zenCurtainEnabled ?? false,
+        setZenCurtainEnabled,
         parkProject,
         unparkProject,
         maxAttentionProjects,

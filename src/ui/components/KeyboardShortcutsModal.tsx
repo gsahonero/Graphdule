@@ -128,6 +128,11 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
           badge: 'Meta-Work',
         },
         {
+          keys: ['Alt', 'D'],
+          description: 'Open Thoughts Drop Pool (quick thought capture)',
+          badge: 'Distraction Pad',
+        },
+        {
           keys: ['?'],
           description: 'Open this Keyboard Shortcuts cheat sheet',
         },

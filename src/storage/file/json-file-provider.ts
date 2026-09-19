@@ -58,6 +58,7 @@ export class JsonFileProvider {
     standaloneTasks: unknown[];
     preferences: unknown;
     ideaSeeds?: unknown[];
+    droppedThoughts?: unknown[];
     activityLog?: unknown[];
     attentionReviews?: unknown[];
     capacitySnapshots?: unknown[];
