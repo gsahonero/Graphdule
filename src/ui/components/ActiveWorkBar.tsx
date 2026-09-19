@@ -17,7 +17,6 @@ import {
   Coffee,
   Eye,
   EyeOff,
-  MessageSquarePlus,
 } from 'lucide-react';
 import {
   requestPictureInPictureWindow,
@@ -51,7 +50,6 @@ export const ActiveWorkBar: React.FC = () => {
     activeHealthNotification,
     acknowledgeHealthIntervention,
     dismissHealthIntervention,
-    isThoughtsPoolOpen,
     setIsThoughtsPoolOpen,
     addDroppedThought,
     zenCurtainEnabled,

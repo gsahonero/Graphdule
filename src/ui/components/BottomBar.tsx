@@ -13,9 +13,14 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { SyncStatusIndicator } from './SyncStatusIndicator';
+import { ProjectService } from '../../domain/services/project-service';
+import { ProjectHealthService } from '../../domain/services/project-health-service';
+import { getProjectColorTheme, ProjectIconDisplay } from '../utils/project-style';
+import { getTodayString } from '../../domain/utils/date';
 
 export const BottomBar: React.FC = () => {
   const {
+    activeProjectDoc,
     preferences,
     toggleDateFormat,
     setIsCapacityConfigModalOpen,
@@ -27,9 +32,27 @@ export const BottomBar: React.FC = () => {
     importProjectJson,
     setIsThoughtsPoolOpen,
     droppedThoughts,
+    activityLog,
   } = useApp();
 
   const inboxThoughtsCount = droppedThoughts ? droppedThoughts.filter((t) => t.status === 'inbox').length : 0;
+
+  // Project Progress Calculation for Minimal Bottom Bar Indicator
+  const hasActiveProject = Boolean(activeProjectDoc);
+  const projectNodes = activeProjectDoc?.nodes || [];
+  const projectProgress = hasActiveProject ? ProjectService.calculateProgress(projectNodes) : 0;
+  const completedTaskCount = projectNodes.filter((n) => n.status === 'completed').length;
+  const totalTaskCount = projectNodes.length;
+  const projectTheme = getProjectColorTheme(activeProjectDoc?.project?.style?.color);
+  const projectHealth = hasActiveProject && activeProjectDoc
+    ? ProjectHealthService.evaluateProjectHealth(
+        projectNodes,
+        activeProjectDoc.edges,
+        activityLog,
+        getTodayString(),
+        activeProjectDoc.project.id
+      )
+    : null;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -115,6 +138,70 @@ export const BottomBar: React.FC = () => {
           <Calendar className="w-3 h-3 text-slate-400 shrink-0" />
           <span>{preferences.dateFormat === 'MMM_D_YYYY' ? 'Mon, DD' : 'DD/MM'}</span>
         </button>
+
+        {/* Minimal Project Progress Cue with Rich Hover Detail */}
+        {hasActiveProject && activeProjectDoc && (
+          <>
+            <span className="text-slate-300 dark:text-slate-700">|</span>
+
+            <div
+              data-testid="bottombar-progress-indicator"
+              className="relative group flex items-center space-x-1.5 px-2 py-0.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            >
+              <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400">Progress</span>
+              <div className="w-16 sm:w-20 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+                <div
+                  className={`h-full ${projectTheme.progressBar || 'bg-emerald-500'} transition-all duration-300 rounded-full`}
+                  style={{ width: `${projectProgress}%` }}
+                />
+              </div>
+              <span className={`text-[10px] font-mono font-bold ${projectTheme.text || 'text-emerald-500'}`}>
+                {projectProgress}%
+              </span>
+
+              {/* Full Detail Hover Popover */}
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-3.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl z-50 hidden group-hover:flex flex-col gap-2.5 pointer-events-none animate-in fade-in zoom-in-95 duration-150 text-left">
+                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
+                  <div className="flex items-center space-x-2 min-w-0">
+                    <ProjectIconDisplay icon={activeProjectDoc.project.style?.icon} emoji={activeProjectDoc.project.style?.emoji} className="w-4 h-4 text-emerald-500 shrink-0" />
+                    <span className="font-bold text-slate-800 dark:text-slate-100 truncate text-xs">
+                      {activeProjectDoc.project.name}
+                    </span>
+                  </div>
+                  <span className="font-mono font-bold text-xs text-emerald-600 dark:text-emerald-400 shrink-0">
+                    {projectProgress}%
+                  </span>
+                </div>
+
+                <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full ${projectTheme.progressBar || 'bg-emerald-500'} rounded-full transition-all duration-300`}
+                    style={{ width: `${projectProgress}%` }}
+                  />
+                </div>
+
+                <div className="space-y-1.5 text-[11px]">
+                  <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
+                    <span>Tasks Completed:</span>
+                    <span className="font-semibold text-slate-800 dark:text-slate-200">
+                      {completedTaskCount} / {totalTaskCount} ({totalTaskCount - completedTaskCount} remaining)
+                    </span>
+                  </div>
+
+                  {projectHealth && (
+                    <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
+                      <span>Flow State:</span>
+                      <span className="inline-flex items-center gap-1 font-semibold capitalize text-emerald-600 dark:text-emerald-400">
+                        <span className={`w-1.5 h-1.5 rounded-full ${projectHealth.health === 'flowing' ? 'bg-emerald-500 animate-pulse' : projectHealth.health === 'idle' ? 'bg-amber-500' : 'bg-rose-500'}`} />
+                        {projectHealth.health} ({projectHealth.frontierCount} ready)
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Center: Essential Utilities & Shortcuts */}

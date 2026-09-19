@@ -518,6 +518,34 @@ const GraphCanvas: React.FC = () => {
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, [scopeStack.length, handleGoUpOneLevel]);
 
+  // Track whether an input or textarea is actively focused for dynamic shortcut teaching hints
+  const [isEditingTaskText, setIsEditingTaskText] = useState(false);
+
+  useEffect(() => {
+    const handleFocusIn = (e: FocusEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        setIsEditingTaskText(true);
+      }
+    };
+    const handleFocusOut = () => {
+      setTimeout(() => {
+        const activeEl = document.activeElement;
+        const isInput =
+          activeEl &&
+          (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || (activeEl as HTMLElement).isContentEditable);
+        setIsEditingTaskText(Boolean(isInput));
+      }, 50);
+    };
+
+    window.addEventListener('focusin', handleFocusIn);
+    window.addEventListener('focusout', handleFocusOut);
+    return () => {
+      window.removeEventListener('focusin', handleFocusIn);
+      window.removeEventListener('focusout', handleFocusOut);
+    };
+  }, []);
+
   // Clean onNodesChange: updates RF local state and propagates node deletions to storage
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
@@ -1892,14 +1920,28 @@ const GraphCanvas: React.FC = () => {
 
       {/* Instant Shortcut Teaching Hint Strip for selected node */}
       {selectedNode && !isWholeProjectView && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 hidden sm:flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-900/90 dark:bg-slate-800/95 text-slate-200 border border-slate-700/80 shadow-xl text-[11px] backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 pointer-events-none select-none">
-          <span className="font-semibold text-emerald-400">"{selectedNode.text.slice(0, 22)}{selectedNode.text.length > 22 ? '…' : ''}"</span>
-          <span className="opacity-30">|</span>
-          <span className="flex items-center gap-1">Press <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 font-mono text-[10px] text-white">Tab</kbd> child</span>
-          <span className="opacity-30">·</span>
-          <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 font-mono text-[10px] text-white">Enter</kbd> sibling</span>
-          <span className="opacity-30">·</span>
-          <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 font-mono text-[10px] text-white">Del</kbd> delete</span>
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 hidden sm:flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-900/90 dark:bg-slate-800/95 text-slate-200 border border-slate-700/80 shadow-xl text-[11px] backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 pointer-events-none select-none">
+          {isEditingTaskText ? (
+            <>
+              <span className="font-semibold text-emerald-400">Editing "{selectedNode.text.slice(0, 20)}{selectedNode.text.length > 20 ? '…' : ''}"</span>
+              <span className="opacity-30">|</span>
+              <span className="flex items-center gap-1">Press <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 font-mono text-[10px] text-white">Enter</kbd> save</span>
+              <span className="opacity-30">·</span>
+              <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 font-mono text-[10px] text-white">Tab</kbd> save & child</span>
+              <span className="opacity-30">·</span>
+              <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 font-mono text-[10px] text-white">Esc</kbd> cancel</span>
+            </>
+          ) : (
+            <>
+              <span className="font-semibold text-emerald-400">"{selectedNode.text.slice(0, 20)}{selectedNode.text.length > 20 ? '…' : ''}"</span>
+              <span className="opacity-30">|</span>
+              <span className="flex items-center gap-1">Press <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 font-mono text-[10px] text-white">Enter</kbd> add sibling</span>
+              <span className="opacity-30">·</span>
+              <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 font-mono text-[10px] text-white">Tab</kbd> add child</span>
+              <span className="opacity-30">·</span>
+              <span className="flex items-center gap-1"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 font-mono text-[10px] text-white">Del</kbd> delete</span>
+            </>
+          )}
         </div>
       )}
 

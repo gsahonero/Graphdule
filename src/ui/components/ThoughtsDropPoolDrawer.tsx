@@ -13,7 +13,6 @@ import {
   Check,
   ChevronDown,
   Sprout,
-  FileText,
   Target,
 } from 'lucide-react';
 import { DroppedThoughtConversionTarget } from '../../domain/models/types';

@@ -47,7 +47,7 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
 
   const categories: ShortcutCategory[] = [
     {
-      title: 'Graph Canvas & Rapid Structuring',
+      title: 'Graph Canvas (When a task is selected)',
       icon: <Workflow className="w-4 h-4 text-emerald-500" />,
       shortcuts: [
         {
@@ -103,6 +103,12 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
         {
           keys: ['Enter'],
           description: 'Confirm & save inline text edit',
+          badge: 'Save',
+        },
+        {
+          keys: ['Tab'],
+          description: 'Save title and immediately create dependent child task',
+          badge: 'Save & Child',
         },
         {
           keys: ['Esc'],

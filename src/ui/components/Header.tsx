@@ -21,7 +21,6 @@ import {
   Keyboard,
   Sparkles,
 } from 'lucide-react';
-import { SyncStatusIndicator } from './SyncStatusIndicator';
 import { BonsaiCompanion } from './BonsaiCompanion';
 
 export const Header: React.FC = () => {
@@ -235,9 +234,6 @@ export const Header: React.FC = () => {
             />
           </div>
         )}
-
-        {/* Unified Cloud & Calendar Sync status indicator (always visible) */}
-        <SyncStatusIndicator />
 
         {/* Dark/Light mode toggle (visible on all screens) */}
         <button

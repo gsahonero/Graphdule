@@ -67,4 +67,66 @@ describe('Keyboard Shortcuts Modal & BottomBar', () => {
     fireEvent.click(paletteBtn);
     expect(setIsAppearanceModalOpenMock).toHaveBeenCalledWith(true);
   });
+
+  it('renders minimal progress cue on BottomBar when active project is present, with rich hover detail', () => {
+    const mockActiveDoc: any = {
+      project: {
+        id: 'proj_test',
+        name: 'Launch Website',
+        endGoalNodeId: 'node_2',
+        style: { color: 'emerald', icon: 'rocket' },
+      },
+      nodes: [
+        { id: 'node_1', text: 'Task 1', status: 'completed', dueDate: '2026-09-18' },
+        { id: 'node_2', text: 'Task 2', status: 'planned', dueDate: '2026-09-19' },
+      ],
+      edges: [
+        { id: 'edge_1', projectId: 'proj_test', fromNodeId: 'node_1', toNodeId: 'node_2' },
+      ],
+      activityLog: [],
+    };
+
+    const mockContext: any = {
+      preferences: { theme: 'dark', dateFormat: 'DD/MM/YYYY' },
+      toggleDateFormat: vi.fn(),
+      setIsCapacityConfigModalOpen: vi.fn(),
+      setIsHealthConfigModalOpen: vi.fn(),
+      setIsAppearanceModalOpen: vi.fn(),
+      setIsShortcutsModalOpen: vi.fn(),
+      setIsOnboardingOpen: vi.fn(),
+      exportAllData: vi.fn(),
+      importProjectJson: vi.fn(),
+      cloudSyncState: { provider: 'none', status: 'idle' },
+      gcalendarSyncConfig: { enabled: false },
+      activeProjectDoc: mockActiveDoc,
+      activityLog: [],
+    };
+
+    render(
+      <AppContext.Provider value={mockContext}>
+        <BottomBar />
+      </AppContext.Provider>
+    );
+
+    const progressIndicator = screen.getByTestId('bottombar-progress-indicator');
+    expect(progressIndicator).toBeInTheDocument();
+    expect(progressIndicator).toHaveTextContent('Progress');
+    expect(progressIndicator).toHaveTextContent('50%');
+
+    // Rich hover popover content
+    expect(screen.getByText('Launch Website')).toBeInTheDocument();
+    expect(screen.getByText(/1 \/ 2/)).toBeInTheDocument();
+    expect(screen.getByText(/Flow State:/)).toBeInTheDocument();
+  });
+
+  it('verifies non-contradictory Enter key descriptions in KeyboardShortcutsModal', () => {
+    render(<KeyboardShortcutsModal isOpen={true} onClose={vi.fn()} />);
+
+    // In canvas selection: Enter adds parallel sibling
+    expect(screen.getByText('Graph Canvas (When a task is selected)')).toBeInTheDocument();
+    expect(screen.getByText('Add parallel sibling task from same predecessor')).toBeInTheDocument();
+
+    // While naming/editing a task: Enter saves inline text edit
+    expect(screen.getByText('Confirm & save inline text edit')).toBeInTheDocument();
+  });
 });

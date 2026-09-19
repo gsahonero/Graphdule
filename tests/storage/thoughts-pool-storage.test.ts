@@ -1,6 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { MigrationService } from '../../src/domain/services/migration-service';
-import { ProjectService } from '../../src/domain/services/project-service';
 import { DroppedThought } from '../../src/domain/models/types';
 
 describe('Thoughts Drop Pool Storage & Backup Migration', () => {

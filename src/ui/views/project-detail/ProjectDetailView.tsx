@@ -101,7 +101,6 @@ export const ProjectDetailView: React.FC = () => {
 
   const { project, nodes } = activeProjectDoc;
   const egnNode = nodes.find((n) => n.id === project.endGoalNodeId);
-  const progressPercentage = ProjectService.calculateProgress(nodes);
   const projectTags = project.tags || [];
 
   const summary = useMemo(() => {
@@ -457,17 +456,6 @@ export const ProjectDetailView: React.FC = () => {
             >
               <Redo2 className="w-3.5 h-3.5" />
             </button>
-          </div>
-
-          <div className="hidden md:flex items-center space-x-2">
-            <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Progress:</div>
-            <div className="w-20 bg-slate-200 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
-              <div
-                className={`h-full ${theme.progressBar} transition-all duration-300`}
-                style={{ width: `${progressPercentage}%` }}
-              />
-            </div>
-            <div className={`text-[11px] font-bold ${theme.text}`}>{progressPercentage}%</div>
           </div>
 
           {/* Archive / Restore Button */}

@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import React from 'react';
 import '@testing-library/jest-dom';
 import { ThoughtsDropPoolDrawer } from '../../src/ui/components/ThoughtsDropPoolDrawer';
 import * as AppContextModule from '../../src/ui/context/AppContext';

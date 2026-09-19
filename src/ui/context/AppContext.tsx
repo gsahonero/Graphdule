@@ -14,7 +14,6 @@ import {
   CascadeImpactPreview,
   IdeaSeed,
   DroppedThought,
-  DroppedThoughtStatus,
   DroppedThoughtConversionTarget,
   ActivityEvent,
   ActivityEventType,
@@ -287,7 +286,7 @@ interface AppContextType {
   // Thoughts Drop Pool
   droppedThoughts: DroppedThought[];
   isThoughtsPoolOpen: boolean;
-  setIsThoughtsPoolOpen: (open: boolean) => void;
+  setIsThoughtsPoolOpen: React.Dispatch<React.SetStateAction<boolean>>;
   addDroppedThought: (
     text: string,
     options?: {
@@ -3449,6 +3448,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               : await storage.readProject(targetProjectId);
           if (doc) {
             const newNode = ProjectService.createNode(
+              targetProjectId,
               thought.text,
               getTodayString(),
               null,
@@ -3458,7 +3458,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               'medium',
               'standard'
             );
-            const updatedDoc = ProjectService.addNodeToProject(doc, newNode);
+            const updatedDoc: ProjectDocument = {
+              ...doc,
+              nodes: [...doc.nodes, newNode],
+            };
             await storage.writeProject(updatedDoc);
             if (activeProjectDoc?.project.id === targetProjectId) {
               setActiveProjectDoc(updatedDoc);
@@ -3498,7 +3501,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       try {
-        playSound('milestone');
+        playSound({ enabled: true, type: 'subtle_chime' });
       } catch {
         // audio optional
       }
